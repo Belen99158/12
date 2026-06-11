@@ -128,9 +128,15 @@ td{padding:8px;border-bottom:1px solid var(--line);vertical-align:top}
    La hoja debe estar publicada en la web como CSV.
    URL: archivo → publicar en la web → CSV → hoja1
    ============================================================ */
-const SHEETS_ID = "2PACX-1vTpOv2PFreipcoBc7ry-bD3QSRbqD49nQicajrI86pDAuUuQkbPoiszwxmt2HQbodo4zAlHI2rvknPk";
-// URL de exportación CSV directa (pública, sin auth)
-const CSV_URL = `https://docs.google.com/spreadsheets/d/e/${SHEETS_ID}/pub?output=csv&gid=0`;
+/* DOS vías de acceso a la misma hoja: se prueban ambas automáticamente. */
+// Vía principal: URL de publicación CSV exacta (con gid de la hoja). Esta es la confirmada.
+const CSV_PUB = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTpOv2PFreipcoBc7ry-bD3QSRbqD49nQicajrI86pDAuUuQkbPoiszwxmt2HQbodo4zAlHI2rvknPk/pub?gid=1814361639&single=true&output=csv";
+// Vías de respaldo: ID normal (si está compartida como pública)
+const SHEETS_ID = "19WwKz-OjCCylK-crbwRu61d3A2q4ophHbRNAguyUtl8";
+const CSV_GVIZ = `https://docs.google.com/spreadsheets/d/${SHEETS_ID}/gviz/tq?tqx=out:csv&gid=1814361639`;
+const CSV_EXPORT = `https://docs.google.com/spreadsheets/d/${SHEETS_ID}/export?format=csv&gid=1814361639`;
+// Lista de URLs base a intentar (en orden). La confirmada va primero.
+const CSV_URLS = [CSV_PUB, CSV_GVIZ, CSV_EXPORT];
 
 /* ============================================================ USUARIOS ============================================================ */
 const USERS = [
@@ -247,34 +253,34 @@ async function cargarBaseDesdeSheets(forzar=false, onProg=null){
   if(onProg) onProg("Descargando base de facturas desde Google Sheets…", 10);
   let csvText=null, ultimoError="";
 
-  // Lista de métodos de descarga, se prueban en orden hasta que uno funcione
-  const metodos=[
-    // 1) Directo (funciona en GitHub Pages y la mayoría de hostings reales)
-    async()=>{ const r=await fetch(CSV_URL); if(!r.ok)throw new Error("HTTP "+r.status); return await r.text(); },
-    // 2) Proxy allorigins (raw)
-    async()=>{ const r=await fetch("https://api.allorigins.win/raw?url="+encodeURIComponent(CSV_URL)); if(!r.ok)throw new Error("HTTP "+r.status); return await r.text(); },
-    // 3) Proxy allorigins (get/json)
-    async()=>{ const r=await fetch("https://api.allorigins.win/get?url="+encodeURIComponent(CSV_URL)); if(!r.ok)throw new Error("HTTP "+r.status); const j=await r.json(); return j.contents; },
-    // 4) Proxy corsproxy.io
-    async()=>{ const r=await fetch("https://corsproxy.io/?url="+encodeURIComponent(CSV_URL)); if(!r.ok)throw new Error("HTTP "+r.status); return await r.text(); },
-    // 5) Proxy thingproxy
-    async()=>{ const r=await fetch("https://thingproxy.freeboard.io/fetch/"+CSV_URL); if(!r.ok)throw new Error("HTTP "+r.status); return await r.text(); },
-  ];
+  // Probamos cada URL base, y para cada una varios métodos (directo + proxies),
+  // hasta que alguna combinación devuelva un CSV válido.
+  const fetchTexto=async(metodo,url)=>{
+    if(metodo==="directo"){ const r=await fetch(url); if(!r.ok)throw new Error("HTTP "+r.status); return await r.text(); }
+    if(metodo==="allorigins_raw"){ const r=await fetch("https://api.allorigins.win/raw?url="+encodeURIComponent(url)); if(!r.ok)throw new Error("HTTP "+r.status); return await r.text(); }
+    if(metodo==="corsproxy"){ const r=await fetch("https://corsproxy.io/?url="+encodeURIComponent(url)); if(!r.ok)throw new Error("HTTP "+r.status); return await r.text(); }
+    if(metodo==="allorigins_get"){ const r=await fetch("https://api.allorigins.win/get?url="+encodeURIComponent(url)); if(!r.ok)throw new Error("HTTP "+r.status); const j=await r.json(); return j.contents; }
+    if(metodo==="codetabs"){ const r=await fetch("https://api.codetabs.com/v1/proxy/?quest="+encodeURIComponent(url)); if(!r.ok)throw new Error("HTTP "+r.status); return await r.text(); }
+  };
+  const metodos=["directo","allorigins_raw","corsproxy","allorigins_get","codetabs"];
+  const esValido=txt=> txt && txt.length>50 && !txt.trim().toLowerCase().startsWith("<!doctype") && !txt.trim().toLowerCase().startsWith("<html") && txt.includes(",");
 
-  for(let m=0;m<metodos.length;m++){
-    try{
-      if(onProg) onProg("Conectando con Google Sheets (intento "+(m+1)+"/"+metodos.length+")…", 10+m*8);
-      const txt=await metodos[m]();
-      // Validar que sea CSV real (debe contener encabezados esperados, no HTML de error)
-      if(txt && txt.length>50 && (txt.toUpperCase().includes("FACTURA")||txt.includes(","))){
-        csvText=txt; break;
-      }
-      ultimoError="Respuesta no válida";
-    }catch(e){ ultimoError=(e&&e.message)||String(e); }
+  let intento=0; const totalIntentos=CSV_URLS.length*metodos.length;
+  for(const url of CSV_URLS){
+    for(const metodo of metodos){
+      intento++;
+      try{
+        if(onProg) onProg("Conectando con Google Sheets ("+intento+"/"+totalIntentos+")…", 10+Math.round(intento/totalIntentos*40));
+        const txt=await fetchTexto(metodo,url);
+        if(esValido(txt)){ csvText=txt; break; }
+        ultimoError="Respuesta no válida (¿hoja sin permiso público?)";
+      }catch(e){ ultimoError=(e&&e.message)||String(e); }
+    }
+    if(csvText) break;
   }
 
   if(!csvText){
-    throw new Error("No se pudo descargar la base desde Google Sheets. "+ultimoError+". (En la vista previa esto es normal; al publicar en GitHub Pages funcionará el método directo.)");
+    throw new Error("No se pudo descargar la base. "+ultimoError+". Comparte la hoja como 'Cualquiera con el enlace' o publícala como CSV.");
   }
   if(onProg) onProg("Procesando filas…", 60);
   base = parsearCSV(csvText);
