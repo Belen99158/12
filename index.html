@@ -552,8 +552,7 @@ function cambiarVista(role){
 /* ============================================================ ASESOR ============================================================ */
 let nuevo=null, filtroItems="", filtroMisTickets="", filtroBandeja="";
 function renderAsesor(){
-  const mios=state.tickets.filter(t=>t.vendedor===me.name).slice().reverse();
-  const guiaIncorrecta=mios.filter(t=>t.estado==="GUIA_INCORRECTA");
+  const guiaIncorrecta=state.tickets.filter(t=>t.vendedor===me.name&&t.estado==="GUIA_INCORRECTA").slice().reverse();
   $("main").innerHTML=`
     <div style="display:flex;align-items:center;gap:14px;margin-bottom:18px;flex-wrap:wrap">
       <h2 style="font-size:28px;color:var(--navy)">Orden Lubamaqui</h2>
@@ -1458,6 +1457,11 @@ function renderAdmin(){
       <div class="muted" style="margin-bottom:12px">Anula guías y descarga el reporte de guías (pedidas, usadas, no usadas, anuladas).</div>
       <button class="btn btn-p" onclick="adminVerGuias()">📦 Administrar guías</button>
       <button class="btn btn-ok" onclick="excelGuias()">⬇ Reporte de guías</button>
+    </div>
+    <div class="card" style="border-left:5px solid var(--bad)">
+      <h3 style="font-size:19px;color:var(--bad);margin-bottom:6px">⚠ Limpiar datos de prueba</h3>
+      <div class="muted" style="margin-bottom:12px">Borra <b>todos</b> los tickets y guías para empezar de cero. Esta acción no se puede deshacer. La base de facturas NO se toca. Úsalo solo una vez antes de empezar a trabajar en serio.</div>
+      <button class="btn btn-bad" onclick="abrirLimpiarTodo()">🗑 Borrar todos los tickets y guías</button>
     </div>
     <div class="grid3">
       <div class="card"><div class="disp" style="font-size:34px;color:var(--navy)">${total}</div><div class="muted">Tickets totales</div></div>
