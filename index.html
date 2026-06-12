@@ -333,10 +333,13 @@ async function leerBaseDeFirebase(onProg){
    cae a Google Sheets. El admin actualiza Firebase con el botón correspondiente. */
 async function cargarBase(forzar=false, onProg=null){
   if(baseLoaded&&!forzar) return;
-  // 1) Intentar Firebase (rápido)
+  // 1) Intentar Firebase (rápido) con tope de tiempo
   try{
     if(onProg) onProg("Buscando base en Firebase…",10);
-    const res=await leerBaseDeFirebase(onProg);
+    const res=await Promise.race([
+      leerBaseDeFirebase(onProg),
+      new Promise((_,rej)=>setTimeout(()=>rej(new Error("timeout Firebase")),20000))
+    ]);
     if(res&&res.rows&&res.rows.length){
       base=res.rows; indexarBase(); baseLoaded=true; baseLineas=base.length;
       baseFechaStr="Firebase · "+(res.meta.ts?new Date(res.meta.ts).toLocaleString("es-EC"):"");
@@ -344,8 +347,9 @@ async function cargarBase(forzar=false, onProg=null){
       if(onProg) onProg("Base lista: "+base.length.toLocaleString("es-EC")+" líneas (Firebase)",100);
       return;
     }
-  }catch(e){ console.warn("Base Firebase falló, uso Sheets:",e); }
+  }catch(e){ console.warn("Base Firebase falló o no existe, uso Sheets:",e&&e.message); }
   // 2) Respaldo: Google Sheets
+  if(onProg) onProg("Cargando desde Google Sheets…",15);
   await cargarBaseDesdeSheets(true,onProg);
 }
 
@@ -486,7 +490,10 @@ async function doLogin(){
     if(fbSuscrito){ resolve(); return; } // ya suscrito de un login anterior
     const el=$("load-msg"); if(el) el.textContent="Sincronizando tickets…";
     const pp=$("load-prog"); if(pp) pp.style.width="30%";
-    suscribirEstado(resolve);
+    let resuelto=false;
+    const done=()=>{ if(!resuelto){ resuelto=true; resolve(); } };
+    suscribirEstado(done);
+    setTimeout(done,8000); // tope de seguridad: nunca esperar más de 8s
   });
 
   // 2) Cargar base de facturas (Firebase primero, Sheets de respaldo)
@@ -498,7 +505,9 @@ async function doLogin(){
   }catch(e){
     toast("⚠ "+e.message,6000);
   }
-  render();
+  // 3) Mostrar la interfaz (siempre, pase lo que pase arriba)
+  try{ render(); }
+  catch(e){ console.error("render:",e); toast("Error al mostrar: "+(e&&e.message||e),6000); }
 }
 function logout(){ me=null; vistaActiva=null; const ps=$("panel-selector"); if(ps) ps.remove(); $("login-pass").value=""; $("app-view").style.display="none"; $("login-view").style.display="flex"; baseLoaded=false; }
 
@@ -541,7 +550,7 @@ function cambiarVista(role){
 }
 
 /* ============================================================ ASESOR ============================================================ */
-let nuevo=null, filtroItems="";
+let nuevo=null, filtroItems="", filtroMisTickets="", filtroBandeja="";
 function renderAsesor(){
   const mios=state.tickets.filter(t=>t.vendedor===me.name).slice().reverse();
   const guiaIncorrecta=mios.filter(t=>t.estado==="GUIA_INCORRECTA");
@@ -568,7 +577,6 @@ function renderAsesor(){
     </div>`;
   renderMisTicketsTabla();
 }
-let filtroMisTickets="";
 function renderMisTicketsTabla(){
   let mios=state.tickets.filter(t=>t.vendedor===me.name).slice().reverse();
   const q=filtroMisTickets.trim().toUpperCase();
@@ -952,7 +960,6 @@ function renderBandeja(role,titulo,sub){
     <div class="card"><h3 style="font-size:18px;color:var(--navy);margin-bottom:8px">Historial procesado</h3>${histTable(role)}</div>`;
   renderBandejaTabla(role);
 }
-let filtroBandeja="";
 function renderBandejaTabla(role){
   let lista=state.tickets.filter(t=>t.estado===role).slice().reverse();
   const q=filtroBandeja.trim().toUpperCase();
