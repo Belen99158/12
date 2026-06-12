@@ -563,7 +563,6 @@ function renderAsesor(){
     </div>
     ${!baseLoaded?'<div class="card" style="background:var(--warn-bg);border-color:#E8C766">⚠ La base de facturas no está cargada. Presiona "Cargar base de facturas" o espera a que se conecte automáticamente.</div>':""}
     ${guiaIncorrecta.map(t=>`<div class="alert-del">⚠ <b>Tu ticket ${esc(t.numero)} fue devuelto por guía incorrecta</b> (${esc(t.guiaIncorrecta?.por||"")}, ${fdate(t.guiaIncorrecta?.f)}).<br>Motivo: <b>${esc(t.guiaIncorrecta?.motivo||"")}</b> · La guía volvió a estar disponible, crea el ticket de nuevo con la guía correcta.</div>`).join("")}
-    ${eliminados.map(t=>`<div class="alert-del">🗑 <b>Tu ticket ${esc(t.numero)} fue eliminado</b> (${esc(t.eliminacion?.por||"")}, ${fdate(t.eliminacion?.f)}).<br>Motivo: <b>${esc(t.eliminacion?.motivo||"sin motivo")}</b></div>`).join("")}
     <div class="card">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap">
         <h3 style="font-size:19px;color:var(--navy);flex:1">Mis tickets</h3>
