@@ -160,14 +160,30 @@ const USERS = [
 const ROLE_LABEL={ASESOR:"Asesor comercial",MERCADERIA:"Revisión de mercadería",DEVOLUCION:"Revisión de devolución",GARANTIA:"Revisión de garantía",NC:"Notas de crédito",ADMIN:"Administrativo"};
 const MOTIVOS=["DACION EN PAGOS","GESTION COMERCIAL CLIENTE VENDEDOR","LOGISTICA BODEGA","DEVOLUCION","GARANTIAS"];
 const MARCAS=["PERMATEX","ORIGINAL","VALEO","MAHLE","ABRO","LUBA AUTOPARTS","SEIWA","NPR","SABO","APLIC","JCC","MAGNETI MARELLI","AUTOTOP","OTRO"];
-const ESTADO_LABEL={MERCADERIA:"En revisión mercadería",DEVOLUCION:"En revisión devolución",GARANTIA:"En revisión garantía",NC:"En notas de crédito",NO_LLEGO:"No llegó",DEV_RECHAZADA:"Devolución no aceptada",GAR_RECHAZADA:"Garantía no aceptada",ELIMINADO:"Eliminado"};
+const ESTADO_LABEL={MERCADERIA:"En revisión mercadería",DEVOLUCION:"En revisión devolución",GARANTIA:"En revisión garantía",NC:"En notas de crédito",NO_LLEGO:"No llegó",DEV_RECHAZADA:"Devolución no aceptada",GAR_RECHAZADA:"Garantía no aceptada",GUIA_INCORRECTA:"Devuelto por guía incorrecta",ELIMINADO:"Eliminado"};
 const MESES=["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 
 let me=null, base=[], RAZONES=[];
-/* state guarda tickets y secuencias; ahora persiste en Firebase Realtime Database */
-let state={seq3200:0,seq5200:0,tickets:[]};
+/* state guarda tickets, secuencias y GUIAS; persiste en Firebase Realtime Database */
+let state={seq3200:0,seq5200:0,tickets:[],guias:[]};
 /* Caché en memoria de la base de facturas; se recarga desde Sheets solo si es necesario */
 let baseLoaded=false, baseFechaStr="", baseLineas=0;
+
+/* ============================================================ GUÍAS (helpers) ============================================================ */
+/* Estructura de una guía:
+   {id, numero, asesor, fechaCreacion(ISO), estado:"ACTIVA"|"USADA"|"ANULADA",
+    creadaPor, anulacion:{por,f,motivo}} */
+function hoyStr(d){ const x=d?new Date(d):new Date(); return x.getFullYear()+"-"+String(x.getMonth()+1).padStart(2,"0")+"-"+String(x.getDate()).padStart(2,"0"); }
+function findGuia(id){ return (state.guias||[]).find(g=>g.id===id); }
+/* Guías que un asesor puede seleccionar HOY: suyas, no anuladas, creadas hoy */
+function guiasSeleccionables(asesor){
+  const hoy=hoyStr();
+  return (state.guias||[]).filter(g=>g.asesor===asesor && g.estado!=="ANULADA" && hoyStr(g.fechaCreacion)===hoy);
+}
+/* ¿La guía fue usada en algún ticket activo? */
+function guiaUsadaEnTickets(guiaId){
+  return state.tickets.some(t=>t.estado!=="ELIMINADO" && t.guiaId===guiaId);
+}
 
 /* ============================================================ FIREBASE ============================================================ */
 const firebaseConfig = {
@@ -205,10 +221,11 @@ function suscribirEstado(onPrimera){
       state={
         seq3200:val.seq3200||0,
         seq5200:val.seq5200||0,
-        tickets:Array.isArray(val.tickets)?val.tickets:(val.tickets?Object.values(val.tickets):[])
+        tickets:Array.isArray(val.tickets)?val.tickets:(val.tickets?Object.values(val.tickets):[]),
+        guias:Array.isArray(val.guias)?val.guias:(val.guias?Object.values(val.guias):[])
       };
     }else{
-      state={seq3200:0,seq5200:0,tickets:[]};
+      state={seq3200:0,seq5200:0,tickets:[],guias:[]};
     }
     if(primera){ primera=false; if(onPrimera) onPrimera(); }
     else if(me){ render(); } // actualización en vivo desde otro dispositivo
@@ -227,6 +244,7 @@ async function saveState(){
       seq3200:state.seq3200||0,
       seq5200:state.seq5200||0,
       tickets:state.tickets||[],
+      guias:state.guias||[],
       _updated:firebase.database.ServerValue.TIMESTAMP
     });
   }catch(e){
@@ -255,12 +273,18 @@ async function cargarBaseDesdeSheets(forzar=false, onProg=null){
 
   // Probamos cada URL base, y para cada una varios métodos (directo + proxies),
   // hasta que alguna combinación devuelva un CSV válido.
+  // Se agrega un parámetro único (_=timestamp) para EVITAR caché: así siempre
+  // se descarga la versión más reciente del Excel (si borraste facturas, se reflejan).
+  const cacheBuster="&_="+Date.now();
+  const conBuster=u=> u + (u.includes("?")?cacheBuster:"?"+cacheBuster.slice(1));
   const fetchTexto=async(metodo,url)=>{
-    if(metodo==="directo"){ const r=await fetch(url); if(!r.ok)throw new Error("HTTP "+r.status); return await r.text(); }
-    if(metodo==="allorigins_raw"){ const r=await fetch("https://api.allorigins.win/raw?url="+encodeURIComponent(url)); if(!r.ok)throw new Error("HTTP "+r.status); return await r.text(); }
-    if(metodo==="corsproxy"){ const r=await fetch("https://corsproxy.io/?url="+encodeURIComponent(url)); if(!r.ok)throw new Error("HTTP "+r.status); return await r.text(); }
-    if(metodo==="allorigins_get"){ const r=await fetch("https://api.allorigins.win/get?url="+encodeURIComponent(url)); if(!r.ok)throw new Error("HTTP "+r.status); const j=await r.json(); return j.contents; }
-    if(metodo==="codetabs"){ const r=await fetch("https://api.codetabs.com/v1/proxy/?quest="+encodeURIComponent(url)); if(!r.ok)throw new Error("HTTP "+r.status); return await r.text(); }
+    const u=conBuster(url);
+    const opts={cache:"no-store"}; // fuerza descarga fresca, ignora caché del navegador
+    if(metodo==="directo"){ const r=await fetch(u,opts); if(!r.ok)throw new Error("HTTP "+r.status); return await r.text(); }
+    if(metodo==="allorigins_raw"){ const r=await fetch("https://api.allorigins.win/raw?url="+encodeURIComponent(u),opts); if(!r.ok)throw new Error("HTTP "+r.status); return await r.text(); }
+    if(metodo==="corsproxy"){ const r=await fetch("https://corsproxy.io/?url="+encodeURIComponent(u),opts); if(!r.ok)throw new Error("HTTP "+r.status); return await r.text(); }
+    if(metodo==="allorigins_get"){ const r=await fetch("https://api.allorigins.win/get?url="+encodeURIComponent(u)+"&_="+Date.now(),opts); if(!r.ok)throw new Error("HTTP "+r.status); const j=await r.json(); return j.contents; }
+    if(metodo==="codetabs"){ const r=await fetch("https://api.codetabs.com/v1/proxy/?quest="+encodeURIComponent(u),opts); if(!r.ok)throw new Error("HTTP "+r.status); return await r.text(); }
   };
   const metodos=["directo","allorigins_raw","corsproxy","allorigins_get","codetabs"];
   const esValido=txt=> txt && txt.length>50 && !txt.trim().toLowerCase().startsWith("<!doctype") && !txt.trim().toLowerCase().startsWith("<html") && txt.includes(",");
@@ -283,7 +307,7 @@ async function cargarBaseDesdeSheets(forzar=false, onProg=null){
     throw new Error("No se pudo descargar la base. "+ultimoError+". Comparte la hoja como 'Cualquiera con el enlace' o publícala como CSV.");
   }
   if(onProg) onProg("Procesando filas…", 60);
-  base = parsearCSV(csvText);
+  base = parsearCSV(csvText);   // reemplaza completamente la base anterior
   indexarBase();
   baseLoaded=true;
   baseLineas=base.length;
@@ -353,6 +377,7 @@ function tagFor(t){
   if(t.estado==="GARANTIA") return '<span class="tag tag-gar">En garantía</span>';
   if(t.estado==="NC") return '<span class="tag tag-nc">Notas de crédito'+(t.nc&&t.nc.hecha?" · NC hecha":" · pendiente")+'</span>';
   if(t.estado==="NO_LLEGO") return '<span class="tag tag-bad">No llegó</span>';
+  if(t.estado==="GUIA_INCORRECTA") return '<span class="tag tag-bad">Guía incorrecta</span>';
   if(t.estado==="DEV_RECHAZADA") return '<span class="tag tag-bad">Devolución no aceptada</span>';
   if(t.estado==="GAR_RECHAZADA") return '<span class="tag tag-bad">Garantía no aceptada</span>';
   if(t.estado==="ELIMINADO") return '<span class="tag tag-bad">Eliminado</span>';
@@ -410,6 +435,7 @@ let nuevo=null, filtroItems="";
 function renderAsesor(){
   const mios=state.tickets.filter(t=>t.vendedor===me.name).slice().reverse();
   const eliminados=mios.filter(t=>t.estado==="ELIMINADO");
+  const guiaIncorrecta=mios.filter(t=>t.estado==="GUIA_INCORRECTA");
   $("main").innerHTML=`
     <div style="display:flex;align-items:center;gap:14px;margin-bottom:18px;flex-wrap:wrap">
       <h2 style="font-size:28px;color:var(--navy)">Orden Lubamaqui</h2>
@@ -418,6 +444,7 @@ function renderAsesor(){
       <button class="btn btn-a" onclick="abrirNuevo()">+ Nuevo ticket</button>
     </div>
     ${!baseLoaded?'<div class="card" style="background:var(--warn-bg);border-color:#E8C766">⚠ La base de facturas no está cargada. Presiona "Cargar base de facturas" o espera a que se conecte automáticamente.</div>':""}
+    ${guiaIncorrecta.map(t=>`<div class="alert-del">⚠ <b>Tu ticket ${esc(t.numero)} fue devuelto por guía incorrecta</b> (${esc(t.guiaIncorrecta?.por||"")}, ${fdate(t.guiaIncorrecta?.f)}).<br>Motivo: <b>${esc(t.guiaIncorrecta?.motivo||"")}</b> · La guía volvió a estar disponible, crea el ticket de nuevo con la guía correcta.</div>`).join("")}
     ${eliminados.map(t=>`<div class="alert-del">🗑 <b>Tu ticket ${esc(t.numero)} fue eliminado</b> (${esc(t.eliminacion?.por||"")}, ${fdate(t.eliminacion?.f)}).<br>Motivo: <b>${esc(t.eliminacion?.motivo||"sin motivo")}</b></div>`).join("")}
     <div class="card">
       <h3 style="font-size:19px;margin-bottom:10px;color:var(--navy)">Mis tickets</h3>
@@ -438,10 +465,24 @@ async function recargarBase(){
 }
 function abrirNuevo(){
   if(!baseLoaded||base.length===0){ toast("Base no disponible. Espera a que cargue o usa el botón 'Cargar base'."); return; }
-  nuevo={razon:"",factura:"",motivo:"",items:[]}; filtroItems="";
+  const guiasDisp=guiasSeleccionables(me.name);
+  if(guiasDisp.length===0){
+    $("modal-root").innerHTML=`<div class="modal-bg"><div class="modal" style="max-width:520px">
+      <h2 style="font-size:24px;color:var(--bad);margin-bottom:8px">No tienes guías activas hoy</h2>
+      <div class="muted" style="margin-bottom:16px">Para crear un ticket primero necesitas una <b>guía activa registrada hoy</b> a tu nombre. Las guías las registra el área de Notas de Crédito. Solicita que registren tu guía del día.</div>
+      <div style="text-align:right"><button class="btn btn-p" onclick="$('modal-root').innerHTML=''">Entendido</button></div>
+    </div></div>`;
+    return;
+  }
+  nuevo={razon:"",factura:"",motivo:"",items:[],guiaId:"",sobre:false}; filtroItems="";
   $("modal-root").innerHTML=`<div class="modal-bg"><div class="modal">
     <h2 style="font-size:26px;color:var(--navy);margin-bottom:4px">Nuevo ticket · Orden Lubamaqui</h2>
     <div class="muted" style="margin-bottom:18px">Fecha: <b>${fdate(new Date())}</b> · Vendedor: <b>${esc(me.name)}</b></div>
+    <div class="card" style="background:#FFF9E8;border-color:#E8C766">
+      <div class="field" style="margin-bottom:0"><label>⭐ Guía (obligatoria · solo tus guías activas de hoy)</label>
+        <select id="n-guia"><option value="">— Selecciona tu guía —</option>
+        ${guiasDisp.map(g=>`<option value="${g.id}">${esc(g.numero)} — ${fdate(g.fechaCreacion)}</option>`).join("")}</select></div>
+    </div>
     <div class="grid3">
       <div class="field ac-wrap"><label>Razón social</label>
         <input id="n-razon" placeholder="Escribe mín. 2 letras…" autocomplete="off" oninput="buscarRazon()" onfocus="buscarRazon()">
@@ -455,6 +496,10 @@ function abrirNuevo(){
       <div class="field"><label>Número de ticket</label><input id="n-num" disabled placeholder="Se asigna según el motivo"></div>
     </div>
     <div id="n-items"></div>
+    <div class="card" style="background:#F0F3F7;margin-top:14px">
+      <label style="display:flex;align-items:center;gap:8px;text-transform:none;font-size:14px;color:var(--ink);letter-spacing:0;cursor:pointer">
+        <input type="checkbox" id="n-sobre" style="width:auto"> 📨 En esta guía también se envió un <b>sobre</b></label>
+    </div>
     <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px">
       <button class="btn btn-g" onclick="$('modal-root').innerHTML=''">Cancelar</button>
       <button class="btn btn-p" onclick="guardarTicket()">Guardar ticket</button>
@@ -535,6 +580,10 @@ function nNum(){
   $("n-num").value=(gar?"5200":"3200")+"-"+String(next).padStart(4,"0");
 }
 async function guardarTicket(){
+  const guiaId=$("n-guia").value;
+  if(!guiaId){ toast("⭐ Debes seleccionar una guía. Sin guía no se puede crear el ticket."); return; }
+  const guia=findGuia(guiaId);
+  if(!guia||guia.estado==="ANULADA"||hoyStr(guia.fechaCreacion)!==hoyStr()){ toast("Esa guía ya no es válida hoy. Recarga e intenta de nuevo."); return; }
   if(!nuevo.razon||!nuevo.factura){toast("Selecciona razón social y factura.");return;}
   if(!nuevo.motivo){toast("Selecciona el motivo del ticket.");return;}
   const usados=codigosUsados(nuevo.factura);
@@ -551,12 +600,14 @@ async function guardarTicket(){
   if(items.length===0){toast("Ingresa cantidad en al menos un producto.");return;}
   const gar=nuevo.motivo==="GARANTIAS"; if(gar) state.seq5200++; else state.seq3200++;
   const num=(gar?"5200":"3200")+"-"+String(gar?state.seq5200:state.seq3200).padStart(4,"0");
+  const sobre=$("n-sobre")?$("n-sobre").checked:false;
   const t={id:"T"+Date.now(),numero:num,motivo:nuevo.motivo,razonSocial:nuevo.razon,ruc:nuevo.ruc,
     factura:nuevo.factura,emision:nuevo.emision,facturador:nuevo.facturador||"",fechaTicket:new Date().toISOString(),
     vendedor:me.name,estado:"MERCADERIA",items,fechas:{},
-    historial:[{f:new Date().toISOString(),e:"Ticket creado por "+me.name}]};
+    guiaId:guia.id, guiaNumero:guia.numero, sobre,
+    historial:[{f:new Date().toISOString(),e:"Ticket creado por "+me.name+" · Guía "+guia.numero+(sobre?" · con sobre":"")}]};
   state.tickets.push(t); await saveState();
-  $("modal-root").innerHTML=""; toast("✓ Ticket "+num+" creado.");
+  $("modal-root").innerHTML=""; toast("✓ Ticket "+num+" creado con guía "+guia.numero+".");
   setTimeout(()=>imprimirTicket(t.id),400);
   render();
 }
@@ -593,11 +644,13 @@ th,td{font-size:9pt;padding:1px 2px;vertical-align:top}
 <div class="bold">Vendedor:</div> ${esc(t.vendedor)}
 <div class="line"></div>
 <table>
+  <tr><td><b>Guía:</b></td><td>${esc(t.guiaNumero||"—")}</td></tr>
   <tr><td><b>Factura:</b></td><td>${esc(t.factura)}</td></tr>
   <tr><td><b>Motivo:</b></td><td>${esc(t.motivo)}</td></tr>
   <tr><td><b>Emisión:</b></td><td>${fdate(t.emision)}</td></tr>
   <tr><td><b>Fecha ticket:</b></td><td>${fdate(t.fechaTicket)}</td></tr>
   ${t.facturador?`<tr><td><b>Facturador:</b></td><td>${esc(t.facturador)}</td></tr>`:""}
+  ${t.sobre?`<tr><td><b>Sobre:</b></td><td>SÍ</td></tr>`:""}
 </table>
 <div class="line"></div>
 <div class="center bold">DETALLE PRODUCTOS</div>
@@ -666,7 +719,9 @@ function verTicket(id){
   $("modal-root").innerHTML=`<div class="modal-bg" onclick="if(event.target===this)this.remove()"><div class="modal">
     <h2 style="font-size:24px;color:var(--navy);margin-bottom:8px">Ticket ${esc(t.numero)} ${tagFor(t)}</h2>
     ${t.estado==="ELIMINADO"?`<div class="alert-del">🗑 Eliminado por <b>${esc(t.eliminacion?.por||"")}</b> el ${fdate(t.eliminacion?.f)}. Motivo: <b>${esc(t.eliminacion?.motivo||"")}</b></div>`:""}
+    ${t.estado==="GUIA_INCORRECTA"?`<div class="alert-del">⚠ <b>Devuelto por guía incorrecta</b> (${esc(t.guiaIncorrecta?.por||"")}, ${fdate(t.guiaIncorrecta?.f)}). Motivo: <b>${esc(t.guiaIncorrecta?.motivo||"")}</b><br>La guía fue liberada y vuelve a estar disponible.</div>`:""}
     <div class="kv" style="margin-bottom:12px">
+      <b>Guía</b><span>${esc(t.guiaNumero||"—")} ${t.sobre?'· 📨 con sobre':''}</span>
       <b>Razón social</b><span>${esc(t.razonSocial)}</span>
       <b>RUC</b><span>${esc(t.ruc||"")}</span>
       <b>Factura</b><span>${esc(t.factura)}</span>
@@ -788,17 +843,36 @@ function revisarMerc(t){
   $("modal-root").innerHTML=`<div class="modal-bg"><div class="modal">
     <h2 style="font-size:24px;color:var(--navy)">Revisión de mercadería · ${esc(t.numero)}</h2>
     <div class="muted" style="margin-bottom:10px">${esc(t.razonSocial)} · Factura ${esc(t.factura)}</div>
-    <div style="margin-bottom:12px">
-      <button class="btn btn-ok btn-sm" onclick="mercTodo('${t.id}',1)">✓ Llegó todo</button>
-      <button class="btn btn-bad btn-sm" onclick="mercTodo('${t.id}',0)">✗ No llegó nada</button>
+    <div class="card" style="background:#FFF9E8;border-color:#E8C766">
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <div><span class="muted">Guía del ticket:</span> <b style="font-size:16px">${esc(t.guiaNumero||"(sin guía)")}</b></div>
+        ${t.sobre?'<span class="tag tag-dev">📨 Incluye sobre</span>':'<span class="muted">Sin sobre</span>'}
+      </div>
+      <div class="field" style="margin-top:10px;margin-bottom:0"><label>¿La guía es correcta?</label>
+        <select id="m-guia" onchange="document.getElementById('m-guia-motivo').style.display=this.value==='0'?'block':'none'">
+          <option value="">— Seleccionar —</option>
+          <option value="1">SÍ, la guía es correcta</option>
+          <option value="0">NO, guía incorrecta (devolver ticket)</option>
+        </select></div>
+      <div id="m-guia-motivo" style="display:none;margin-top:8px">
+        <label>Motivo (el vendedor lo verá)</label>
+        <input id="m-guia-com" placeholder="Ej.: número de guía no coincide, guía de otro asesor…">
+      </div>
     </div>
-    <div style="overflow-x:auto"><table><thead><tr><th>Código</th><th>Descripción</th><th>Com. vendedor</th><th class="num">Cant. ticket</th><th style="width:105px">Cant. llegada</th><th>Comentario</th></tr></thead><tbody>
-    ${t.items.map((i,x)=>`<tr><td><b>${esc(i.codigo)}</b></td><td style="max-width:240px;font-size:12px">${esc(i.desc)}</td>
-      <td style="max-width:130px;font-size:12px" class="muted">${esc(i.comVendedor||"")}</td>
-      <td class="num">${i.cantidad}</td>
-      <td><input type="number" min="0" max="${i.cantidad}" value="" placeholder="0" id="m-q-${x}" style="text-align:right"></td>
-      <td><input id="m-co-${x}" placeholder="Comentario"></td></tr>`).join("")}
-    </tbody></table></div>
+    <div id="m-merc-prod">
+      <div class="muted" style="margin-bottom:10px"><b>Digita la cantidad que llegó</b> de cada producto. Pon <b>0</b> si no llegó.</div>
+      <div style="margin-bottom:12px">
+        <button class="btn btn-ok btn-sm" onclick="mercTodo('${t.id}',1)">✓ Llegó todo</button>
+        <button class="btn btn-bad btn-sm" onclick="mercTodo('${t.id}',0)">✗ No llegó nada</button>
+      </div>
+      <div style="overflow-x:auto"><table><thead><tr><th>Código</th><th>Descripción</th><th>Com. vendedor</th><th class="num">Cant. ticket</th><th style="width:105px">Cant. llegada</th><th>Comentario</th></tr></thead><tbody>
+      ${t.items.map((i,x)=>`<tr><td><b>${esc(i.codigo)}</b></td><td style="max-width:240px;font-size:12px">${esc(i.desc)}</td>
+        <td style="max-width:130px;font-size:12px" class="muted">${esc(i.comVendedor||"")}</td>
+        <td class="num">${i.cantidad}</td>
+        <td><input type="number" min="0" max="${i.cantidad}" value="" placeholder="0" id="m-q-${x}" style="text-align:right"></td>
+        <td><input id="m-co-${x}" placeholder="Comentario"></td></tr>`).join("")}
+      </tbody></table></div>
+    </div>
     <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px">
       <button class="btn btn-g" onclick="$('modal-root').innerHTML=''">Cancelar</button>
       <button class="btn btn-p" onclick="guardarMerc('${t.id}')">Guardar revisión</button>
@@ -811,14 +885,29 @@ function mercTodo(id,todo){
 }
 async function guardarMerc(id){
   const t=findT(id);
-  for(let x=0;x<t.items.length;x++){if(!$("m-q-"+x)||$("m-q-"+x).value===""){toast("Digita la cantidad llegada en todos los productos.");return;}}
+  const guiaOk=$("m-guia")?$("m-guia").value:"1";
+  if(guiaOk===""){ toast("Indica si la guía es correcta."); return; }
   const ahora=new Date().toISOString();
+  // Guía incorrecta → devolver ticket, la guía vuelve a quedar activa (al quitar guiaId del ticket)
+  if(guiaOk==="0"){
+    const motivo=($("m-guia-com")?$("m-guia-com").value:"").trim()||"Guía incorrecta";
+    t.fechas=t.fechas||{}; t.fechas.mercaderia=ahora;
+    t.guiaIncorrecta={motivo,por:me.name,f:ahora};
+    t.guiaId=null; // libera la guía → vuelve a estar activa
+    t.estado="GUIA_INCORRECTA";
+    t.historial.push({f:ahora,e:"Devuelto por guía incorrecta ("+me.name+"). Motivo: "+motivo+". Guía liberada."});
+    await saveState();$("modal-root").innerHTML="";toast("Ticket devuelto por guía incorrecta. La guía volvió a estar activa.");render();
+    return;
+  }
+  // Guía correcta → revisar cantidades
+  for(let x=0;x<t.items.length;x++){if(!$("m-q-"+x)||$("m-q-"+x).value===""){toast("Digita la cantidad llegada en todos los productos.");return;}}
+  t.guiaValidada={por:me.name,f:ahora};
   t.items.forEach((i,x)=>{const q=Math.max(0,Math.min(i.cantidad,+($("m-q-"+x).value||0)));i.merc={cantLlegada:q,com:$("m-co-"+x).value,por:me.name,f:ahora};});
   t.fechas=t.fechas||{};t.fechas.mercaderia=ahora;
   const totLlego=t.items.reduce((s,i)=>s+llegoQ(i),0);
-  if(totLlego===0){t.estado="NO_LLEGO";t.historial.push({f:ahora,e:"No llegó mercadería. "+me.name});}
-  else if(t.motivo==="GARANTIAS"){t.estado="GARANTIA";t.historial.push({f:ahora,e:"Mercadería recibida → garantía ("+me.name+")"});}
-  else{t.estado="DEVOLUCION";t.historial.push({f:ahora,e:"Mercadería recibida → devolución ("+me.name+")"});}
+  if(totLlego===0){t.estado="NO_LLEGO";t.historial.push({f:ahora,e:"No llegó mercadería. Guía OK. "+me.name});}
+  else if(t.motivo==="GARANTIAS"){t.estado="GARANTIA";t.historial.push({f:ahora,e:"Guía OK. Mercadería recibida → garantía ("+me.name+")"});}
+  else{t.estado="DEVOLUCION";t.historial.push({f:ahora,e:"Guía OK. Mercadería recibida → devolución ("+me.name+")"});}
   await saveState();$("modal-root").innerHTML="";toast("✓ Revisión de mercadería guardada.");render();
 }
 
@@ -947,14 +1036,24 @@ async function guardarGar(id){
 }
 
 /* ============================================================ NOTAS DE CRÉDITO ============================================================ */
-let ncTab="pend";
+let ncTab="pend", ncVista="tickets";
 function renderNC(){
+  $("main").innerHTML=`
+    <h2 style="font-size:28px;color:var(--navy)">Notas de crédito y guías</h2>
+    <div class="muted" style="margin-bottom:16px">Gestiona notas de crédito y administra las guías por asesor.</div>
+    <div class="tabs">
+      <button class="tab ${ncVista==="tickets"?"on":""}" onclick="ncVista='tickets';render()">📄 Notas de crédito</button>
+      <button class="tab ${ncVista==="guias"?"on":""}" onclick="ncVista='guias';render()">📦 Guías por asesor</button>
+    </div>
+    <div id="nc-body"></div>`;
+  if(ncVista==="guias") renderGuiasNC();
+  else renderNCtickets();
+}
+function renderNCtickets(){
   const lista=state.tickets.filter(t=>t.estado==="NC").slice().reverse();
   const pend=lista.filter(t=>!t.nc.hecha),hechas=lista.filter(t=>t.nc.hecha);
   const show=ncTab==="pend"?pend:hechas;
-  $("main").innerHTML=`
-    <h2 style="font-size:28px;color:var(--navy)">Bandeja · Notas de crédito</h2>
-    <div class="muted" style="margin-bottom:16px">Devoluciones y garantías aceptadas.</div>
+  $("nc-body").innerHTML=`
     <div class="tabs">
       <button class="tab ${ncTab==="pend"?"on":""}" onclick="ncTab='pend';render()">Pendientes (${pend.length})</button>
       <button class="tab ${ncTab==="hechas"?"on":""}" onclick="ncTab='hechas';render()">NC hechas (${hechas.length})</button>
@@ -973,6 +1072,133 @@ function renderNC(){
     </td></tr>`;}).join("")}
     </tbody></table></div>`}
     </div>`;
+}
+
+/* ---- Gestión de guías (usuario NC) ---- */
+let guiaFiltroAsesor="";
+function renderGuiasNC(){
+  const asesores=USERS.filter(u=>u.role==="ASESOR").map(u=>u.name);
+  let guias=(state.guias||[]).slice().reverse();
+  if(guiaFiltroAsesor) guias=guias.filter(g=>g.asesor===guiaFiltroAsesor);
+  const hoy=hoyStr();
+  const cont={total:state.guias?.length||0,activas:0,usadas:0,anuladas:0};
+  (state.guias||[]).forEach(g=>{ if(g.estado==="ANULADA")cont.anuladas++; else if(guiaUsadaEnTickets(g.id))cont.usadas++; else cont.activas++; });
+  $("nc-body").innerHTML=`
+    <div class="card" style="border-left:5px solid var(--amber)">
+      <h3 style="font-size:18px;color:var(--navy);margin-bottom:10px">Registrar nuevas guías</h3>
+      <div class="grid3">
+        <div class="field"><label>Asesor</label><select id="g-asesor">${asesores.map(a=>`<option>${esc(a)}</option>`).join("")}</select></div>
+        <div class="field"><label>Fecha de la guía</label><input type="date" id="g-fecha" value="${hoy}"></div>
+        <div class="field"><label>&nbsp;</label><button class="btn btn-p" style="width:100%;justify-content:center" onclick="agregarGuias()">+ Agregar guías</button></div>
+      </div>
+      <div class="field"><label>Números de guía (uno por línea o separados por coma/espacio)</label>
+        <textarea id="g-numeros" rows="3" placeholder="Ej.:&#10;001-2025&#10;002-2025&#10;003-2025"></textarea></div>
+    </div>
+    <div class="grid3" style="margin-bottom:16px">
+      <div class="card"><div class="disp" style="font-size:30px;color:var(--ok)">${cont.activas}</div><div class="muted">Activas (sin usar)</div></div>
+      <div class="card"><div class="disp" style="font-size:30px;color:var(--navy)">${cont.usadas}</div><div class="muted">Usadas en tickets</div></div>
+      <div class="card"><div class="disp" style="font-size:30px;color:var(--bad)">${cont.anuladas}</div><div class="muted">Anuladas</div></div>
+    </div>
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap">
+        <h3 style="font-size:18px;color:var(--navy);flex:1">Guías registradas (${guias.length})</h3>
+        <select style="max-width:240px" onchange="guiaFiltroAsesor=this.value;render()">
+          <option value="">Todos los asesores</option>${asesores.map(a=>`<option ${guiaFiltroAsesor===a?"selected":""}>${esc(a)}</option>`).join("")}</select>
+        <button class="btn btn-ok btn-sm" onclick="excelGuias()">⬇ Reporte de guías</button>
+      </div>
+      ${guias.length===0?'<div class="empty"><div class="big">Sin guías registradas</div></div>':`
+      <div style="overflow-x:auto"><table><thead><tr><th>N° Guía</th><th>Asesor</th><th>Fecha guía</th><th>Estado</th><th>Uso</th><th></th></tr></thead><tbody>
+      ${guias.map(g=>{
+        const usada=guiaUsadaEnTickets(g.id);
+        const tks=state.tickets.filter(t=>t.estado!=="ELIMINADO"&&t.guiaId===g.id);
+        let estTag;
+        if(g.estado==="ANULADA") estTag='<span class="tag tag-bad">Anulada</span>';
+        else if(usada) estTag='<span class="tag tag-nc">Usada</span>';
+        else estTag='<span class="tag tag-merc">Activa</span>';
+        return `<tr>
+          <td><b>${esc(g.numero)}</b></td>
+          <td>${esc(g.asesor)}</td>
+          <td>${fdate(g.fechaCreacion)}<div class="muted">${fdatetime(g.fechaCreacion)}</div></td>
+          <td>${estTag}${g.estado==="ANULADA"&&g.anulacion?`<div class="muted">${esc(g.anulacion.motivo||"")}</div>`:""}</td>
+          <td>${tks.length?tks.map(t=>esc(t.numero)).join(", "):'<span class="muted">—</span>'}</td>
+          <td style="white-space:nowrap">${g.estado!=="ANULADA"&&!usada?`<button class="btn btn-g btn-sm" onclick="editarGuia('${g.id}')">✎ Editar</button>`:""}</td>
+        </tr>`;}).join("")}
+      </tbody></table></div>`}
+    </div>`;
+}
+async function agregarGuias(){
+  const asesor=$("g-asesor").value;
+  const fecha=$("g-fecha").value;
+  const raw=$("g-numeros").value.trim();
+  if(!raw){ toast("Escribe al menos un número de guía."); return; }
+  if(!fecha){ toast("Selecciona la fecha de la guía."); return; }
+  const nums=raw.split(/[\n,;\s]+/).map(s=>s.trim()).filter(Boolean);
+  if(nums.length===0){ toast("No se detectaron números válidos."); return; }
+  // fecha ISO con hora actual pero día seleccionado
+  const fIso=new Date(fecha+"T"+new Date().toTimeString().slice(0,8)).toISOString();
+  state.guias=state.guias||[];
+  const existentes=new Set(state.guias.filter(g=>g.estado!=="ANULADA").map(g=>g.numero+"|"+g.asesor));
+  let agregadas=0, repetidas=0;
+  nums.forEach(n=>{
+    if(existentes.has(n+"|"+asesor)){ repetidas++; return; }
+    state.guias.push({id:"G"+Date.now()+"_"+Math.random().toString(36).slice(2,6),numero:n,asesor,fechaCreacion:fIso,estado:"ACTIVA",creadaPor:me.name});
+    agregadas++;
+  });
+  await saveState();
+  toast("✓ "+agregadas+" guía(s) agregada(s)"+(repetidas?" · "+repetidas+" ya existían":""));
+  render();
+}
+function editarGuia(id){
+  const g=findGuia(id);
+  $("modal-root").innerHTML=`<div class="modal-bg"><div class="modal" style="max-width:520px">
+    <h2 style="font-size:22px;color:var(--navy);margin-bottom:8px">Editar guía</h2>
+    <div class="field"><label>N° de guía</label><input id="eg-num" value="${esc(g.numero)}"></div>
+    <div class="field"><label>Asesor</label><select id="eg-asesor">${USERS.filter(u=>u.role==="ASESOR").map(u=>`<option ${g.asesor===u.name?"selected":""}>${esc(u.name)}</option>`).join("")}</select></div>
+    <div class="field"><label>Fecha de la guía</label><input type="date" id="eg-fecha" value="${hoyStr(g.fechaCreacion)}"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-g" onclick="$('modal-root').innerHTML=''">Cancelar</button>
+      <button class="btn btn-p" onclick="guardarEdicionGuia('${g.id}')">Guardar</button>
+    </div>
+  </div></div>`;
+}
+async function guardarEdicionGuia(id){
+  const g=findGuia(id);
+  const num=$("eg-num").value.trim(); if(!num){ toast("El número no puede estar vacío."); return; }
+  g.numero=num; g.asesor=$("eg-asesor").value;
+  const f=$("eg-fecha").value;
+  if(f){ g.fechaCreacion=new Date(f+"T"+new Date(g.fechaCreacion).toTimeString().slice(0,8)).toISOString(); }
+  await saveState(); $("modal-root").innerHTML=""; toast("✓ Guía actualizada."); render();
+}
+function excelGuias(){
+  if(!state.guias||state.guias.length===0){ toast("No hay guías para el reporte."); return; }
+  const rows=state.guias.map(g=>{
+    const usada=guiaUsadaEnTickets(g.id);
+    const tks=state.tickets.filter(t=>t.estado!=="ELIMINADO"&&t.guiaId===g.id);
+    let estado=g.estado==="ANULADA"?"ANULADA":(usada?"USADA":"NO USADA");
+    return {
+      "N° GUIA":g.numero,"ASESOR":g.asesor,"FECHA GUIA":fdate(g.fechaCreacion),
+      "ESTADO":estado,
+      "TICKETS QUE LA USARON":tks.map(t=>t.numero).join(", "),
+      "FECHA(S) TICKET":tks.map(t=>fdate(t.fechaTicket)).join(", "),
+      "MOTIVO ANULACION":g.estado==="ANULADA"&&g.anulacion?g.anulacion.motivo:"",
+      "ANULADA POR":g.estado==="ANULADA"&&g.anulacion?g.anulacion.por:"",
+      "CREADA POR":g.creadaPor||""
+    };
+  });
+  const total=state.guias.length;
+  const usadas=state.guias.filter(g=>g.estado!=="ANULADA"&&guiaUsadaEnTickets(g.id)).length;
+  const anuladas=state.guias.filter(g=>g.estado==="ANULADA").length;
+  const noUsadas=total-usadas-anuladas;
+  rows.push({});
+  rows.push({"N° GUIA":"RESUMEN"});
+  rows.push({"N° GUIA":"Total pedidas","ASESOR":total});
+  rows.push({"N° GUIA":"Usadas","ASESOR":usadas});
+  rows.push({"N° GUIA":"No usadas","ASESOR":noUsadas});
+  rows.push({"N° GUIA":"Anuladas","ASESOR":anuladas});
+  const ws=XLSX.utils.json_to_sheet(rows),wb=XLSX.utils.book_new();
+  ws["!cols"]=[{wch:18},{wch:24},{wch:14},{wch:12},{wch:24},{wch:24},{wch:24},{wch:18},{wch:18}];
+  XLSX.utils.book_append_sheet(wb,ws,"Reporte Guías");
+  XLSX.writeFile(wb,"Reporte_Guias_"+new Date().toISOString().slice(0,10)+".xlsx");
 }
 function itemsAceptados(t){
   if(t.motivo==="GARANTIAS") return t.items.filter(i=>llegoQ(i)>0).map(i=>{const q=llegoQ(i);const f=i.cantidad?q/i.cantidad:0;return {...i,cantNC:q,neto:i.neto*f,iva:i.iva*f,total:i.total*f};});
@@ -1042,15 +1268,29 @@ function renderAdmin(){
       <h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">Base de facturas (Google Sheets)</h3>
       <div class="muted" style="margin-bottom:10px">
         ${baseLoaded?`✓ Base en memoria: <b>${base.length.toLocaleString("es-EC")}</b> líneas · <b>${[...new Set(base.map(r=>r.factura))].length.toLocaleString("es-EC")}</b> facturas`:"Base no cargada"}<br>
-        La base se carga automáticamente desde Google Sheets al iniciar sesión. También puedes forzar una recarga aquí.
+        Si editaste el Excel (agregaste o <b>borraste</b> facturas), presiona <b>"Recargar base"</b> para traer la versión más reciente. La recarga ignora la caché y descarga todo de nuevo.
       </div>
       <button class="btn btn-p" onclick="forzarRecargaAdmin()">🔄 Recargar base desde Google Sheets</button>
       <div id="adm-prog" style="margin-top:10px"></div>
+      <div class="muted" style="margin-top:10px;background:#FFF4D6;padding:8px 10px;border-radius:6px">
+        ⏱ Nota: Google publica los cambios del Excel con unos minutos de retraso (puede tardar hasta ~5 min en reflejar lo que borraste). Si recargaste y aún ves facturas viejas, espera unos minutos y vuelve a recargar.
+      </div>
     </div>
     <div class="card" style="border-left:5px solid var(--ok)">
-      <h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">Reporte consolidado</h3>
-      <div class="muted" style="margin-bottom:12px">Excel con todos los tickets, fechas de respuesta, N° de NC y estado.</div>
-      <button class="btn btn-ok" onclick="reporteConsolidado()">⬇ Descargar reporte (Excel)</button>
+      <h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">Reporte consolidado de tickets</h3>
+      <div class="muted" style="margin-bottom:12px">Excel con todos los tickets, fechas de respuesta, N° de NC, guía y estado. Puedes filtrar por rango de fechas (fecha de creación del ticket).</div>
+      <div class="grid3" style="margin-bottom:10px">
+        <div class="field" style="margin-bottom:0"><label>Desde</label><input type="date" id="rep-desde"></div>
+        <div class="field" style="margin-bottom:0"><label>Hasta</label><input type="date" id="rep-hasta"></div>
+        <div class="field" style="margin-bottom:0"><label>&nbsp;</label><button class="btn btn-ok" style="width:100%;justify-content:center" onclick="reporteConsolidado()">⬇ Descargar reporte</button></div>
+      </div>
+      <div class="muted">Deja las fechas vacías para incluir todos los tickets.</div>
+    </div>
+    <div class="card" style="border-left:5px solid #6A2E91">
+      <h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">Guías</h3>
+      <div class="muted" style="margin-bottom:12px">Anula guías y descarga el reporte de guías (pedidas, usadas, no usadas, anuladas).</div>
+      <button class="btn btn-p" onclick="adminVerGuias()">📦 Administrar guías</button>
+      <button class="btn btn-ok" onclick="excelGuias()">⬇ Reporte de guías</button>
     </div>
     <div class="grid3">
       <div class="card"><div class="disp" style="font-size:34px;color:var(--navy)">${total}</div><div class="muted">Tickets totales</div></div>
@@ -1101,8 +1341,21 @@ async function confirmarEliminar(id){
 }
 function reporteConsolidado(){
   if(state.tickets.length===0){toast("No hay tickets.");return;}
-  const rows=state.tickets.map(t=>({
-    "N° TICKET":t.numero,"FECHA CREACION":fdatetime(t.fechaTicket),"FACTURA":t.factura,"FACTURADOR":t.facturador||"",
+  const desde=$("rep-desde")?$("rep-desde").value:"";
+  const hasta=$("rep-hasta")?$("rep-hasta").value:"";
+  let tks=state.tickets;
+  if(desde||hasta){
+    tks=tks.filter(t=>{
+      const f=hoyStr(t.fechaTicket);
+      if(desde&&f<desde) return false;
+      if(hasta&&f>hasta) return false;
+      return true;
+    });
+  }
+  if(tks.length===0){toast("No hay tickets en ese rango de fechas.");return;}
+  const rows=tks.map(t=>({
+    "N° TICKET":t.numero,"GUIA":t.guiaNumero||"","SOBRE":t.sobre?"SÍ":"NO",
+    "FECHA CREACION":fdatetime(t.fechaTicket),"FACTURA":t.factura,"FACTURADOR":t.facturador||"",
     "EMISION":fdate(t.emision),"RAZON SOCIAL":t.razonSocial,"RUC":t.ruc||"","VENDEDOR":t.vendedor,"MOTIVO":t.motivo,
     "FECHA MERCADERIA":t.fechas?.mercaderia?fdatetime(t.fechas.mercaderia):"",
     "FECHA DEVOLUCION":t.fechas?.devolucion?fdatetime(t.fechas.devolucion):"",
@@ -1111,13 +1364,53 @@ function reporteConsolidado(){
     "N° NC":t.nc?.numero||"","ESTADO NC":t.nc?(t.nc.hecha?"HECHA":"PENDIENTE"):"",
     "ESTADO":ESTADO_LABEL[t.estado]||t.estado,
     "MOTIVO ELIMINACION":t.eliminacion?t.eliminacion.motivo:"",
+    "GUIA INCORRECTA":t.guiaIncorrecta?t.guiaIncorrecta.motivo:"",
     "TOTAL TICKET":+t.items.reduce((s,i)=>s+i.total,0).toFixed(2),
     "TOTAL ACEPTADO":t.estado==="NC"||t.fechas?.nc?+totalAceptado(t).toFixed(2):""
   }));
   const ws=XLSX.utils.json_to_sheet(rows),wb=XLSX.utils.book_new();
-  ws["!cols"]=Object.keys(rows[0]).map(k=>({wch:Math.max(14,k.length+2)}));
+  ws["!cols"]=Object.keys(rows[0]).map(k=>({wch:Math.max(13,k.length+2)}));
   XLSX.utils.book_append_sheet(wb,ws,"Consolidado");
-  XLSX.writeFile(wb,"Reporte_Consolidado_"+new Date().toISOString().slice(0,10)+".xlsx");
+  const suf=desde||hasta?("_"+(desde||"inicio")+"_a_"+(hasta||"hoy")):"";
+  XLSX.writeFile(wb,"Reporte_Consolidado"+suf+".xlsx");
+}
+/* ---- Admin: administrar / anular guías ---- */
+function adminVerGuias(){
+  const guias=(state.guias||[]).slice().reverse();
+  $("modal-root").innerHTML=`<div class="modal-bg"><div class="modal">
+    <h2 style="font-size:24px;color:var(--navy);margin-bottom:10px">Administrar guías</h2>
+    ${guias.length===0?'<div class="empty"><div class="big">Sin guías</div></div>':`
+    <div style="overflow-x:auto"><table><thead><tr><th>N° Guía</th><th>Asesor</th><th>Fecha</th><th>Estado</th><th>Tickets</th><th></th></tr></thead><tbody>
+    ${guias.map(g=>{
+      const usada=guiaUsadaEnTickets(g.id);
+      const tks=state.tickets.filter(t=>t.estado!=="ELIMINADO"&&t.guiaId===g.id);
+      let estTag=g.estado==="ANULADA"?'<span class="tag tag-bad">Anulada</span>':(usada?'<span class="tag tag-nc">Usada</span>':'<span class="tag tag-merc">Activa</span>');
+      return `<tr><td><b>${esc(g.numero)}</b></td><td>${esc(g.asesor)}</td><td>${fdate(g.fechaCreacion)}</td>
+      <td>${estTag}</td><td>${tks.map(t=>esc(t.numero)).join(", ")||"—"}</td>
+      <td>${g.estado!=="ANULADA"?`<button class="btn btn-bad btn-sm" onclick="abrirAnularGuia('${g.id}')">Anular</button>`:`<span class="muted">${esc(g.anulacion?.por||"")}</span>`}</td></tr>`;
+    }).join("")}
+    </tbody></table></div>`}
+    <div style="text-align:right;margin-top:12px"><button class="btn btn-p" onclick="$('modal-root').innerHTML=''">Cerrar</button></div>
+  </div></div>`;
+}
+function abrirAnularGuia(id){
+  const g=findGuia(id);
+  $("modal-root").innerHTML=`<div class="modal-bg"><div class="modal" style="max-width:480px">
+    <h2 style="font-size:22px;color:var(--bad);margin-bottom:8px">Anular guía ${esc(g.numero)}</h2>
+    <div class="muted" style="margin-bottom:14px">Asesor: ${esc(g.asesor)} · ${fdate(g.fechaCreacion)}<br>Una guía anulada ya no podrá usarse para crear tickets.</div>
+    <div class="field"><label>Motivo de anulación</label><textarea id="anul-motivo" rows="3" placeholder="Ej.: guía duplicada, error de registro…"></textarea></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-g" onclick="adminVerGuias()">Cancelar</button>
+      <button class="btn btn-bad" onclick="confirmarAnularGuia('${g.id}')">Anular guía</button>
+    </div>
+  </div></div>`;
+}
+async function confirmarAnularGuia(id){
+  const motivo=$("anul-motivo").value.trim(); if(!motivo){ toast("Escribe el motivo."); return; }
+  const g=findGuia(id);
+  g.estado="ANULADA"; g.anulacion={por:me.name,f:new Date().toISOString(),motivo};
+  await saveState(); toast("✓ Guía "+g.numero+" anulada."); adminVerGuias(); 
+  if(me.role==="ADMIN") renderAdmin();
 }
 
 /* ============================================================ INIT ============================================================ */
