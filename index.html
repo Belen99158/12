@@ -157,6 +157,18 @@ const USERS = [
  {name:"WILLIAM ACHACHI",pass:"1113",role:"ADMIN"},
  {name:"TANNIA BASSANTES",pass:"1114",role:"ADMIN"},
 ];
+/* Usuarios que pueden cambiar entre TODOS los paneles (no solo admin) */
+const SUPER_ADMINS=["BELEN MANZANO","TANNIA BASSANTES"];
+/* Vista actualmente activa para un super admin (null = su panel normal admin) */
+let vistaActiva=null;
+const VISTAS=[
+  {role:"ASESOR",label:"Asesor"},
+  {role:"MERCADERIA",label:"Rev. Mercadería"},
+  {role:"DEVOLUCION",label:"Rev. Devolución"},
+  {role:"GARANTIA",label:"Rev. Garantía"},
+  {role:"NC",label:"Notas de crédito"},
+  {role:"ADMIN",label:"Administrativo"},
+];
 const ROLE_LABEL={ASESOR:"Asesor comercial",MERCADERIA:"Revisión de mercadería",DEVOLUCION:"Revisión de devolución",GARANTIA:"Revisión de garantía",NC:"Notas de crédito",ADMIN:"Administrativo"};
 const MOTIVOS=["DACION EN PAGOS","GESTION COMERCIAL CLIENTE VENDEDOR","LOGISTICA BODEGA","DEVOLUCION","GARANTIAS"];
 const MARCAS=["PERMATEX","ORIGINAL","VALEO","MAHLE","ABRO","LUBA AUTOPARTS","SEIWA","NPR","SABO","APLIC","JCC","MAGNETI MARELLI","AUTOTOP","OTRO"];
@@ -263,9 +275,80 @@ async function leerPdfNCfb(ticketId){
   return snap.val();
 }
 
+/* ============================================================ BASE DE FACTURAS EN FIREBASE ============================================================ */
+/* Guardamos la base comprimida por diccionario: los textos repetidos (cliente, descripción,
+   factura, facturador, etc.) se guardan UNA sola vez. Reduce el tamaño ~70%. */
+function comprimirBase(rows){
+  const pool=[], map=new Map();
+  const idx=s=>{ s=String(s??""); if(map.has(s))return map.get(s); const i=pool.length; pool.push(s); map.set(s,i); return i; };
+  const r=rows.map(x=>[idx(x.emision),idx(x.factura),idx(x.ruc),idx(x.razon),idx(x.codigo),idx(x.desc),idx(x.sub),idx(x.facturador),x.cant,x.neto,x.iva,x.total]);
+  return {v:1,p:pool,r};
+}
+function descomprimirBase(obj){
+  if(!obj||!obj.r) return [];
+  const p=obj.p;
+  return obj.r.map(a=>({emision:p[a[0]],factura:p[a[1]],ruc:p[a[2]],razon:p[a[3]],codigo:p[a[4]],desc:p[a[5]],sub:p[a[6]],facturador:p[a[7]],cant:a[8],neto:a[9],iva:a[10],total:a[11]}));
+}
+/* Firebase Realtime DB tiene límite por nodo; partimos en bloques de ~250KB de JSON. */
+const FB_CHUNK=200000;
+async function subirBaseAFirebase(rows,onProg){
+  if(!fbReady) throw new Error("Sin conexión a Firebase");
+  const comp=comprimirBase(rows);
+  const json=JSON.stringify(comp);
+  // partir en bloques
+  const chunks=[];
+  for(let i=0;i<json.length;i+=FB_CHUNK) chunks.push(json.slice(i,i+FB_CHUNK));
+  if(onProg) onProg("Subiendo base a Firebase ("+chunks.length+" bloques)…",70);
+  // borrar base anterior y escribir la nueva
+  await fbDB.ref("baseFacturas").remove();
+  const meta={n:chunks.length,rows:rows.length,ts:new Date().toISOString(),por:me?me.name:""};
+  for(let i=0;i<chunks.length;i++){
+    if(onProg) onProg("Subiendo bloque "+(i+1)+"/"+chunks.length+"…",70+Math.round((i+1)/chunks.length*25));
+    await fbDB.ref("baseFacturas/chunks/"+i).set(chunks[i]);
+  }
+  await fbDB.ref("baseFacturas/meta").set(meta);
+  return meta;
+}
+async function leerBaseDeFirebase(onProg){
+  if(!fbReady) return null;
+  const metaSnap=await fbDB.ref("baseFacturas/meta").get();
+  const meta=metaSnap.val();
+  if(!meta||!meta.n) return null;
+  if(onProg) onProg("Leyendo base desde Firebase…",20);
+  let json="";
+  for(let i=0;i<meta.n;i++){
+    if(onProg) onProg("Cargando bloque "+(i+1)+"/"+meta.n+"…",20+Math.round((i+1)/meta.n*50));
+    const c=await fbDB.ref("baseFacturas/chunks/"+i).get();
+    json+=c.val()||"";
+  }
+  const comp=JSON.parse(json);
+  return {rows:descomprimirBase(comp),meta};
+}
+
 /* ============================================================ CARGA BASE DESDE GOOGLE SHEETS ============================================================ */
 /* La base de facturas se carga directo del CSV público de Sheets.
    Se cachea en memoria por sesión. El admin puede forzar recarga. */
+/* ============================================================ CARGA DE BASE (Firebase primero, Sheets de respaldo) ============================================================ */
+/* Estrategia rápida: lee la base ya guardada en Firebase (veloz). Si no existe,
+   cae a Google Sheets. El admin actualiza Firebase con el botón correspondiente. */
+async function cargarBase(forzar=false, onProg=null){
+  if(baseLoaded&&!forzar) return;
+  // 1) Intentar Firebase (rápido)
+  try{
+    if(onProg) onProg("Buscando base en Firebase…",10);
+    const res=await leerBaseDeFirebase(onProg);
+    if(res&&res.rows&&res.rows.length){
+      base=res.rows; indexarBase(); baseLoaded=true; baseLineas=base.length;
+      baseFechaStr="Firebase · "+(res.meta.ts?new Date(res.meta.ts).toLocaleString("es-EC"):"");
+      actualizarChipBase();
+      if(onProg) onProg("Base lista: "+base.length.toLocaleString("es-EC")+" líneas (Firebase)",100);
+      return;
+    }
+  }catch(e){ console.warn("Base Firebase falló, uso Sheets:",e); }
+  // 2) Respaldo: Google Sheets
+  await cargarBaseDesdeSheets(true,onProg);
+}
+
 async function cargarBaseDesdeSheets(forzar=false, onProg=null){
   if(baseLoaded&&!forzar) return; // ya en memoria
   if(onProg) onProg("Descargando base de facturas desde Google Sheets…", 10);
@@ -406,9 +489,9 @@ async function doLogin(){
     suscribirEstado(resolve);
   });
 
-  // 2) Cargar base de facturas desde Google Sheets
+  // 2) Cargar base de facturas (Firebase primero, Sheets de respaldo)
   try{
-    await cargarBaseDesdeSheets(false,(msg,pct)=>{
+    await cargarBase(false,(msg,pct)=>{
       const el=$("load-msg"); if(el) el.textContent=msg;
       const pp=$("load-prog"); if(pp) pp.style.width=Math.max(40,pct)+"%";
     });
@@ -417,24 +500,50 @@ async function doLogin(){
   }
   render();
 }
-function logout(){ me=null; $("login-pass").value=""; $("app-view").style.display="none"; $("login-view").style.display="flex"; baseLoaded=false; }
+function logout(){ me=null; vistaActiva=null; const ps=$("panel-selector"); if(ps) ps.remove(); $("login-pass").value=""; $("app-view").style.display="none"; $("login-view").style.display="flex"; baseLoaded=false; }
 
 /* ============================================================ RENDER ROUTER ============================================================ */
+function esSuperAdmin(){ return me && SUPER_ADMINS.includes(me.name); }
+function rolActivo(){
+  // Super admin puede cambiar de vista; los demás usan su rol fijo
+  if(esSuperAdmin() && vistaActiva) return vistaActiva;
+  return me.role;
+}
 function render(){
   const fb=$("chip-fb"); if(fb) fb.textContent=fbReady?"🟢 En línea":"🔴 Sin conexión";
-  if(me.role==="ASESOR") renderAsesor();
-  else if(me.role==="MERCADERIA") renderBandeja("MERCADERIA","Bandeja · Revisión de mercadería","Digita la cantidad que llegó de cada producto.");
-  else if(me.role==="DEVOLUCION") renderBandeja("DEVOLUCION","Bandeja · Revisión de devolución","Tickets con mercadería recibida cuyo motivo es devolución.");
-  else if(me.role==="GARANTIA") renderBandeja("GARANTIA","Bandeja · Revisión de garantía","Tickets de garantía con mercadería recibida.");
-  else if(me.role==="NC") renderNC();
+  renderSelectorPanel();
+  const r=rolActivo();
+  if(r==="ASESOR") renderAsesor();
+  else if(r==="MERCADERIA") renderBandeja("MERCADERIA","Bandeja · Revisión de mercadería","Digita la cantidad que llegó de cada producto.");
+  else if(r==="DEVOLUCION") renderBandeja("DEVOLUCION","Bandeja · Revisión de devolución","Tickets con mercadería recibida cuyo motivo es devolución.");
+  else if(r==="GARANTIA") renderBandeja("GARANTIA","Bandeja · Revisión de garantía","Tickets de garantía con mercadería recibida.");
+  else if(r==="NC") renderNC();
   else renderAdmin();
+}
+function renderSelectorPanel(){
+  let cont=$("panel-selector");
+  if(!esSuperAdmin()){ if(cont) cont.remove(); return; }
+  if(!cont){
+    cont=document.createElement("div");
+    cont.id="panel-selector";
+    cont.style.cssText="background:#143A60;padding:8px 22px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;border-bottom:1px solid rgba(255,255,255,.1)";
+    const tb=document.querySelector(".topbar");
+    tb.parentNode.insertBefore(cont,tb.nextSibling);
+  }
+  const actual=rolActivo();
+  cont.innerHTML=`<span style="color:rgba(255,255,255,.6);font-size:11px;text-transform:uppercase;letter-spacing:.05em;margin-right:4px">Panel:</span>`+
+    VISTAS.map(v=>`<button onclick="cambiarVista('${v.role}')" style="padding:5px 12px;border-radius:99px;border:1px solid ${actual===v.role?'var(--amber)':'rgba(255,255,255,.2)'};background:${actual===v.role?'var(--amber)':'transparent'};color:${actual===v.role?'#1B2430':'#fff'};font-size:12px;font-weight:600;cursor:pointer">${v.label}</button>`).join("");
+}
+function cambiarVista(role){
+  vistaActiva=role;
+  $("chip-role").textContent=(role===me.role&&!SUPER_ADMINS.includes(me.name))?ROLE_LABEL[role]:ROLE_LABEL[role]+" (vista)";
+  render();
 }
 
 /* ============================================================ ASESOR ============================================================ */
 let nuevo=null, filtroItems="";
 function renderAsesor(){
   const mios=state.tickets.filter(t=>t.vendedor===me.name).slice().reverse();
-  const eliminados=mios.filter(t=>t.estado==="ELIMINADO");
   const guiaIncorrecta=mios.filter(t=>t.estado==="GUIA_INCORRECTA");
   $("main").innerHTML=`
     <div style="display:flex;align-items:center;gap:14px;margin-bottom:18px;flex-wrap:wrap">
@@ -447,18 +556,41 @@ function renderAsesor(){
     ${guiaIncorrecta.map(t=>`<div class="alert-del">⚠ <b>Tu ticket ${esc(t.numero)} fue devuelto por guía incorrecta</b> (${esc(t.guiaIncorrecta?.por||"")}, ${fdate(t.guiaIncorrecta?.f)}).<br>Motivo: <b>${esc(t.guiaIncorrecta?.motivo||"")}</b> · La guía volvió a estar disponible, crea el ticket de nuevo con la guía correcta.</div>`).join("")}
     ${eliminados.map(t=>`<div class="alert-del">🗑 <b>Tu ticket ${esc(t.numero)} fue eliminado</b> (${esc(t.eliminacion?.por||"")}, ${fdate(t.eliminacion?.f)}).<br>Motivo: <b>${esc(t.eliminacion?.motivo||"sin motivo")}</b></div>`).join("")}
     <div class="card">
-      <h3 style="font-size:19px;margin-bottom:10px;color:var(--navy)">Mis tickets</h3>
-      ${mios.length===0?'<div class="empty"><div class="big">Sin tickets todavía</div>Crea tu primer ticket con el botón "Nuevo ticket".</div>':`
-      <div style="overflow-x:auto"><table><thead><tr><th>N° Ticket</th><th>Fecha</th><th>Razón social</th><th>Factura</th><th>Motivo</th><th>Estado</th><th></th></tr></thead><tbody>
-      ${mios.map(t=>`<tr><td><b>${esc(t.numero)}</b></td><td>${fdate(t.fechaTicket)}</td><td>${esc(t.razonSocial)}</td><td>${esc(t.factura)}</td><td>${esc(t.motivo)}</td><td>${tagFor(t)}</td>
-      <td style="white-space:nowrap"><button class="btn btn-g btn-sm" onclick="verTicket('${t.id}')">Ver</button> <button class="btn btn-a btn-sm" onclick="imprimirTicket('${t.id}')">🖨 Imprimir</button></td></tr>`).join("")}
-      </tbody></table></div>`}
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap">
+        <h3 style="font-size:19px;color:var(--navy);flex:1">Mis tickets</h3>
+      </div>
+      <div class="srch-bar">
+        <span>🔍</span>
+        <input type="text" id="ase-srch" placeholder="Buscar por cliente, N° ticket, factura o guía…" value="${esc(filtroMisTickets)}" oninput="filtroMisTickets=this.value;renderMisTicketsTabla()">
+        ${filtroMisTickets?`<button class="btn btn-sm btn-g" onclick="filtroMisTickets='';renderMisTicketsTabla()">✕</button>`:""}
+      </div>
+      <div id="mis-tickets-tabla"></div>
     </div>`;
+  renderMisTicketsTabla();
+}
+let filtroMisTickets="";
+function renderMisTicketsTabla(){
+  let mios=state.tickets.filter(t=>t.vendedor===me.name).slice().reverse();
+  const q=filtroMisTickets.trim().toUpperCase();
+  if(q){
+    mios=mios.filter(t=>(t.numero+" "+t.razonSocial+" "+t.factura+" "+(t.guiaNumero||"")+" "+t.motivo).toUpperCase().includes(q));
+  }
+  const cont=$("mis-tickets-tabla");
+  if(!cont) return;
+  const srch=$("ase-srch"); // mantener foco si ya existe
+  if(mios.length===0){
+    cont.innerHTML=q?`<div class="empty"><div class="big">Sin resultados</div>No hay tickets que coincidan con "${esc(filtroMisTickets)}".</div>`:'<div class="empty"><div class="big">Sin tickets todavía</div>Crea tu primer ticket con el botón "Nuevo ticket".</div>';
+    return;
+  }
+  cont.innerHTML=`<div style="overflow-x:auto"><table><thead><tr><th>N° Ticket</th><th>Fecha</th><th>Guía</th><th>Razón social</th><th>Factura</th><th>Motivo</th><th>Estado</th><th></th></tr></thead><tbody>
+    ${mios.map(t=>`<tr><td><b>${esc(t.numero)}</b></td><td>${fdate(t.fechaTicket)}</td><td>${esc(t.guiaNumero||"—")}</td><td>${esc(t.razonSocial)}</td><td>${esc(t.factura)}</td><td>${esc(t.motivo)}</td><td>${tagFor(t)}</td>
+    <td style="white-space:nowrap"><button class="btn btn-g btn-sm" onclick="verTicket('${t.id}')">Ver</button> <button class="btn btn-a btn-sm" onclick="imprimirTicket('${t.id}')">🖨</button></td></tr>`).join("")}
+    </tbody></table></div>`;
 }
 async function recargarBase(){
   toast("Cargando base…");
   try{
-    await cargarBaseDesdeSheets(true,(msg)=>toast(msg,2000));
+    await cargarBase(true,(msg)=>toast(msg,2000));
     toast("✓ Base cargada: "+base.length.toLocaleString("es-EC")+" líneas");
     render();
   }catch(e){ toast("Error: "+e.message,6000); }
@@ -721,7 +853,7 @@ function verTicket(id){
     ${t.estado==="ELIMINADO"?`<div class="alert-del">🗑 Eliminado por <b>${esc(t.eliminacion?.por||"")}</b> el ${fdate(t.eliminacion?.f)}. Motivo: <b>${esc(t.eliminacion?.motivo||"")}</b></div>`:""}
     ${t.estado==="GUIA_INCORRECTA"?`<div class="alert-del">⚠ <b>Devuelto por guía incorrecta</b> (${esc(t.guiaIncorrecta?.por||"")}, ${fdate(t.guiaIncorrecta?.f)}). Motivo: <b>${esc(t.guiaIncorrecta?.motivo||"")}</b><br>La guía fue liberada y vuelve a estar disponible.</div>`:""}
     <div class="kv" style="margin-bottom:12px">
-      <b>Guía</b><span>${esc(t.guiaNumero||"—")} ${t.sobre?'· 📨 con sobre':''}</span>
+      <b>Guía</b><span>${esc(t.guiaNumero||"—")} ${t.sobre?'· 📨 con sobre'+(t.sobreLlego===true?' <span class="tag tag-nc">sobre llegó</span>':t.sobreLlego===false?' <span class="tag tag-bad">sobre NO llegó</span>':''):''}</span>
       <b>Razón social</b><span>${esc(t.razonSocial)}</span>
       <b>RUC</b><span>${esc(t.ruc||"")}</span>
       <b>Factura</b><span>${esc(t.factura)}</span>
@@ -810,13 +942,27 @@ function renderBandeja(role,titulo,sub){
     <h2 style="font-size:28px;color:var(--navy)">${titulo}</h2>
     <div class="muted" style="margin-bottom:18px">${sub}</div>
     <div class="card">
-    ${lista.length===0?'<div class="empty"><div class="big">Bandeja vacía</div>No hay tickets pendientes.</div>':`
-    <table><thead><tr><th>N° Ticket</th><th>Fecha</th><th>Razón social</th><th>Factura</th><th>Motivo</th><th>Vendedor</th><th></th></tr></thead><tbody>
-    ${lista.map(t=>`<tr><td><b>${esc(t.numero)}</b></td><td>${fdate(t.fechaTicket)}</td><td>${esc(t.razonSocial)}</td><td>${esc(t.factura)}</td><td>${esc(t.motivo)}</td><td>${esc(t.vendedor)}</td>
-    <td><button class="btn btn-a btn-sm" onclick="revisar('${role}','${t.id}')">Revisar</button></td></tr>`).join("")}
-    </tbody></table>`}
+      <div class="srch-bar">
+        <span>🔍</span>
+        <input type="text" id="band-srch" placeholder="Buscar por asesor, N° ticket, razón social, factura o guía…" value="${esc(filtroBandeja)}" oninput="filtroBandeja=this.value;renderBandejaTabla('${role}')">
+        ${filtroBandeja?`<button class="btn btn-sm btn-g" onclick="filtroBandeja='';renderBandejaTabla('${role}')">✕</button>`:""}
+      </div>
+      <div id="band-tabla"></div>
     </div>
     <div class="card"><h3 style="font-size:18px;color:var(--navy);margin-bottom:8px">Historial procesado</h3>${histTable(role)}</div>`;
+  renderBandejaTabla(role);
+}
+let filtroBandeja="";
+function renderBandejaTabla(role){
+  let lista=state.tickets.filter(t=>t.estado===role).slice().reverse();
+  const q=filtroBandeja.trim().toUpperCase();
+  if(q) lista=lista.filter(t=>(t.vendedor+" "+t.numero+" "+t.razonSocial+" "+t.factura+" "+(t.guiaNumero||"")+" "+t.motivo).toUpperCase().includes(q));
+  const cont=$("band-tabla"); if(!cont) return;
+  if(lista.length===0){ cont.innerHTML=q?`<div class="empty"><div class="big">Sin resultados</div></div>`:'<div class="empty"><div class="big">Bandeja vacía</div>No hay tickets pendientes.</div>'; return; }
+  cont.innerHTML=`<table><thead><tr><th>N° Ticket</th><th>Fecha</th><th>Guía</th><th>Razón social</th><th>Factura</th><th>Motivo</th><th>Vendedor</th><th></th></tr></thead><tbody>
+    ${lista.map(t=>`<tr><td><b>${esc(t.numero)}</b></td><td>${fdate(t.fechaTicket)}</td><td>${esc(t.guiaNumero||"—")}</td><td>${esc(t.razonSocial)}</td><td>${esc(t.factura)}</td><td>${esc(t.motivo)}</td><td>${esc(t.vendedor)}</td>
+    <td><button class="btn btn-a btn-sm" onclick="revisar('${role}','${t.id}')">Revisar</button></td></tr>`).join("")}
+    </tbody></table>`;
 }
 function histTable(role){
   let l=state.tickets.filter(t=>t.estado!=="ELIMINADO").filter(t=>{
@@ -858,6 +1004,12 @@ function revisarMerc(t){
         <label>Motivo (el vendedor lo verá)</label>
         <input id="m-guia-com" placeholder="Ej.: número de guía no coincide, guía de otro asesor…">
       </div>
+      ${t.sobre?`<div class="field" style="margin-top:10px;margin-bottom:0"><label>📨 El asesor indicó que envió un SOBRE. ¿Llegó?</label>
+        <select id="m-sobre">
+          <option value="">— Seleccionar —</option>
+          <option value="1">SÍ, el sobre llegó</option>
+          <option value="0">NO, el sobre NO llegó</option>
+        </select></div>`:""}
     </div>
     <div id="m-merc-prod">
       <div class="muted" style="margin-bottom:10px"><b>Digita la cantidad que llegó</b> de cada producto. Pon <b>0</b> si no llegó.</div>
@@ -901,6 +1053,12 @@ async function guardarMerc(id){
   }
   // Guía correcta → revisar cantidades
   for(let x=0;x<t.items.length;x++){if(!$("m-q-"+x)||$("m-q-"+x).value===""){toast("Digita la cantidad llegada en todos los productos.");return;}}
+  // Confirmación del sobre (si el ticket lo declaró)
+  if(t.sobre){
+    const sobreLlego=$("m-sobre")?$("m-sobre").value:"";
+    if(sobreLlego===""){ toast("Indica si el sobre llegó."); return; }
+    t.sobreLlego=(sobreLlego==="1");
+  }
   t.guiaValidada={por:me.name,f:ahora};
   t.items.forEach((i,x)=>{const q=Math.max(0,Math.min(i.cantidad,+($("m-q-"+x).value||0)));i.merc={cantLlegada:q,com:$("m-co-"+x).value,por:me.name,f:ahora};});
   t.fechas=t.fechas||{};t.fechas.mercaderia=ahora;
@@ -1265,15 +1423,18 @@ function renderAdmin(){
   $("main").innerHTML=`
     <h2 style="font-size:28px;color:var(--navy);margin-bottom:16px">Panel administrativo</h2>
     <div class="card" style="border-left:5px solid var(--amber)">
-      <h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">Base de facturas (Google Sheets)</h3>
+      <h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">Base de facturas</h3>
       <div class="muted" style="margin-bottom:10px">
-        ${baseLoaded?`✓ Base en memoria: <b>${base.length.toLocaleString("es-EC")}</b> líneas · <b>${[...new Set(base.map(r=>r.factura))].length.toLocaleString("es-EC")}</b> facturas`:"Base no cargada"}<br>
-        Si editaste el Excel (agregaste o <b>borraste</b> facturas), presiona <b>"Recargar base"</b> para traer la versión más reciente. La recarga ignora la caché y descarga todo de nuevo.
+        ${baseLoaded?`✓ Base cargada: <b>${base.length.toLocaleString("es-EC")}</b> líneas · <b>${[...new Set(base.map(r=>r.factura))].length.toLocaleString("es-EC")}</b> facturas<br><span style="font-size:11px">${esc(baseFechaStr||"")}</span>`:"Base no cargada"}
       </div>
-      <button class="btn btn-p" onclick="forzarRecargaAdmin()">🔄 Recargar base desde Google Sheets</button>
+      <div class="muted" style="margin-bottom:12px;background:#E2F3EA;padding:10px 12px;border-radius:6px">
+        <b>💡 Cómo funciona:</b> cuando actualices el Excel (agregar o borrar facturas), presiona <b>"Actualizar base a Firebase"</b>. El sistema descarga de Google Sheets y la guarda en Firebase. Desde ahí, <b>todos los usuarios entran rapidísimo</b> porque leen la base directo de Firebase, sin esperar a Google.
+      </div>
+      <button class="btn btn-a" onclick="actualizarBaseFirebase()">📤 Actualizar base a Firebase</button>
+      <button class="btn btn-g" onclick="forzarRecargaAdmin()">🔄 Recargar (solo en mi pantalla)</button>
       <div id="adm-prog" style="margin-top:10px"></div>
       <div class="muted" style="margin-top:10px;background:#FFF4D6;padding:8px 10px;border-radius:6px">
-        ⏱ Nota: Google publica los cambios del Excel con unos minutos de retraso (puede tardar hasta ~5 min en reflejar lo que borraste). Si recargaste y aún ves facturas viejas, espera unos minutos y vuelve a recargar.
+        ⏱ Google publica los cambios del Excel con unos minutos de retraso (hasta ~5 min). Si actualizaste el Excel hace poco y no ves los cambios, espera unos minutos antes de presionar "Actualizar base a Firebase".
       </div>
     </div>
     <div class="card" style="border-left:5px solid var(--ok)">
@@ -1311,13 +1472,35 @@ async function forzarRecargaAdmin(){
   const prog=$("adm-prog");
   if(prog) prog.innerHTML=`<div class="muted">Descargando…</div><div class="prog-bar"><div class="prog-fill" id="adm-fill" style="width:0%"></div></div>`;
   try{
-    await cargarBaseDesdeSheets(true,(msg,pct)=>{
+    await cargarBase(true,(msg,pct)=>{
       const el=$("adm-prog");if(!el)return;
       el.innerHTML=`<div class="muted">${esc(msg)}</div><div class="prog-bar"><div class="prog-fill" style="width:${pct}%"></div></div>`;
     });
     toast("✓ Base recargada: "+base.length.toLocaleString("es-EC")+" líneas");
     render();
   }catch(e){ toast("Error: "+e.message,6000); const el=$("adm-prog"); if(el) el.innerHTML=`<div class="muted" style="color:var(--bad)">${esc(e.message)}</div>`; }
+}
+/* Descarga de Google Sheets + sube a Firebase (lo usan todos después) */
+async function actualizarBaseFirebase(){
+  if(!fbReady){ toast("Sin conexión a Firebase. No se puede actualizar."); return; }
+  const prog=$("adm-prog");
+  const setP=(msg,pct)=>{ const el=$("adm-prog"); if(el) el.innerHTML=`<div class="muted">${esc(msg)}</div><div class="prog-bar"><div class="prog-fill" style="width:${pct}%"></div></div>`; };
+  setP("Descargando facturas desde Google Sheets…",5);
+  try{
+    // 1) Descargar fresco de Sheets (forzando, ignora Firebase)
+    await cargarBaseDesdeSheets(true,(msg,pct)=>setP(msg,Math.min(60,pct)));
+    if(!base.length) throw new Error("No se descargaron facturas.");
+    // 2) Subir a Firebase comprimida
+    const meta=await subirBaseAFirebase(base,(msg,pct)=>setP(msg,pct));
+    baseFechaStr="Firebase · "+new Date(meta.ts).toLocaleString("es-EC");
+    setP("✓ Base actualizada en Firebase: "+meta.rows.toLocaleString("es-EC")+" líneas",100);
+    toast("✓ Base subida a Firebase. Ahora todos los usuarios cargarán rápido.");
+    render();
+  }catch(e){
+    console.error(e);
+    toast("Error: "+e.message,6000);
+    const el=$("adm-prog"); if(el) el.innerHTML=`<div class="muted" style="color:var(--bad)">${esc(e.message)}</div>`;
+  }
 }
 function abrirEliminar(id){
   const t=findT(id);
@@ -1354,7 +1537,7 @@ function reporteConsolidado(){
   }
   if(tks.length===0){toast("No hay tickets en ese rango de fechas.");return;}
   const rows=tks.map(t=>({
-    "N° TICKET":t.numero,"GUIA":t.guiaNumero||"","SOBRE":t.sobre?"SÍ":"NO",
+    "N° TICKET":t.numero,"GUIA":t.guiaNumero||"","SOBRE":t.sobre?"SÍ":"NO","SOBRE LLEGÓ":t.sobre?(t.sobreLlego===true?"SÍ":t.sobreLlego===false?"NO":"PENDIENTE"):"",
     "FECHA CREACION":fdatetime(t.fechaTicket),"FACTURA":t.factura,"FACTURADOR":t.facturador||"",
     "EMISION":fdate(t.emision),"RAZON SOCIAL":t.razonSocial,"RUC":t.ruc||"","VENDEDOR":t.vendedor,"MOTIVO":t.motivo,
     "FECHA MERCADERIA":t.fechas?.mercaderia?fdatetime(t.fechas.mercaderia):"",
