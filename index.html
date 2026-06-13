@@ -100,12 +100,7 @@ td{padding:8px;border-bottom:1px solid var(--line);vertical-align:top}
 <div id="login-view">
   <div class="login-card">
     <div style="text-align:center;margin-bottom:8px">
-      <svg width="80" height="80" viewBox="0 0 100 100">
-        <rect x="6" y="6" width="88" height="88" rx="14" fill="#232021"/>
-        <path d="M28 20 h14 v40 h22 v16 H28 Z" fill="#fff"/>
-        <path d="M52 18 h30 v6 l-14 44 h-2 L52 24 Z" fill="#D61F26"/>
-        <path d="M60 30 h16 v30 h14 v16 H60 Z" fill="#fff" opacity="0.9"/>
-      </svg>
+      <svg width="80" height="80" viewBox="0 0 100 100"><rect x="6" y="6" width="88" height="88" rx="14" fill="#232021"></rect><path d="M28 20 h14 v40 h22 v16 H28 Z" fill="#fff"></path><path d="M52 18 h30 v6 l-14 44 h-2 L52 24 Z" fill="#D61F26"></path></svg>
     </div>
     <h1 style="text-align:center">LUBA<span style="color:var(--rojo)">MAQUI</span></h1>
     <div class="sub" style="text-align:center">Devoluciones · Garantías · Notas de crédito</div>
@@ -118,14 +113,9 @@ td{padding:8px;border-bottom:1px solid var(--line);vertical-align:top}
 
 <div id="app-view" style="display:none">
   <div class="topbar">
-    <div style="display:flex;align-items:center;gap:10px">
-      <svg width="34" height="34" viewBox="0 0 100 100" style="flex-shrink:0">
-        <rect x="6" y="6" width="88" height="88" rx="14" fill="#fff"/>
-        <path d="M28 20 h14 v40 h22 v16 H28 Z" fill="#232021"/>
-        <path d="M52 18 h30 v6 l-14 44 h-2 L52 24 Z" fill="#D61F26"/>
-        <path d="M60 30 h16 v30 h14 v16 H60 Z" fill="#232021" opacity="0.85"/>
-      </svg>
-      <div class="logo">LUBA<span>MAQUI</span></div>
+    <div class="logo" style="display:flex;align-items:center;gap:8px">
+      <svg width="30" height="30" viewBox="0 0 100 100" style="flex-shrink:0"><rect x="6" y="6" width="88" height="88" rx="14" fill="#fff"></rect><path d="M28 20 h14 v40 h22 v16 H28 Z" fill="#232021"></path><path d="M52 18 h30 v6 l-14 44 h-2 L52 24 Z" fill="#D61F26"></path></svg>
+      <span>LUBA<span style="color:var(--amber)">MAQUI</span></span>
     </div>
     <div class="role-chip" id="chip-role"></div>
     <div style="flex:1"></div>
@@ -293,8 +283,8 @@ async function leerPdfNCfb(ticketId){
 }
 
 /* ============================================================ BASE DE FACTURAS EN FIREBASE ============================================================ */
-/* Guardamos la base comprimida por diccionario: los textos repetidos (cliente, descripción,
-   factura, facturador, etc.) se guardan UNA sola vez. Reduce el tamaño ~70%. */
+/* Compresion por diccionario: los textos repetidos (cliente, descripcion, factura,
+   facturador, etc.) se guardan una sola vez. Reduce el tamano ~70%. */
 function comprimirBase(rows){
   const pool=[], map=new Map();
   const idx=s=>{ s=String(s??""); if(map.has(s))return map.get(s); const i=pool.length; pool.push(s); map.set(s,i); return i; };
@@ -1650,9 +1640,9 @@ async function confirmarEliminar(id){
   await saveState();$("modal-root").innerHTML="";toast("✓ Ticket "+t.numero+" eliminado.");render();
 }
 /* ============================================================ INDICADORES DE DEVOLUCIONES ============================================================ */
-const SUCURSALES={"004":"Sucursal 004 (El Rey)","002":"Sucursal 002 (Bodega)","003":"Sucursal 003 (6 Diciembre)","007":"Sucursal 007","006":"Sucursal 006 (Tumbaco / La Prensa)"};
-const UMBRAL_MAYORISTA=500; // un cliente con devoluciones/compras sobre este monto se considera mayorista
-let chartRefs=[];
+var SUCURSALES={"004":"Sucursal 004 (El Rey)","002":"Sucursal 002 (Bodega)","003":"Sucursal 003 (6 Diciembre)","007":"Sucursal 007","006":"Sucursal 006 (Tumbaco / La Prensa)"};
+var UMBRAL_MAYORISTA=500;
+var chartRefs=[];
 function nombreSucursal(cod){ return SUCURSALES[cod]||("Sucursal "+(cod||"?")); }
 function cerrarIndicadores(){ chartRefs.forEach(function(c){try{c.destroy();}catch(e){}}); chartRefs=[]; $('modal-root').innerHTML=''; }
 /* Devuelve los tickets que representan una devolución/garantía REAL en el rango.
@@ -1672,57 +1662,49 @@ function montoVendidoBase(){
   return base.reduce((s,r)=>s+(r.total||0),0);
 }
 function verIndicadores(){
-  const desde=$("ind-desde")?$("ind-desde").value:"";
-  const hasta=$("ind-hasta")?$("ind-hasta").value:"";
-  const tks=ticketsDevolucionEnRango(desde,hasta);
-  // limpiar charts previos
-  chartRefs.forEach(c=>{try{c.destroy();}catch(e){}}); chartRefs=[];
+  var desde=$("ind-desde")?$("ind-desde").value:"";
+  var hasta=$("ind-hasta")?$("ind-hasta").value:"";
+  var tks=ticketsDevolucionEnRango(desde,hasta);
+  chartRefs.forEach(function(c){try{c.destroy();}catch(e){}}); chartRefs=[];
 
-  // ---- Cálculos ----
-  let totalDev=0, totalProdDev=0;
-  const porCliente={}, porProducto={}, porVendedor={}, porSucursal={}, porMotivo={}, porDia={};
-  tks.forEach(t=>{
-    const its=itemsAceptados(t);
-    const montoT=its.reduce((s,i)=>s+i.total,0);
-    const cantT=its.reduce((s,i)=>s+(i.cantNC||0),0);
+  var totalDev=0, totalProdDev=0;
+  var porCliente={}, porProducto={}, porVendedor={}, porSucursal={}, porMotivo={}, porDia={};
+  tks.forEach(function(t){
+    var its=itemsAceptados(t);
+    var montoT=its.reduce(function(s,i){return s+i.total;},0);
+    var cantT=its.reduce(function(s,i){return s+(i.cantNC||0);},0);
     totalDev+=montoT; totalProdDev+=cantT;
-    // cliente
-    const ck=t.razonSocial||"?";
+    var ck=t.razonSocial||"?";
     if(!porCliente[ck]) porCliente[ck]={monto:0,cant:0,ruc:t.ruc||""};
     porCliente[ck].monto+=montoT; porCliente[ck].cant+=cantT;
-    // producto
-    its.forEach(i=>{
-      const pk=i.codigo;
+    its.forEach(function(i){
+      var pk=i.codigo;
       if(!porProducto[pk]) porProducto[pk]={monto:0,cant:0,desc:i.desc,marca:i.sub};
       porProducto[pk].monto+=i.total; porProducto[pk].cant+=(i.cantNC||0);
     });
-    // vendedor
-    const vk=t.vendedor||"?";
+    var vk=t.vendedor||"?";
     if(!porVendedor[vk]) porVendedor[vk]={monto:0,cant:0};
     porVendedor[vk].monto+=montoT; porVendedor[vk].cant+=cantT;
-    // sucursal
-    const sk=t.sucursal||String(t.factura||"").replace(/[^0-9]/g,"").slice(0,3)||"000";
+    var sk=t.sucursal||String(t.factura||"").replace(/[^0-9]/g,"").slice(0,3)||"000";
     if(!porSucursal[sk]) porSucursal[sk]={monto:0,cant:0};
     porSucursal[sk].monto+=montoT; porSucursal[sk].cant+=cantT;
-    // motivo
-    const mk=t.motivo||"?";
-    if(!porMotivo[mk]) porMotivo[mk]={monto:0,cant:0};
-    porMotivo[mk].monto+=montoT; porMotivo[mk].cant+=cantT;
-    // por día
-    const dk=hoyStr(t.fechaTicket);
+    var mk2=t.motivo||"?";
+    if(!porMotivo[mk2]) porMotivo[mk2]={monto:0,cant:0};
+    porMotivo[mk2].monto+=montoT; porMotivo[mk2].cant+=cantT;
+    var dk=hoyStr(t.fechaTicket);
     if(!porDia[dk]) porDia[dk]=0;
     porDia[dk]+=montoT;
   });
-  const ventaBruta=montoVendidoBase();
-  const tasaGlobal=ventaBruta>0?(totalDev/ventaBruta*100):0;
-  const ventaNeta=ventaBruta-totalDev;
+  var ventaBruta=montoVendidoBase();
+  var tasaGlobal=ventaBruta>0?(totalDev/ventaBruta*100):0;
+  var ventaNeta=ventaBruta-totalDev;
 
-  const topClientes=Object.entries(porCliente).sort((a,b)=>b[1].monto-a[1].monto).slice(0,10);
-  const topProductos=Object.entries(porProducto).sort((a,b)=>b[1].monto-a[1].monto).slice(0,10);
-  const vendedores=Object.entries(porVendedor).sort((a,b)=>b[1].monto-a[1].monto);
-  const sucursales=Object.entries(porSucursal).sort((a,b)=>b[1].monto-a[1].monto);
-  const motivos=Object.entries(porMotivo).sort((a,b)=>b[1].monto-a[1].monto);
-  const dias=Object.entries(porDia).sort((a,b)=>a[0].localeCompare(b[0]));
+  var topClientes=Object.entries(porCliente).sort(function(a,b){return b[1].monto-a[1].monto;}).slice(0,10);
+  var topProductos=Object.entries(porProducto).sort(function(a,b){return b[1].monto-a[1].monto;}).slice(0,10);
+  var vendedores=Object.entries(porVendedor).sort(function(a,b){return b[1].monto-a[1].monto;});
+  var sucursales=Object.entries(porSucursal).sort(function(a,b){return b[1].monto-a[1].monto;});
+  var motivos=Object.entries(porMotivo).sort(function(a,b){return b[1].monto-a[1].monto;});
+  var dias=Object.entries(porDia).sort(function(a,b){return a[0].localeCompare(b[0]);});
 
   var rango=(desde||hasta)?((desde||"inicio")+" a "+(hasta||"hoy")):"todo el histórico";
 
@@ -1782,9 +1764,9 @@ function dibujarCharts(d){
   mk("ch-dia",{type:"line",data:{labels:d.dias.map(function(x){return x[0].slice(5);}),datasets:[{label:"Devuelto $",data:d.dias.map(function(x){return +x[1].toFixed(2);}),borderColor:"#D61F26",backgroundColor:"rgba(214,31,38,.12)",fill:true,tension:.25}]},options:{plugins:{legend:{display:false}},scales:{y:{beginAtZero:true}}}});
   mk("ch-suc",{type:"pie",data:{labels:d.sucursales.map(function(x){return nombreSucursal(x[0]);}),datasets:[{data:d.sucursales.map(function(x){return +x[1].monto.toFixed(2);}),backgroundColor:COL}]},options:{plugins:{legend:{position:"bottom",labels:{boxWidth:12,font:{size:10}}}}}});
   mk("ch-prod",{type:"bar",data:{labels:d.topProductos.map(function(x){return x[0];}),datasets:[{label:"Monto $",data:d.topProductos.map(function(x){return +x[1].monto.toFixed(2);}),backgroundColor:"#D61F26"}]},options:{indexAxis:"y",plugins:{legend:{display:false}}}});
-  mk("ch-cli",{type:"bar",data:{labels:d.topClientes.map(function(x){return x[0].length>22?x[0].slice(0,22)+"…":x[0];}),datasets:[{label:"Monto $",data:d.topClientes.map(function(x){return +x[1].monto.toFixed(2);}),backgroundColor:"#0E2A47"}]},options:{indexAxis:"y",plugins:{legend:{display:false}}}});
+  mk("ch-cli",{type:"bar",data:{labels:d.topClientes.map(function(x){return x[0].length>22?x[0].slice(0,22)+"...":x[0];}),datasets:[{label:"Monto $",data:d.topClientes.map(function(x){return +x[1].monto.toFixed(2);}),backgroundColor:"#0E2A47"}]},options:{indexAxis:"y",plugins:{legend:{display:false}}}});
   mk("ch-vend",{type:"pie",data:{labels:d.vendedores.map(function(x){return x[0];}),datasets:[{data:d.vendedores.map(function(x){return +x[1].monto.toFixed(2);}),backgroundColor:COL}]},options:{plugins:{legend:{position:"bottom",labels:{boxWidth:12,font:{size:9}}}}}});
-  mk("ch-mot",{type:"bar",data:{labels:d.motivos.map(function(x){return x[0].length>20?x[0].slice(0,20)+"…":x[0];}),datasets:[{label:"Monto $",data:d.motivos.map(function(x){return +x[1].monto.toFixed(2);}),backgroundColor:"#232021"}]},options:{indexAxis:"y",plugins:{legend:{display:false}}}});
+  mk("ch-mot",{type:"bar",data:{labels:d.motivos.map(function(x){return x[0].length>20?x[0].slice(0,20)+"...":x[0];}),datasets:[{label:"Monto $",data:d.motivos.map(function(x){return +x[1].monto.toFixed(2);}),backgroundColor:"#232021"}]},options:{indexAxis:"y",plugins:{legend:{display:false}}}});
 }
 function excelIndicadores(desde,hasta){
   const tks=ticketsDevolucionEnRango(desde,hasta);
