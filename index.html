@@ -1724,64 +1724,53 @@ function verIndicadores(){
   const motivos=Object.entries(porMotivo).sort((a,b)=>b[1].monto-a[1].monto);
   const dias=Object.entries(porDia).sort((a,b)=>a[0].localeCompare(b[0]));
 
-  const rango=(desde||hasta)?`${desde||"inicio"} a ${hasta||"hoy"}`:"todo el histórico";
+  var rango=(desde||hasta)?((desde||"inicio")+" a "+(hasta||"hoy")):"todo el histórico";
 
-  $("modal-root").innerHTML=`<div class="modal-bg"><div class="modal" style="max-width:1100px">
-    <div style="display:flex;align-items:center;gap:12px;margin-bottom:6px;flex-wrap:wrap">
-      <h2 style="font-size:24px;color:var(--navy);flex:1">📊 Indicadores de devoluciones y garantías</h2>
-      <button class="btn btn-ok btn-sm" onclick="excelIndicadores('${desde}','${hasta}')">⬇ Descargar Excel</button>
-      <button class="btn btn-g btn-sm" onclick="cerrarIndicadores()">Cerrar</button>
-    </div>
-    <div class="muted" style="margin-bottom:16px">Periodo: <b>${esc(rango)}</b> · ${tks.length} ticket(s) de devolución/garantía</div>
-
-    <div class="grid3" style="margin-bottom:8px">
-      <div class="card" style="margin-bottom:0;text-align:center"><div class="disp" style="font-size:30px;color:var(--rojo)">${tasaGlobal.toFixed(2)}%</div><div class="muted">Tasa de devolución global</div></div>
-      <div class="card" style="margin-bottom:0;text-align:center"><div class="disp" style="font-size:26px;color:var(--bad)">${money(totalDev)}</div><div class="muted">Total devuelto</div></div>
-      <div class="card" style="margin-bottom:0;text-align:center"><div class="disp" style="font-size:26px;color:var(--ok)">${money(ventaNeta)}</div><div class="muted">Venta neta real</div></div>
-    </div>
-    <div class="card" style="background:#F0F3F7">
-      <div class="kv" style="grid-template-columns:200px 1fr">
-        <b>Venta bruta (base)</b><span>${money(ventaBruta)}</span>
-        <b>Total devoluciones</b><span style="color:var(--bad)">- ${money(totalDev)}</span>
-        <b>Venta neta real</b><span style="color:var(--ok);font-weight:700">${money(ventaNeta)}</span>
-        <b>Productos devueltos</b><span>${totalProdDev.toLocaleString("es-EC")} unidades</span>
-      </div>
-    </div>
-
-    <div class="grid2">
-      <div class="card"><div class="sec-title">Evolución diaria de devoluciones</div><canvas id="ch-dia" height="160"></canvas></div>
-      <div class="card"><div class="sec-title">Distribución por sucursal</div><canvas id="ch-suc" height="160"></canvas></div>
-    </div>
-    <div class="grid2">
-      <div class="card"><div class="sec-title">Top productos devueltos</div><canvas id="ch-prod" height="200"></canvas></div>
-      <div class="card"><div class="sec-title">Top clientes</div><canvas id="ch-cli" height="200"></canvas></div>
-    </div>
-    <div class="grid2">
-      <div class="card"><div class="sec-title">Devoluciones por vendedor</div><canvas id="ch-vend" height="200"></canvas></div>
-      <div class="card"><div class="sec-title">Por motivo de devolución</div><canvas id="ch-mot" height="200"></canvas></div>
-    </div>
-
-    <div class="card"><div class="sec-title">Ranking de productos más devueltos</div>
-      <div style="overflow-x:auto"><table><thead><tr><th>#</th><th>Código</th><th>Descripción</th><th>Marca/Subgrupo</th><th class="num">Cant.</th><th class="num">Monto</th></tr></thead><tbody>
-      ${topProductos.map((p,i)=>`<tr><td>${i+1}</td><td><b>${esc(p[0])}</b></td><td style="max-width:280px;font-size:12px">${esc(p[1].desc)}</td><td>${esc(p[1].marca)}</td><td class="num">${p[1].cant}</td><td class="num">${money(p[1].monto)}</td></tr>`).join("")||'<tr><td colspan="6" class="muted">Sin datos</td></tr>'}
-      </tbody></table></div>
-    </div>
-    <div class="card"><div class="sec-title">Devoluciones por cliente (mayorista alto monto)</div>
-      <div style="overflow-x:auto"><table><thead><tr><th>#</th><th>Cliente</th><th>Tipo</th><th class="num">Productos</th><th class="num">Monto</th></tr></thead><tbody>
-      ${topClientes.map((c,i)=>`<tr><td>${i+1}</td><td>${esc(c[0])}</td><td>${c[1].monto>=UMBRAL_MAYORISTA?'<span class="tag tag-dev">Mayorista</span>':'<span class="tag tag-fin">Minorista</span>'}</td><td class="num">${c[1].cant}</td><td class="num">${money(c[1].monto)}</td></tr>`).join("")||'<tr><td colspan="5" class="muted">Sin datos</td></tr>'}
-      </tbody></table></div>
-    </div>
-    <div class="card"><div class="sec-title">Devoluciones por vendedor</div>
-      <div style="overflow-x:auto"><table><thead><tr><th>Vendedor</th><th class="num">Productos</th><th class="num">Monto devuelto</th><th class="num">% del total</th></tr></thead><tbody>
-      ${vendedores.map(function(v){return '<tr><td>'+esc(v[0])+'</td><td class="num">'+v[1].cant+'</td><td class="num">'+money(v[1].monto)+'</td><td class="num">'+(totalDev>0?(v[1].monto/totalDev*100).toFixed(1):0)+'%</td></tr>';}).join("")||'<tr><td colspan="4" class="muted">Sin datos</td></tr>'}
-      </tbody></table></div>
-    </div>
-    <div class="card"><div class="sec-title">Devoluciones por sucursal</div>
-      <div style="overflow-x:auto"><table><thead><tr><th>Sucursal</th><th class="num">Productos</th><th class="num">Monto</th><th class="num">% del total</th></tr></thead><tbody>
-      ${sucursales.map(function(s){return '<tr><td>'+esc(nombreSucursal(s[0]))+'</td><td class="num">'+s[1].cant+'</td><td class="num">'+money(s[1].monto)+'</td><td class="num">'+(totalDev>0?(s[1].monto/totalDev*100).toFixed(1):0)+'%</td></tr>';}).join("")||'<tr><td colspan="4" class="muted">Sin datos</td></tr>'}
-      </tbody></table></div>
-    </div>
-  </div></div>`;
+  var html=''+
+    '<div class="modal-bg"><div class="modal" style="max-width:1100px">'+
+    '<div style="display:flex;align-items:center;gap:12px;margin-bottom:6px;flex-wrap:wrap">'+
+    '<h2 style="font-size:24px;color:var(--navy);flex:1">Indicadores de devoluciones y garantías</h2>'+
+    '<button class="btn btn-ok btn-sm" onclick="excelIndicadores(\''+desde+'\',\''+hasta+'\')">Descargar Excel</button>'+
+    '<button class="btn btn-g btn-sm" onclick="cerrarIndicadores()">Cerrar</button>'+
+    '</div>'+
+    '<div class="muted" style="margin-bottom:16px">Periodo: <b>'+esc(rango)+'</b> · '+tks.length+' ticket(s) de devolución/garantía</div>'+
+    '<div class="grid3" style="margin-bottom:8px">'+
+    '<div class="card" style="margin-bottom:0;text-align:center"><div class="disp" style="font-size:30px;color:var(--rojo)">'+tasaGlobal.toFixed(2)+'%</div><div class="muted">Tasa de devolución global</div></div>'+
+    '<div class="card" style="margin-bottom:0;text-align:center"><div class="disp" style="font-size:26px;color:var(--bad)">'+money(totalDev)+'</div><div class="muted">Total devuelto</div></div>'+
+    '<div class="card" style="margin-bottom:0;text-align:center"><div class="disp" style="font-size:26px;color:var(--ok)">'+money(ventaNeta)+'</div><div class="muted">Venta neta real</div></div>'+
+    '</div>'+
+    '<div class="card" style="background:#F0F3F7"><div class="kv" style="grid-template-columns:200px 1fr">'+
+    '<b>Venta bruta (base)</b><span>'+money(ventaBruta)+'</span>'+
+    '<b>Total devoluciones</b><span style="color:var(--bad)">- '+money(totalDev)+'</span>'+
+    '<b>Venta neta real</b><span style="color:var(--ok);font-weight:700">'+money(ventaNeta)+'</span>'+
+    '<b>Productos devueltos</b><span>'+totalProdDev.toLocaleString("es-EC")+' unidades</span>'+
+    '</div></div>'+
+    '<div class="grid2">'+
+    '<div class="card"><div class="sec-title">Evolución diaria de devoluciones</div><canvas id="ch-dia" height="160"></canvas></div>'+
+    '<div class="card"><div class="sec-title">Distribución por sucursal</div><canvas id="ch-suc" height="160"></canvas></div>'+
+    '</div>'+
+    '<div class="grid2">'+
+    '<div class="card"><div class="sec-title">Top productos devueltos</div><canvas id="ch-prod" height="200"></canvas></div>'+
+    '<div class="card"><div class="sec-title">Top clientes</div><canvas id="ch-cli" height="200"></canvas></div>'+
+    '</div>'+
+    '<div class="grid2">'+
+    '<div class="card"><div class="sec-title">Devoluciones por vendedor</div><canvas id="ch-vend" height="200"></canvas></div>'+
+    '<div class="card"><div class="sec-title">Por motivo de devolución</div><canvas id="ch-mot" height="200"></canvas></div>'+
+    '</div>'+
+    '<div class="card"><div class="sec-title">Ranking de productos más devueltos</div><div style="overflow-x:auto"><table><thead><tr><th>#</th><th>Código</th><th>Descripción</th><th>Marca/Subgrupo</th><th class="num">Cant.</th><th class="num">Monto</th></tr></thead><tbody>'+
+    (topProductos.map(function(p,i){return '<tr><td>'+(i+1)+'</td><td><b>'+esc(p[0])+'</b></td><td style="max-width:280px;font-size:12px">'+esc(p[1].desc)+'</td><td>'+esc(p[1].marca)+'</td><td class="num">'+p[1].cant+'</td><td class="num">'+money(p[1].monto)+'</td></tr>';}).join("")||'<tr><td colspan="6" class="muted">Sin datos</td></tr>')+
+    '</tbody></table></div></div>'+
+    '<div class="card"><div class="sec-title">Devoluciones por cliente (mayorista = mayor monto)</div><div style="overflow-x:auto"><table><thead><tr><th>#</th><th>Cliente</th><th>Tipo</th><th class="num">Productos</th><th class="num">Monto</th></tr></thead><tbody>'+
+    (topClientes.map(function(c,i){return '<tr><td>'+(i+1)+'</td><td>'+esc(c[0])+'</td><td>'+(c[1].monto>=UMBRAL_MAYORISTA?'<span class="tag tag-dev">Mayorista</span>':'<span class="tag tag-fin">Minorista</span>')+'</td><td class="num">'+c[1].cant+'</td><td class="num">'+money(c[1].monto)+'</td></tr>';}).join("")||'<tr><td colspan="5" class="muted">Sin datos</td></tr>')+
+    '</tbody></table></div></div>'+
+    '<div class="card"><div class="sec-title">Devoluciones por vendedor</div><div style="overflow-x:auto"><table><thead><tr><th>Vendedor</th><th class="num">Productos</th><th class="num">Monto devuelto</th><th class="num">% del total</th></tr></thead><tbody>'+
+    (vendedores.map(function(v){return '<tr><td>'+esc(v[0])+'</td><td class="num">'+v[1].cant+'</td><td class="num">'+money(v[1].monto)+'</td><td class="num">'+(totalDev>0?(v[1].monto/totalDev*100).toFixed(1):0)+'%</td></tr>';}).join("")||'<tr><td colspan="4" class="muted">Sin datos</td></tr>')+
+    '</tbody></table></div></div>'+
+    '<div class="card"><div class="sec-title">Devoluciones por sucursal</div><div style="overflow-x:auto"><table><thead><tr><th>Sucursal</th><th class="num">Productos</th><th class="num">Monto</th><th class="num">% del total</th></tr></thead><tbody>'+
+    (sucursales.map(function(s){return '<tr><td>'+esc(nombreSucursal(s[0]))+'</td><td class="num">'+s[1].cant+'</td><td class="num">'+money(s[1].monto)+'</td><td class="num">'+(totalDev>0?(s[1].monto/totalDev*100).toFixed(1):0)+'%</td></tr>';}).join("")||'<tr><td colspan="4" class="muted">Sin datos</td></tr>')+
+    '</tbody></table></div></div>'+
+    '</div></div>';
+  $("modal-root").innerHTML=html;
 
   // ---- Dibujar gráficos ----
   setTimeout(function(){ dibujarCharts({dias:dias,sucursales:sucursales,topProductos:topProductos,topClientes:topClientes,vendedores:vendedores,motivos:motivos}); },100);
