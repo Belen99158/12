@@ -138,11 +138,39 @@ td{padding:8px;border-bottom:1px solid var(--line);vertical-align:top}
       <option value="25">WILLIAM ACHACHI — Administrativo</option>
       <option value="26">TANNIA BASSANTES — Administrativo</option>
     </select></div>
-    <div class="field"><label>Contraseña</label><input id="login-pass" type="password" placeholder="••••" onkeydown="if(event.key==='Enter')doLogin()"></div>
+    <div class="field"><label>Contraseña</label><input id="login-pass" type="password" placeholder="••••"></div>
     <div id="login-err" style="color:var(--bad);font-size:13px;margin-bottom:10px;display:none">Contraseña incorrecta.</div>
-    <button class="btn btn-a" style="width:100%;justify-content:center;font-size:15px;padding:12px" onclick="doLogin()">Entrar</button>
+    <button id="btn-entrar" class="btn btn-a" style="width:100%;justify-content:center;font-size:15px;padding:12px">Entrar</button>
+    <div id="login-js-err" style="color:#B3261E;font-size:12px;margin-top:10px;display:none;background:#FBE9E7;padding:8px;border-radius:6px"></div>
   </div>
 </div>
+
+<script>
+(function(){
+  function tryLogin(){
+    try{
+      if(typeof doLogin === "function"){
+        doLogin();
+      } else {
+        var el = document.getElementById("login-js-err");
+        el.style.display="block";
+        el.textContent="Error: el sistema no cargo correctamente. Revisa tu conexion a internet y recarga la pagina (F5).";
+      }
+    }catch(e){
+      var el = document.getElementById("login-js-err");
+      el.style.display="block";
+      el.textContent="Error al iniciar sesion: "+e.message;
+      console.error(e);
+    }
+  }
+  document.addEventListener("DOMContentLoaded", function(){
+    var btn = document.getElementById("btn-entrar");
+    var pass = document.getElementById("login-pass");
+    if(btn) btn.addEventListener("click", tryLogin);
+    if(pass) pass.addEventListener("keydown", function(e){ if(e.key==="Enter") tryLogin(); });
+  });
+})();
+<\/script>
 
 <div id="app-view" style="display:none">
   <div class="topbar">
