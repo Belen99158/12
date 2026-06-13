@@ -13,7 +13,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-:root{--navy:#0E2A47;--navy2:#143A60;--amber:#D61F26;--amber-d:#A3171C;--bg:#EDF0F3;--card:#FFFFFF;--ink:#1B2430;--mut:#5B6877;--line:#D7DDE4;--ok:#1E7F4F;--ok-bg:#E2F3EA;--bad:#B3261E;--bad-bg:#FBE9E7;--warn-bg:#FFF4D6;--negro:#232021;--rojo:#D61F26}
+:root{--navy:#0E2A47;--navy2:#143A60;--amber:#D61F26;--amber-d:#A3161B;--bg:#EDF0F3;--card:#FFFFFF;--ink:#1B2430;--mut:#5B6877;--line:#D7DDE4;--ok:#1E7F4F;--ok-bg:#E2F3EA;--bad:#B3261E;--bad-bg:#FBE9E7;--warn-bg:#FFF4D6;--rojo:#D61F26;--negro:#1A1A1A}
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--ink);font-size:14px}
 h1,h2,h3,.disp{font-family:'Barlow Condensed',sans-serif;letter-spacing:.02em}
@@ -61,8 +61,8 @@ td{padding:8px;border-bottom:1px solid var(--line);vertical-align:top}
 .kv b{color:var(--mut);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.05em;padding-top:2px}
 .empty{text-align:center;padding:50px 20px;color:var(--mut)}
 .empty .big{font-family:'Barlow Condensed';font-size:26px;color:var(--ink);margin-bottom:6px}
-#login-view{min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(160deg,#232021 0%,#0E2A47 60%,#081B30 100%);padding:20px}
-.login-card{background:#fff;border-radius:14px;padding:38px 34px;width:400px;border-top:6px solid var(--rojo)}
+#login-view{min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(160deg,var(--navy) 0%,#081B30 70%);padding:20px}
+.login-card{background:#fff;border-radius:14px;padding:38px 34px;width:400px;border-top:6px solid var(--amber)}
 .login-card h1{font-size:34px;color:var(--navy)}
 .login-card .sub{color:var(--mut);margin:4px 0 24px;font-size:13px;text-transform:uppercase;letter-spacing:.12em;font-weight:600}
 .thumb{width:90px;height:90px;object-fit:cover;border:1px solid var(--line);border-radius:6px}
@@ -99,11 +99,9 @@ td{padding:8px;border-bottom:1px solid var(--line);vertical-align:top}
 
 <div id="login-view">
   <div class="login-card">
-    <div style="text-align:center;margin-bottom:8px">
-      <svg width="80" height="80" viewBox="0 0 100 100"><rect x="6" y="6" width="88" height="88" rx="14" fill="#232021"></rect><path d="M28 20 h14 v40 h22 v16 H28 Z" fill="#fff"></path><path d="M52 18 h30 v6 l-14 44 h-2 L52 24 Z" fill="#D61F26"></path></svg>
-    </div>
-    <h1 style="text-align:center">LUBA<span style="color:var(--rojo)">MAQUI</span></h1>
-    <div class="sub" style="text-align:center">Devoluciones · Garantías · Notas de crédito</div>
+    <img src="logo.png" alt="LUBAMAQUI" style="width:180px;display:block;margin:0 auto 8px" onerror="this.style.display='none';document.getElementById('login-txt-logo').style.display='block'">
+    <h1 id="login-txt-logo" style="display:none">LUBA<span style="color:var(--rojo)">MAQUI</span></h1>
+    <div class="sub">Devoluciones · Garantías · Notas de crédito</div>
     <div class="field"><label>Usuario</label><select id="login-user"></select></div>
     <div class="field"><label>Contraseña</label><input id="login-pass" type="password" placeholder="••••" onkeydown="if(event.key==='Enter')doLogin()"></div>
     <div id="login-err" style="color:var(--bad);font-size:13px;margin-bottom:10px;display:none">Contraseña incorrecta.</div>
@@ -113,10 +111,8 @@ td{padding:8px;border-bottom:1px solid var(--line);vertical-align:top}
 
 <div id="app-view" style="display:none">
   <div class="topbar">
-    <div class="logo" style="display:flex;align-items:center;gap:8px">
-      <svg width="30" height="30" viewBox="0 0 100 100" style="flex-shrink:0"><rect x="6" y="6" width="88" height="88" rx="14" fill="#fff"></rect><path d="M28 20 h14 v40 h22 v16 H28 Z" fill="#232021"></path><path d="M52 18 h30 v6 l-14 44 h-2 L52 24 Z" fill="#D61F26"></path></svg>
-      <span>LUBA<span style="color:var(--amber)">MAQUI</span></span>
-    </div>
+    <img src="logo.png" alt="LUBAMAQUI" style="height:38px" onerror="this.style.display='none';document.getElementById('top-txt-logo').style.display='block'">
+    <div class="logo" id="top-txt-logo" style="display:none">LUBA<span>MAQUI</span></div>
     <div class="role-chip" id="chip-role"></div>
     <div style="flex:1"></div>
     <div style="font-size:12px;color:rgba(255,255,255,.75)" id="chip-fb"></div>
@@ -146,17 +142,24 @@ const CSV_EXPORT = `https://docs.google.com/spreadsheets/d/${SHEETS_ID}/export?f
 const CSV_URLS = [CSV_PUB, CSV_GVIZ, CSV_EXPORT];
 
 /* ============================================================ USUARIOS ============================================================ */
-var USERS = [
- ["JOSUE PINEDA","1999","ASESOR"],["CARLOS HERRERA","2000","ASESOR"],["MOISES MOLINA","5003","ASESOR"],["SEBASTIAN VANEGAS","8001","ASESOR"],
- ["DANIEL ESPANA","1552","ASESOR"],["FERNANDO MEZA","3225","ASESOR"],["PABLO PERALTA","4550","ASESOR"],["CRISTIAN SALAZAR","4888","ASESOR"],
- ["CARLOS GRANJA","7810","ASESOR"],["CRISTINA CIFUENTES","8520","ASESOR"],["EDISON MAYORGA","6588","ASESOR"],["EDUARDO PICO","0458","ASESOR"],
- ["STALIN COBA","2150","ASESOR"],["MABEL JACOME","0545","ASESOR"],["DIEGO ACHACHI","0254","ASESOR"],["CALL CENTER 1","8054","ASESOR"],
- ["ANTHONY SANTILLAN (Mercaderia)","1125","MERCADERIA"],["REVISOR MER1","1126","MERCADERIA"],
- ["ANTHONY SANTILLAN (Devolucion)","1255","DEVOLUCION"],["REVISOR DEV1","1256","DEVOLUCION"],
- ["WILLIAM MANOTOA","5554","GARANTIA"],["REVISOR GAR1","5556","GARANTIA"],
- ["JESSICA ANJA","1984","NC"],["REVISOR NC1","1985","NC"],
- ["BELEN MANZANO","1112","ADMIN"],["WILLIAM ACHACHI","1113","ADMIN"],["TANNIA BASSANTES","1114","ADMIN"]
-].map(function(a){return {name:a[0],pass:a[1],role:a[2]};});
+const USERS = [
+ ...[["JOSUE PINEDA","1999"],["CARLOS HERRERA","2000"],["MOISES MOLINA","5003"],["SEBASTIAN VANEGAS","8001"],
+ ["DANIEL ESPAÑA","1552"],["FERNANDO MEZA","3225"],["PABLO PERALTA","4550"],["CRISTIAN SALAZAR","4888"],
+ ["CARLOS GRANJA","7810"],["CRISTINA CIFUENTES","8520"],["EDISON MAYORGA","6588"],["EDUARDO PICO","0458"],
+ ["STALIN COBA","2150"],["MABEL JACOME","0545"],["DIEGO ACHACHI","0254"],["CALL CENTER 1","8054"]]
+   .map(([n,p])=>({name:n,pass:p,role:"ASESOR"})),
+ {name:"ANTHONY SANTILLAN (Mercadería)",pass:"1125",role:"MERCADERIA"},
+ {name:"REVISOR MER1",pass:"1126",role:"MERCADERIA"},
+ {name:"ANTHONY SANTILLAN (Devolución)",pass:"1255",role:"DEVOLUCION"},
+ {name:"REVISOR DEV1",pass:"1256",role:"DEVOLUCION"},
+ {name:"WILLIAM MANOTOA",pass:"5554",role:"GARANTIA"},
+ {name:"REVISOR GAR1",pass:"5556",role:"GARANTIA"},
+ {name:"JESSICA ANJA",pass:"1984",role:"NC"},
+ {name:"REVISOR NC1",pass:"1985",role:"NC"},
+ {name:"BELEN MANZANO",pass:"1112",role:"ADMIN"},
+ {name:"WILLIAM ACHACHI",pass:"1113",role:"ADMIN"},
+ {name:"TANNIA BASSANTES",pass:"1114",role:"ADMIN"},
+];
 /* Usuarios que pueden cambiar entre TODOS los paneles (no solo admin) */
 const SUPER_ADMINS=["BELEN MANZANO","TANNIA BASSANTES"];
 /* Vista actualmente activa para un super admin (null = su panel normal admin) */
@@ -174,6 +177,13 @@ const MOTIVOS=["DACION EN PAGOS","GESTION COMERCIAL CLIENTE VENDEDOR","LOGISTICA
 const MARCAS=["PERMATEX","ORIGINAL","VALEO","MAHLE","ABRO","LUBA AUTOPARTS","SEIWA","NPR","SABO","APLIC","JCC","MAGNETI MARELLI","AUTOTOP","OTRO"];
 const ESTADO_LABEL={MERCADERIA:"En revisión mercadería",DEVOLUCION:"En revisión devolución",GARANTIA:"En revisión garantía",NC:"En notas de crédito",NO_LLEGO:"No llegó",DEV_RECHAZADA:"Devolución no aceptada",GAR_RECHAZADA:"Garantía no aceptada",GUIA_INCORRECTA:"Devuelto por guía incorrecta",ELIMINADO:"Eliminado"};
 const MESES=["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+/* Sucursales: el código sale del primer bloque del número de factura (ej. 004-002-000001234 → 004) */
+const SUCURSALES={"004":"AV. EL REY","002":"BODEGA","003":"AV. 6 DE DICIEMBRE","007":"AGENCIA LA PRENSA","006":"AGENCIA TUMBACO"};
+function sucursalDe(factura){
+  const m=String(factura||"").match(/(\d{3})/); // primer bloque de 3 dígitos
+  const cod=m?m[1]:"";
+  return {codigo:cod, nombre:SUCURSALES[cod]||(cod?"Sucursal "+cod:"Sin sucursal")};
+}
 
 let me=null, base=[], RAZONES=[];
 /* state guarda tickets, secuencias y GUIAS; persiste en Firebase Realtime Database */
@@ -276,8 +286,8 @@ async function leerPdfNCfb(ticketId){
 }
 
 /* ============================================================ BASE DE FACTURAS EN FIREBASE ============================================================ */
-/* Compresion por diccionario: los textos repetidos (cliente, descripcion, factura,
-   facturador, etc.) se guardan una sola vez. Reduce el tamano ~70%. */
+/* Guardamos la base comprimida por diccionario: los textos repetidos (cliente, descripción,
+   factura, facturador, etc.) se guardan UNA sola vez. Reduce el tamaño ~70%. */
 function comprimirBase(rows){
   const pool=[], map=new Map();
   const idx=s=>{ s=String(s??""); if(map.has(s))return map.get(s); const i=pool.length; pool.push(s); map.set(s,i); return i; };
@@ -473,8 +483,7 @@ function tagFor(t){
 
 /* ============================================================ LOGIN ============================================================ */
 function initLogin(){
-  var sel=$("login-user"); if(!sel) return;
-  sel.innerHTML=USERS.map(function(u,i){return '<option value="'+i+'">'+esc(u.name)+' — '+ROLE_LABEL[u.role]+'</option>';}).join("");
+  $("login-user").innerHTML=USERS.map((u,i)=>`<option value="${i}">${esc(u.name)} — ${ROLE_LABEL[u.role]}</option>`).join("");
 }
 async function doLogin(){
   const u=USERS[+$("login-user").value];
@@ -591,7 +600,7 @@ function renderMisTicketsTabla(){
   }
   cont.innerHTML=`<div style="overflow-x:auto"><table><thead><tr><th>N° Ticket</th><th>Fecha</th><th>Guía</th><th>Razón social</th><th>Factura</th><th>Motivo</th><th>Estado</th><th></th></tr></thead><tbody>
     ${mios.map(t=>`<tr><td><b>${esc(t.numero)}</b></td><td>${fdate(t.fechaTicket)}</td><td>${esc(t.guiaNumero||"—")}</td><td>${esc(t.razonSocial)}</td><td>${esc(t.factura)}</td><td>${esc(t.motivo)}</td><td>${tagFor(t)}</td>
-    <td style="white-space:nowrap">${t.estado==="GUIA_INCORRECTA"?`<button class="btn btn-a btn-sm" onclick="editarTicketGuia('${t.id}')">✎ Editar guía y reenviar</button> `:""}<button class="btn btn-g btn-sm" onclick="verTicket('${t.id}')">Ver</button> <button class="btn btn-a btn-sm" onclick="imprimirTicket('${t.id}')">🖨</button></td></tr>`).join("")}
+    <td style="white-space:nowrap">${t.estado==="GUIA_INCORRECTA"?`<button class="btn btn-a btn-sm" onclick="editarGuiaTicket('${t.id}')">✎ Editar guía y reenviar</button> `:""}<button class="btn btn-g btn-sm" onclick="verTicket('${t.id}')">Ver</button> <button class="btn btn-a btn-sm" onclick="imprimirTicket('${t.id}')">🖨</button></td></tr>`).join("")}
     </tbody></table></div>`;
 }
 async function recargarBase(){
@@ -634,6 +643,7 @@ function abrirNuevo(){
         <select id="n-motivo" onchange="nNum()"><option value="">— Seleccionar —</option>${MOTIVOS.map(m=>`<option>${esc(m)}</option>`).join("")}</select></div>
       <div class="field"><label>Número de ticket</label><input id="n-num" disabled placeholder="Se asigna según el motivo"></div>
     </div>
+    <div id="n-aviso-dias"></div>
     <div id="n-items"></div>
     <div class="card" style="background:#F0F3F7;margin-top:14px">
       <label style="display:flex;align-items:center;gap:8px;text-transform:none;font-size:14px;color:var(--ink);letter-spacing:0;cursor:pointer">
@@ -669,49 +679,23 @@ function nFact(){
   nuevo.lineas=rows; nuevo.emision=rows[0]?rows[0].emision:""; nuevo.ruc=rows[0]?rows[0].ruc:"";
   nuevo.facturador=rows[0]?rows[0].facturador:"";
   $("n-emi").value=fdate(nuevo.emision); filtroItems="";
-  // Aviso: factura con más de 30 días desde la emisión
-  if(nuevo.emision){
-    const em=new Date(nuevo.emision);
-    if(!isNaN(em)){
-      const dias=Math.floor((Date.now()-em.getTime())/86400000);
-      if(dias>30){
-        toast("⏰ Recordatorio: esta factura tiene "+dias+" días desde su emisión. Las guías solo se aceptan dentro de los 30 días. Cuida esos plazos.",7000);
-      }
-    }
-  }
+  // Aviso si la factura tiene más de 30 días desde su emisión
+  avisoDias30(nuevo.emision);
   renderItemsNuevo();
 }
-function renderItemsNuevo(){
-  if(!nuevo.lineas||!nuevo.lineas.length){$("n-items").innerHTML="";return;}
-  const usados=codigosUsados(nuevo.factura);
-  const q=filtroItems.trim().toUpperCase();
-  const lineas=nuevo.lineas;
-  let avisoDias="";
-  if(nuevo.emision){
-    const em=new Date(nuevo.emision);
-    if(!isNaN(em)){
-      const dias=Math.floor((Date.now()-em.getTime())/86400000);
-      if(dias>30) avisoDias=`<div class="card" style="background:var(--bad-bg);border-color:#E8B0AB;margin-bottom:10px">⏰ <b>Recordatorio:</b> esta factura tiene <b>${dias} días</b> desde su emisión. Las guías solo se aceptan dentro de los <b>30 días</b> de la fecha de emisión. Cuida esos plazos.</div>`;
-    }
+function avisoDias30(emision){
+  const cont=$("n-aviso-dias"); if(!cont) return;
+  const em=new Date(emision);
+  if(isNaN(em)){ cont.innerHTML=""; return; }
+  const dias=Math.floor((Date.now()-em.getTime())/86400000);
+  if(dias>30){
+    cont.innerHTML=`<div class="card" style="background:var(--bad-bg);border-color:#E8B0AB;margin-bottom:12px">
+      ⚠ <b>Recordatorio:</b> esta factura fue emitida hace <b>${dias} días</b>. Las guías solo se aceptan dentro de los <b>30 días</b> de la fecha de emisión. Cuida esos días al gestionar la devolución.</div>`;
+  }else{
+    cont.innerHTML="";
   }
-  $("n-items").innerHTML=`
-    ${avisoDias}
-    <div class="srch-bar">
-      <span>🔍</span>
-      <input type="text" id="n-srch" placeholder="Buscar código o descripción dentro de la factura…" value="${esc(filtroItems)}" oninput="filtroItems=this.value;renderItemsNuevo()">
-      ${filtroItems?`<button class="btn btn-sm btn-g" style="white-space:nowrap" onclick="filtroItems='';renderItemsNuevo()">✕ Limpiar</button>`:""}
-    </div>
-    <div style="overflow-x:auto"><table><thead><tr><th>Código</th><th>Descripción</th><th class="num">Cant. fact.</th><th style="width:84px">Cantidad</th><th style="min-width:160px">Comentario</th><th class="num">P. neto</th><th class="num">Total</th></tr></thead><tbody id="n-tbody">
-    </tbody></table></div>
-    <div class="muted" style="margin-top:4px" id="n-count"></div>`;
-  const tbody=$("n-tbody");
-  let shown=0;
-  lineas.forEach((r,i)=>{
-    const dup=usados.get(r.codigo);
-    const txt=(r.codigo+" "+r.desc+" "+r.sub).toUpperCase();
-    if(q&&!txt.includes(q)) return;
-    shown++;
-    const hlCod=q?r.codigo.replace(new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g,'\\function renderItemsNuevo(){
+}
+function renderItemsNuevo(){
   if(!nuevo.lineas||!nuevo.lineas.length){$("n-items").innerHTML="";return;}
   const usados=codigosUsados(nuevo.factura);
   const q=filtroItems.trim().toUpperCase();
@@ -733,18 +717,6 @@ function renderItemsNuevo(){
     if(q&&!txt.includes(q)) return;
     shown++;
     const hlCod=q?r.codigo.replace(new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),"gi"),m=>`<span class="hl">${m}</span>`):esc(r.codigo);
-    const tr=document.createElement("tr");
-    tr.innerHTML=`<td><b>${hlCod}</b>${dup?`<br><span class="tag tag-bad">En ticket ${esc(dup)}</span>`:""}</td>
-      <td style="max-width:280px;font-size:12px">${esc(r.desc)}<div class="muted">${esc(r.sub)}</div></td>
-      <td class="num">${r.cant}</td>
-      <td><input type="number" min="0" max="${r.cant}" value="0" id="q-${i}" oninput="nCalc(${i})" style="text-align:right" ${dup?"disabled":""}></td>
-      <td><input id="c-${i}" placeholder="Comentario" ${dup?"disabled":""}></td>
-      <td class="num" id="pn-${i}">$0.00</td><td class="num" id="tt-${i}">$0.00</td>`;
-    tbody.appendChild(tr);
-  });
-  if($("n-count")) $("n-count").textContent=q?`Mostrando ${shown} de ${lineas.length} productos`:`${lineas.length} productos en esta factura`;
-  if(shown===0&&q) tbody.innerHTML=`<tr><td colspan="7" class="muted" style="text-align:center;padding:20px">Sin resultados para "${esc(filtroItems)}"</td></tr>`;
-}'),"gi"),m=>`<span class="hl">${m}</span>`):esc(r.codigo);
     const tr=document.createElement("tr");
     tr.innerHTML=`<td><b>${hlCod}</b>${dup?`<br><span class="tag tag-bad">En ticket ${esc(dup)}</span>`:""}</td>
       <td style="max-width:280px;font-size:12px">${esc(r.desc)}<div class="muted">${esc(r.sub)}</div></td>
@@ -795,7 +767,6 @@ async function guardarTicket(){
   const t={id:"T"+Date.now(),numero:num,motivo:nuevo.motivo,razonSocial:nuevo.razon,ruc:nuevo.ruc,
     factura:nuevo.factura,emision:nuevo.emision,facturador:nuevo.facturador||"",fechaTicket:new Date().toISOString(),
     vendedor:me.name,estado:"MERCADERIA",items,fechas:{},
-    sucursal:String(nuevo.factura||"").replace(/[^0-9]/g,"").slice(0,3)||"000",
     guiaId:guia.id, guiaNumero:guia.numero, sobre,
     historial:[{f:new Date().toISOString(),e:"Ticket creado por "+me.name+" · Guía "+guia.numero+(sobre?" · con sobre":"")}]};
   state.tickets.push(t); await saveState();
@@ -803,37 +774,36 @@ async function guardarTicket(){
   setTimeout(()=>imprimirTicket(t.id),400);
   render();
 }
-/* Editar guía de un ticket devuelto por guía incorrecta y reenviarlo a mercadería */
-function editarTicketGuia(id){
+/* Editar la guía de un ticket devuelto por guía incorrecta y reenviarlo a mercadería */
+function editarGuiaTicket(id){
   const t=findT(id);
-  const guiasDisp=guiasSeleccionables(me.name);
+  const guiasDisp=guiasSeleccionables(t.vendedor);
   $("modal-root").innerHTML=`<div class="modal-bg"><div class="modal" style="max-width:560px">
-    <h2 style="font-size:22px;color:var(--navy);margin-bottom:8px">Corregir guía · Ticket ${esc(t.numero)}</h2>
-    <div class="alert-del" style="margin-bottom:14px">Fue devuelto por: <b>${esc(t.guiaIncorrecta?.motivo||"guía incorrecta")}</b></div>
-    <div class="muted" style="margin-bottom:8px">Guía actual: <b>${esc(t.guiaNumero||"—")}</b></div>
-    ${guiasDisp.length===0?`<div class="card" style="background:var(--bad-bg)">No tienes guías activas hoy. Solicita a Notas de Crédito que registren tu guía del día.</div>`:`
-    <div class="field"><label>Selecciona la guía correcta (tus guías activas de hoy)</label>
-      <select id="eg-guia"><option value="">— Selecciona —</option>
+    <h2 style="font-size:22px;color:var(--navy);margin-bottom:6px">Corregir guía · Ticket ${esc(t.numero)}</h2>
+    <div class="muted" style="margin-bottom:8px">${esc(t.razonSocial)} · Factura ${esc(t.factura)}</div>
+    <div class="alert-del" style="margin-bottom:14px">Devuelto por: <b>${esc(t.guiaIncorrecta?.motivo||"guía incorrecta")}</b></div>
+    ${guiasDisp.length===0?`<div class="card" style="background:var(--bad-bg);border-color:#E8B0AB">No tienes guías activas hoy. Solicita al área de Notas de Crédito que registre tu guía del día.</div>`:`
+    <div class="field"><label>⭐ Selecciona la guía correcta (tus guías activas de hoy)</label>
+      <select id="eg-tk-guia"><option value="">— Selecciona tu guía —</option>
       ${guiasDisp.map(g=>`<option value="${g.id}">${esc(g.numero)} — ${fdate(g.fechaCreacion)}</option>`).join("")}</select></div>`}
     <div style="display:flex;gap:10px;justify-content:flex-end">
       <button class="btn btn-g" onclick="$('modal-root').innerHTML=''">Cancelar</button>
-      ${guiasDisp.length>0?`<button class="btn btn-p" onclick="guardarTicketGuia('${t.id}')">Guardar y reenviar a mercadería</button>`:""}
+      ${guiasDisp.length>0?`<button class="btn btn-p" onclick="guardarGuiaTicket('${t.id}')">Guardar y reenviar a mercadería</button>`:""}
     </div>
   </div></div>`;
 }
-async function guardarTicketGuia(id){
+async function guardarGuiaTicket(id){
   const t=findT(id);
-  const guiaId=$("eg-guia").value;
+  const guiaId=$("eg-tk-guia").value;
   if(!guiaId){ toast("Selecciona una guía."); return; }
   const guia=findGuia(guiaId);
   if(!guia||guia.estado==="ANULADA"||hoyStr(guia.fechaCreacion)!==hoyStr()){ toast("Esa guía ya no es válida hoy."); return; }
   const ahora=new Date().toISOString();
-  t.guiaAnterior=t.guiaNumero;
   t.guiaId=guia.id; t.guiaNumero=guia.numero;
-  t.guiaModificada=true; // bandera para que mercadería vea "guía modificada"
+  t.guiaModificada=true; // bandera para que mercadería lo vea
   t.guiaIncorrecta=null;
   t.estado="MERCADERIA";
-  t.historial.push({f:ahora,e:"Vendedor corrigió la guía (antes: "+(t.guiaAnterior||"—")+" → ahora: "+guia.numero+"). Reenviado a mercadería."});
+  t.historial.push({f:ahora,e:"Vendedor corrigió la guía a "+guia.numero+" y reenvió a mercadería ("+me.name+")"});
   await saveState(); $("modal-root").innerHTML=""; toast("✓ Guía corregida. Ticket reenviado a mercadería."); render();
 }
 
@@ -918,19 +888,42 @@ function mostrarPDF(d,nombre){
     <iframe src="${pdfUrl}" style="width:100%;height:68vh;border:1px solid var(--line);border-radius:8px;background:#fff"></iframe>
   </div></div>`;
 }
-const ROJO=[214,31,38],NEGRO=[35,32,33];
+const ROJO=[214,31,38],NEGRO=[26,26,26];
+let logoDataUrl=null;
+/* Precargar el logo.png para incrustarlo en los PDFs */
+function precargarLogo(){
+  const img=new Image();
+  img.crossOrigin="anonymous";
+  img.onload=()=>{
+    try{
+      const c=document.createElement("canvas"); c.width=img.width; c.height=img.height;
+      c.getContext("2d").drawImage(img,0,0);
+      logoDataUrl={data:c.toDataURL("image/png"),w:img.width,h:img.height};
+    }catch(e){ logoDataUrl=null; }
+  };
+  img.onerror=()=>{ logoDataUrl=null; };
+  img.src="logo.png";
+}
 function membrete(d){
+  if(logoDataUrl){
+    // Logo real centrado arriba
+    const maxW=45, ratio=logoDataUrl.h/logoDataUrl.w;
+    const w=maxW, h=maxW*ratio;
+    try{ d.addImage(logoDataUrl.data,"PNG",14,8,w,Math.min(h,22)); }catch(e){ membreteTexto(d); }
+    return;
+  }
+  membreteTexto(d);
+}
+function membreteTexto(d){
   d.setFillColor(...NEGRO);d.triangle(0,0,100,0,0,17,"F");
   d.setFillColor(...ROJO);d.triangle(8,0,95,0,30,12,"F");
   d.setFillColor(...NEGRO);d.triangle(40,0,80,0,55,8,"F");
-  // Logo LM: cuadro negro con L blanca y triángulo rojo (M)
-  d.setFillColor(...NEGRO); d.roundedRect(150,5,13,13,2,2,"F");
-  d.setFillColor(255,255,255); d.rect(152.5,7.5,2.6,8,"F"); d.rect(152.5,13.5,5,2,"F");
-  d.setFillColor(...ROJO); d.triangle(156,7.5,162,7.5,159,15,"F");
+  d.setFillColor(...ROJO);d.rect(157,7,7,7,"F");
+  d.setFillColor(...NEGRO);d.triangle(157,7,164,7,160.5,11,"F");
   d.setFont("helvetica","bold");d.setFontSize(15);d.setTextColor(...NEGRO);
-  d.text("LUBA",165,12);const w=d.getTextWidth("LUBA");d.setTextColor(...ROJO);d.text("MAQUI",165+w,12);
-  d.setFontSize(5.6);d.setTextColor(...NEGRO);d.setFont("helvetica","normal");
-  d.text("G R U P O   E M P R E S A R I A L",165,15.8);d.setTextColor(0,0,0);
+  d.text("LUBA",167,12);const w=d.getTextWidth("LUBA");d.setTextColor(...ROJO);d.text("MAQUI",167+w,12);
+  d.setFontSize(6.2);d.setTextColor(...ROJO);d.setFont("helvetica","normal");
+  d.text("G R U P O   E M P R E S A R I A L",167,15.5);d.setTextColor(0,0,0);
 }
 function pieCorporativo(d){
   d.setFillColor(...ROJO);d.rect(0,277,210,20,"F");d.setFillColor(...NEGRO);d.triangle(150,277,210,277,210,297,"F");
@@ -1084,12 +1077,11 @@ function revisarMerc(t){
     <h2 style="font-size:24px;color:var(--navy)">Revisión de mercadería · ${esc(t.numero)}</h2>
     <div class="muted" style="margin-bottom:10px">${esc(t.razonSocial)} · Factura ${esc(t.factura)}</div>
     <div class="card" style="background:#FFF9E8;border-color:#E8C766">
+      ${t.guiaModificada?'<div style="background:var(--amber);color:#1B2430;padding:6px 10px;border-radius:6px;font-weight:700;margin-bottom:10px;font-size:13px">✎ GUÍA MODIFICADA — el vendedor corrigió la guía y reenvió el ticket. Verifica de nuevo.</div>':""}
       <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
         <div><span class="muted">Guía del ticket:</span> <b style="font-size:16px">${esc(t.guiaNumero||"(sin guía)")}</b></div>
-        ${t.guiaModificada?'<span class="tag tag-gar">✎ Guía modificada</span>':''}
         ${t.sobre?'<span class="tag tag-dev">📨 Incluye sobre</span>':'<span class="muted">Sin sobre</span>'}
       </div>
-      ${t.guiaModificada?`<div class="muted" style="margin-top:6px">⚠ El vendedor corrigió la guía${t.guiaAnterior?` (antes: ${esc(t.guiaAnterior)})`:""}. Verifica que ahora sea correcta.</div>`:""}
       <div class="field" style="margin-top:10px;margin-bottom:0"><label>¿La guía es correcta?</label>
         <select id="m-guia" onchange="document.getElementById('m-guia-motivo').style.display=this.value==='0'?'block':'none'">
           <option value="">— Seleccionar —</option>
@@ -1156,6 +1148,7 @@ async function guardarMerc(id){
     t.sobreLlego=(sobreLlego==="1");
   }
   t.guiaValidada={por:me.name,f:ahora};
+  if(t.guiaModificada) t.guiaModificada=false; // ya revisada la corrección
   t.items.forEach((i,x)=>{const q=Math.max(0,Math.min(i.cantidad,+($("m-q-"+x).value||0)));i.merc={cantLlegada:q,com:$("m-co-"+x).value,por:me.name,f:ahora};});
   t.fechas=t.fechas||{};t.fechas.mercaderia=ahora;
   const totLlego=t.items.reduce((s,i)=>s+llegoQ(i),0);
@@ -1533,6 +1526,15 @@ function renderAdmin(){
         ⏱ Google publica los cambios del Excel con unos minutos de retraso (hasta ~5 min). Si actualizaste el Excel hace poco y no ves los cambios, espera unos minutos antes de presionar "Actualizar base a Firebase".
       </div>
     </div>
+    <div class="card" style="border-left:5px solid var(--navy)">
+      <h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">📊 Indicadores de devoluciones y garantías</h3>
+      <div class="muted" style="margin-bottom:12px">Dashboard con tasa de devolución, ranking de clientes, productos, vendedores, sucursales, motivos e impacto económico. Con tablas y gráficos. Puedes filtrar por rango de fechas.</div>
+      <div class="grid3" style="margin-bottom:10px">
+        <div class="field" style="margin-bottom:0"><label>Desde</label><input type="date" id="ind-desde"></div>
+        <div class="field" style="margin-bottom:0"><label>Hasta</label><input type="date" id="ind-hasta"></div>
+        <div class="field" style="margin-bottom:0"><label>&nbsp;</label><button class="btn btn-p" style="width:100%;justify-content:center" onclick="abrirIndicadores()">📊 Ver indicadores</button></div>
+      </div>
+    </div>
     <div class="card" style="border-left:5px solid var(--ok)">
       <h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">Reporte consolidado de tickets</h3>
       <div class="muted" style="margin-bottom:12px">Excel con todos los tickets, fechas de respuesta, N° de NC, guía y estado. Puedes filtrar por rango de fechas (fecha de creación del ticket).</div>
@@ -1542,15 +1544,6 @@ function renderAdmin(){
         <div class="field" style="margin-bottom:0"><label>&nbsp;</label><button class="btn btn-ok" style="width:100%;justify-content:center" onclick="reporteConsolidado()">⬇ Descargar reporte</button></div>
       </div>
       <div class="muted">Deja las fechas vacías para incluir todos los tickets.</div>
-    </div>
-    <div class="card" style="border-left:5px solid var(--navy)">
-      <h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">📊 Indicadores de devoluciones y garantías</h3>
-      <div class="muted" style="margin-bottom:12px">Tablas y gráficos del impacto sobre las ventas: tasa de devolución, ranking de clientes y productos, por vendedor, sucursal, motivo y más. Filtra por rango de fechas.</div>
-      <div class="grid3" style="margin-bottom:10px">
-        <div class="field" style="margin-bottom:0"><label>Desde</label><input type="date" id="ind-desde"></div>
-        <div class="field" style="margin-bottom:0"><label>Hasta</label><input type="date" id="ind-hasta"></div>
-        <div class="field" style="margin-bottom:0"><label>&nbsp;</label><button class="btn btn-p" style="width:100%;justify-content:center" onclick="verIndicadores()">📊 Ver indicadores</button></div>
-      </div>
     </div>
     <div class="card" style="border-left:5px solid #6A2E91">
       <h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">Guías</h3>
@@ -1632,174 +1625,172 @@ async function confirmarEliminar(id){
   t.historial.push({f:ahora,e:"Eliminado por "+me.name+". Motivo: "+motivo});
   await saveState();$("modal-root").innerHTML="";toast("✓ Ticket "+t.numero+" eliminado.");render();
 }
-/* ============================================================ INDICADORES DE DEVOLUCIONES ============================================================ */
-var SUCURSALES={"004":"Sucursal 004 (El Rey)","002":"Sucursal 002 (Bodega)","003":"Sucursal 003 (6 Diciembre)","007":"Sucursal 007","006":"Sucursal 006 (Tumbaco / La Prensa)"};
-var UMBRAL_MAYORISTA=500;
-var chartRefs=[];
-function nombreSucursal(cod){ return SUCURSALES[cod]||("Sucursal "+(cod||"?")); }
-function cerrarIndicadores(){ chartRefs.forEach(function(c){try{c.destroy();}catch(e){}}); chartRefs=[]; $('modal-root').innerHTML=''; }
-/* Devuelve los tickets que representan una devolución/garantía REAL en el rango.
-   Se cuentan los que llegaron a NC o ya tienen mercadería recibida con items aceptados. */
-function ticketsDevolucionEnRango(desde,hasta){
-  return state.tickets.filter(t=>{
-    if(t.estado==="ELIMINADO"||t.estado==="GUIA_INCORRECTA") return false;
+/* ============================================================ DASHBOARD DE INDICADORES ============================================================ */
+/* Calcula los datos de devoluciones aceptadas (tickets que llegaron a NC o tienen items aceptados) */
+function datosIndicadores(desde,hasta){
+  // Tickets considerados "devolución/garantía con monto" = los que tienen total aceptado
+  const tks=state.tickets.filter(t=>{
+    if(t.estado==="ELIMINADO") return false;
     const f=hoyStr(t.fechaTicket);
     if(desde&&f<desde) return false;
     if(hasta&&f>hasta) return false;
-    // solo cuentan los que tienen monto devuelto/aceptado
-    return itemsAceptados(t).length>0 || t.estado==="NC" || t.fechas?.nc;
+    return true;
   });
+  // Para cada ticket, su monto devuelto = total aceptado (si ya pasó por NC) o total del ticket si aún en proceso
+  const conMonto=tks.map(t=>{
+    const aceptado=(t.estado==="NC"||t.fechas?.nc)?totalAceptado(t):0;
+    const totalTicket=t.items.reduce((s,i)=>s+i.total,0);
+    const monto=aceptado||totalTicket; // usa aceptado si existe, si no el total del ticket
+    const suc=sucursalDe(t.factura);
+    return {t,monto,aceptado,totalTicket,suc};
+  });
+  return conMonto;
 }
-function montoVendidoBase(){
-  // suma de TOTAL de toda la base de facturas (ventas brutas registradas)
-  return base.reduce((s,r)=>s+(r.total||0),0);
-}
-function verIndicadores(){
-  var desde=$("ind-desde")?$("ind-desde").value:"";
-  var hasta=$("ind-hasta")?$("ind-hasta").value:"";
-  var tks=ticketsDevolucionEnRango(desde,hasta);
-  chartRefs.forEach(function(c){try{c.destroy();}catch(e){}}); chartRefs=[];
+function abrirIndicadores(){
+  const desde=$("ind-desde")?$("ind-desde").value:"";
+  const hasta=$("ind-hasta")?$("ind-hasta").value:"";
+  const datos=datosIndicadores(desde,hasta);
+  if(datos.length===0){ toast("No hay tickets en ese rango de fechas."); return; }
 
-  var totalDev=0, totalProdDev=0;
-  var porCliente={}, porProducto={}, porVendedor={}, porSucursal={}, porMotivo={}, porDia={};
-  tks.forEach(function(t){
-    var its=itemsAceptados(t);
-    var montoT=its.reduce(function(s,i){return s+i.total;},0);
-    var cantT=its.reduce(function(s,i){return s+(i.cantNC||0);},0);
-    totalDev+=montoT; totalProdDev+=cantT;
-    var ck=t.razonSocial||"?";
-    if(!porCliente[ck]) porCliente[ck]={monto:0,cant:0,ruc:t.ruc||""};
-    porCliente[ck].monto+=montoT; porCliente[ck].cant+=cantT;
-    its.forEach(function(i){
-      var pk=i.codigo;
-      if(!porProducto[pk]) porProducto[pk]={monto:0,cant:0,desc:i.desc,marca:i.sub};
-      porProducto[pk].monto+=i.total; porProducto[pk].cant+=(i.cantNC||0);
+  const totalDevuelto=datos.reduce((s,d)=>s+d.monto,0);
+  const totalProductos=datos.reduce((s,d)=>s+d.t.items.reduce((a,i)=>a+i.cantidad,0),0);
+  const nTickets=datos.length;
+
+  // Agrupaciones
+  const porCliente={}, porVendedor={}, porSucursal={}, porMotivo={}, porProducto={};
+  datos.forEach(d=>{
+    const t=d.t;
+    // cliente
+    if(!porCliente[t.razonSocial]) porCliente[t.razonSocial]={monto:0,prod:0,ruc:t.ruc};
+    porCliente[t.razonSocial].monto+=d.monto;
+    porCliente[t.razonSocial].prod+=t.items.reduce((a,i)=>a+i.cantidad,0);
+    // vendedor
+    porVendedor[t.vendedor]=(porVendedor[t.vendedor]||0)+d.monto;
+    // sucursal
+    const sn=d.suc.nombre;
+    porSucursal[sn]=(porSucursal[sn]||0)+d.monto;
+    // motivo
+    porMotivo[t.motivo]=(porMotivo[t.motivo]||0)+d.monto;
+    // productos
+    t.items.forEach(i=>{
+      const k=i.codigo+" — "+i.desc;
+      if(!porProducto[k]) porProducto[k]={cant:0,monto:0,marca:i.sub};
+      porProducto[k].cant+=i.cantidad; porProducto[k].monto+=i.total;
     });
-    var vk=t.vendedor||"?";
-    if(!porVendedor[vk]) porVendedor[vk]={monto:0,cant:0};
-    porVendedor[vk].monto+=montoT; porVendedor[vk].cant+=cantT;
-    var sk=t.sucursal||String(t.factura||"").replace(/[^0-9]/g,"").slice(0,3)||"000";
-    if(!porSucursal[sk]) porSucursal[sk]={monto:0,cant:0};
-    porSucursal[sk].monto+=montoT; porSucursal[sk].cant+=cantT;
-    var mk2=t.motivo||"?";
-    if(!porMotivo[mk2]) porMotivo[mk2]={monto:0,cant:0};
-    porMotivo[mk2].monto+=montoT; porMotivo[mk2].cant+=cantT;
-    var dk=hoyStr(t.fechaTicket);
-    if(!porDia[dk]) porDia[dk]=0;
-    porDia[dk]+=montoT;
   });
-  var ventaBruta=montoVendidoBase();
-  var tasaGlobal=ventaBruta>0?(totalDev/ventaBruta*100):0;
-  var ventaNeta=ventaBruta-totalDev;
+  const top=(obj,key,n=10)=>Object.entries(obj).map(([k,v])=>({k,v:key?v[key]:v,full:v})).sort((a,b)=>b.v-a.v).slice(0,n);
 
-  var topClientes=Object.entries(porCliente).sort(function(a,b){return b[1].monto-a[1].monto;}).slice(0,10);
-  var topProductos=Object.entries(porProducto).sort(function(a,b){return b[1].monto-a[1].monto;}).slice(0,10);
-  var vendedores=Object.entries(porVendedor).sort(function(a,b){return b[1].monto-a[1].monto;});
-  var sucursales=Object.entries(porSucursal).sort(function(a,b){return b[1].monto-a[1].monto;});
-  var motivos=Object.entries(porMotivo).sort(function(a,b){return b[1].monto-a[1].monto;});
-  var dias=Object.entries(porDia).sort(function(a,b){return a[0].localeCompare(b[0]);});
+  const cli=top(porCliente,"monto");
+  const ven=top(porVendedor,null);
+  const suc=top(porSucursal,null,10);
+  const mot=top(porMotivo,null,10);
+  const prodM=top(porProducto,"monto");
+  const prodC=top(porProducto,"cant");
 
-  var rango=(desde||hasta)?((desde||"inicio")+" a "+(hasta||"hoy")):"todo el histórico";
+  // evolución diaria
+  const porDia={};
+  datos.forEach(d=>{ const f=hoyStr(d.t.fechaTicket); porDia[f]=(porDia[f]||0)+d.monto; });
+  const dias=Object.keys(porDia).sort();
 
-  var html=''+
-    '<div class="modal-bg"><div class="modal" style="max-width:1100px">'+
-    '<div style="display:flex;align-items:center;gap:12px;margin-bottom:6px;flex-wrap:wrap">'+
-    '<h2 style="font-size:24px;color:var(--navy);flex:1">Indicadores de devoluciones y garantías</h2>'+
-    '<button class="btn btn-ok btn-sm" onclick="excelIndicadores(\''+desde+'\',\''+hasta+'\')">Descargar Excel</button>'+
-    '<button class="btn btn-g btn-sm" onclick="cerrarIndicadores()">Cerrar</button>'+
-    '</div>'+
-    '<div class="muted" style="margin-bottom:16px">Periodo: <b>'+esc(rango)+'</b> · '+tks.length+' ticket(s) de devolución/garantía</div>'+
-    '<div class="grid3" style="margin-bottom:8px">'+
-    '<div class="card" style="margin-bottom:0;text-align:center"><div class="disp" style="font-size:30px;color:var(--rojo)">'+tasaGlobal.toFixed(2)+'%</div><div class="muted">Tasa de devolución global</div></div>'+
-    '<div class="card" style="margin-bottom:0;text-align:center"><div class="disp" style="font-size:26px;color:var(--bad)">'+money(totalDev)+'</div><div class="muted">Total devuelto</div></div>'+
-    '<div class="card" style="margin-bottom:0;text-align:center"><div class="disp" style="font-size:26px;color:var(--ok)">'+money(ventaNeta)+'</div><div class="muted">Venta neta real</div></div>'+
-    '</div>'+
-    '<div class="card" style="background:#F0F3F7"><div class="kv" style="grid-template-columns:200px 1fr">'+
-    '<b>Venta bruta (base)</b><span>'+money(ventaBruta)+'</span>'+
-    '<b>Total devoluciones</b><span style="color:var(--bad)">- '+money(totalDev)+'</span>'+
-    '<b>Venta neta real</b><span style="color:var(--ok);font-weight:700">'+money(ventaNeta)+'</span>'+
-    '<b>Productos devueltos</b><span>'+totalProdDev.toLocaleString("es-EC")+' unidades</span>'+
-    '</div></div>'+
-    '<div class="grid2">'+
-    '<div class="card"><div class="sec-title">Evolución diaria de devoluciones</div><canvas id="ch-dia" height="160"></canvas></div>'+
-    '<div class="card"><div class="sec-title">Distribución por sucursal</div><canvas id="ch-suc" height="160"></canvas></div>'+
-    '</div>'+
-    '<div class="grid2">'+
-    '<div class="card"><div class="sec-title">Top productos devueltos</div><canvas id="ch-prod" height="200"></canvas></div>'+
-    '<div class="card"><div class="sec-title">Top clientes</div><canvas id="ch-cli" height="200"></canvas></div>'+
-    '</div>'+
-    '<div class="grid2">'+
-    '<div class="card"><div class="sec-title">Devoluciones por vendedor</div><canvas id="ch-vend" height="200"></canvas></div>'+
-    '<div class="card"><div class="sec-title">Por motivo de devolución</div><canvas id="ch-mot" height="200"></canvas></div>'+
-    '</div>'+
-    '<div class="card"><div class="sec-title">Ranking de productos más devueltos</div><div style="overflow-x:auto"><table><thead><tr><th>#</th><th>Código</th><th>Descripción</th><th>Marca/Subgrupo</th><th class="num">Cant.</th><th class="num">Monto</th></tr></thead><tbody>'+
-    (topProductos.map(function(p,i){return '<tr><td>'+(i+1)+'</td><td><b>'+esc(p[0])+'</b></td><td style="max-width:280px;font-size:12px">'+esc(p[1].desc)+'</td><td>'+esc(p[1].marca)+'</td><td class="num">'+p[1].cant+'</td><td class="num">'+money(p[1].monto)+'</td></tr>';}).join("")||'<tr><td colspan="6" class="muted">Sin datos</td></tr>')+
-    '</tbody></table></div></div>'+
-    '<div class="card"><div class="sec-title">Devoluciones por cliente (mayorista = mayor monto)</div><div style="overflow-x:auto"><table><thead><tr><th>#</th><th>Cliente</th><th>Tipo</th><th class="num">Productos</th><th class="num">Monto</th></tr></thead><tbody>'+
-    (topClientes.map(function(c,i){return '<tr><td>'+(i+1)+'</td><td>'+esc(c[0])+'</td><td>'+(c[1].monto>=UMBRAL_MAYORISTA?'<span class="tag tag-dev">Mayorista</span>':'<span class="tag tag-fin">Minorista</span>')+'</td><td class="num">'+c[1].cant+'</td><td class="num">'+money(c[1].monto)+'</td></tr>';}).join("")||'<tr><td colspan="5" class="muted">Sin datos</td></tr>')+
-    '</tbody></table></div></div>'+
-    '<div class="card"><div class="sec-title">Devoluciones por vendedor</div><div style="overflow-x:auto"><table><thead><tr><th>Vendedor</th><th class="num">Productos</th><th class="num">Monto devuelto</th><th class="num">% del total</th></tr></thead><tbody>'+
-    (vendedores.map(function(v){return '<tr><td>'+esc(v[0])+'</td><td class="num">'+v[1].cant+'</td><td class="num">'+money(v[1].monto)+'</td><td class="num">'+(totalDev>0?(v[1].monto/totalDev*100).toFixed(1):0)+'%</td></tr>';}).join("")||'<tr><td colspan="4" class="muted">Sin datos</td></tr>')+
-    '</tbody></table></div></div>'+
-    '<div class="card"><div class="sec-title">Devoluciones por sucursal</div><div style="overflow-x:auto"><table><thead><tr><th>Sucursal</th><th class="num">Productos</th><th class="num">Monto</th><th class="num">% del total</th></tr></thead><tbody>'+
-    (sucursales.map(function(s){return '<tr><td>'+esc(nombreSucursal(s[0]))+'</td><td class="num">'+s[1].cant+'</td><td class="num">'+money(s[1].monto)+'</td><td class="num">'+(totalDev>0?(s[1].monto/totalDev*100).toFixed(1):0)+'%</td></tr>';}).join("")||'<tr><td colspan="4" class="muted">Sin datos</td></tr>')+
-    '</tbody></table></div></div>'+
-    '</div></div>';
-  $("modal-root").innerHTML=html;
+  const periodo=(desde||hasta)?`${desde||"inicio"} a ${hasta||"hoy"}`:"Todo el histórico";
 
-  // ---- Dibujar gráficos ----
-  setTimeout(function(){ dibujarCharts({dias:dias,sucursales:sucursales,topProductos:topProductos,topClientes:topClientes,vendedores:vendedores,motivos:motivos}); },100);
-}
-function dibujarCharts(d){
-  if(typeof Chart==="undefined"){ toast("Los gráficos no cargaron (revisa conexión)."); return; }
-  var COL=["#D61F26","#0E2A47","#232021","#1E7F4F","#C77F00","#6A2E91","#143A60","#B3261E","#5B6877","#8A6400"];
-  var mk=function(id,cfg){ var el=$(id); if(!el)return; chartRefs.push(new Chart(el,cfg)); };
-  mk("ch-dia",{type:"line",data:{labels:d.dias.map(function(x){return x[0].slice(5);}),datasets:[{label:"Devuelto $",data:d.dias.map(function(x){return +x[1].toFixed(2);}),borderColor:"#D61F26",backgroundColor:"rgba(214,31,38,.12)",fill:true,tension:.25}]},options:{plugins:{legend:{display:false}},scales:{y:{beginAtZero:true}}}});
-  mk("ch-suc",{type:"pie",data:{labels:d.sucursales.map(function(x){return nombreSucursal(x[0]);}),datasets:[{data:d.sucursales.map(function(x){return +x[1].monto.toFixed(2);}),backgroundColor:COL}]},options:{plugins:{legend:{position:"bottom",labels:{boxWidth:12,font:{size:10}}}}}});
-  mk("ch-prod",{type:"bar",data:{labels:d.topProductos.map(function(x){return x[0];}),datasets:[{label:"Monto $",data:d.topProductos.map(function(x){return +x[1].monto.toFixed(2);}),backgroundColor:"#D61F26"}]},options:{indexAxis:"y",plugins:{legend:{display:false}}}});
-  mk("ch-cli",{type:"bar",data:{labels:d.topClientes.map(function(x){return x[0].length>22?x[0].slice(0,22)+"...":x[0];}),datasets:[{label:"Monto $",data:d.topClientes.map(function(x){return +x[1].monto.toFixed(2);}),backgroundColor:"#0E2A47"}]},options:{indexAxis:"y",plugins:{legend:{display:false}}}});
-  mk("ch-vend",{type:"pie",data:{labels:d.vendedores.map(function(x){return x[0];}),datasets:[{data:d.vendedores.map(function(x){return +x[1].monto.toFixed(2);}),backgroundColor:COL}]},options:{plugins:{legend:{position:"bottom",labels:{boxWidth:12,font:{size:9}}}}}});
-  mk("ch-mot",{type:"bar",data:{labels:d.motivos.map(function(x){return x[0].length>20?x[0].slice(0,20)+"...":x[0];}),datasets:[{label:"Monto $",data:d.motivos.map(function(x){return +x[1].monto.toFixed(2);}),backgroundColor:"#232021"}]},options:{indexAxis:"y",plugins:{legend:{display:false}}}});
+  $("modal-root").innerHTML=`<div class="modal-bg"><div class="modal" style="max-width:1100px">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap">
+      <h2 style="font-size:26px;color:var(--navy);flex:1">📊 Indicadores de devoluciones</h2>
+      <button class="btn btn-ok btn-sm" onclick="excelIndicadores('${desde}','${hasta}')">⬇ Exportar a Excel</button>
+      <button class="btn btn-g btn-sm" onclick="$('modal-root').innerHTML=''">Cerrar</button>
+    </div>
+    <div class="muted" style="margin-bottom:16px">Periodo: <b>${esc(periodo)}</b> · ${nTickets} tickets</div>
+
+    <div class="grid3" style="margin-bottom:16px">
+      <div class="card" style="margin:0"><div class="disp" style="font-size:30px;color:var(--rojo)">${money(totalDevuelto)}</div><div class="muted">Monto total devuelto</div></div>
+      <div class="card" style="margin:0"><div class="disp" style="font-size:30px;color:var(--navy)">${totalProductos.toLocaleString("es-EC")}</div><div class="muted">Productos devueltos</div></div>
+      <div class="card" style="margin:0"><div class="disp" style="font-size:30px;color:var(--ink)">${nTickets}</div><div class="muted">Tickets de devolución/garantía</div></div>
+    </div>
+
+    <div class="sec-title">Evolución diaria de devoluciones</div>
+    <div class="card" style="margin-bottom:14px"><canvas id="chart-dia" height="90"></canvas></div>
+
+    <div class="grid2" style="margin-bottom:14px">
+      <div class="card" style="margin:0"><div class="sec-title" style="margin-top:0">Por sucursal</div><canvas id="chart-suc" height="160"></canvas></div>
+      <div class="card" style="margin:0"><div class="sec-title" style="margin-top:0">Por vendedor</div><canvas id="chart-ven" height="160"></canvas></div>
+    </div>
+
+    <div class="sec-title">Top productos más devueltos (por cantidad)</div>
+    <div class="card" style="margin-bottom:14px"><canvas id="chart-prod" height="110"></canvas></div>
+
+    <div class="sec-title">Top clientes que más devolvieron (por monto)</div>
+    <div class="card" style="margin-bottom:14px"><canvas id="chart-cli" height="110"></canvas></div>
+
+    <div class="grid2">
+      <div class="card" style="margin:0"><div class="sec-title" style="margin-top:0">Ranking de productos</div>
+        <div style="max-height:240px;overflow:auto"><table><thead><tr><th>Producto</th><th class="num">Cant.</th><th class="num">Monto</th></tr></thead><tbody>
+        ${prodC.map(p=>`<tr><td style="font-size:11px">${esc(p.k.slice(0,40))}</td><td class="num">${p.full.cant}</td><td class="num">${money(p.full.monto)}</td></tr>`).join("")}
+        </tbody></table></div></div>
+      <div class="card" style="margin:0"><div class="sec-title" style="margin-top:0">Motivos de devolución</div>
+        <div style="max-height:240px;overflow:auto"><table><thead><tr><th>Motivo</th><th class="num">Monto</th></tr></thead><tbody>
+        ${mot.map(m=>`<tr><td style="font-size:11px">${esc(m.k)}</td><td class="num">${money(m.v)}</td></tr>`).join("")}
+        </tbody></table></div></div>
+    </div>
+  </div></div>`;
+
+  // Dibujar gráficos (después de que el DOM exista)
+  setTimeout(()=>{
+    const PAL=["#0E2A47","#D61F26","#143A60","#1A1A1A","#5B6877","#1E7F4F","#C77F00","#6A2E91","#2E7D9B","#A3161B"];
+    if(typeof Chart==="undefined"){ toast("Gráficos no disponibles (sin conexión)."); return; }
+    new Chart($("chart-dia"),{type:"line",data:{labels:dias.map(d=>d.slice(5)),datasets:[{label:"Monto devuelto",data:dias.map(d=>porDia[d]),borderColor:"#D61F26",backgroundColor:"rgba(214,31,38,.1)",fill:true,tension:.3}]},options:{plugins:{legend:{display:false}},responsive:true,maintainAspectRatio:true}});
+    new Chart($("chart-suc"),{type:"pie",data:{labels:suc.map(s=>s.k),datasets:[{data:suc.map(s=>s.v),backgroundColor:PAL}]},options:{responsive:true,maintainAspectRatio:true,plugins:{legend:{position:"right",labels:{font:{size:10}}}}}});
+    new Chart($("chart-ven"),{type:"pie",data:{labels:ven.map(v=>v.k),datasets:[{data:ven.map(v=>v.v),backgroundColor:PAL}]},options:{responsive:true,maintainAspectRatio:true,plugins:{legend:{position:"right",labels:{font:{size:10}}}}}});
+    new Chart($("chart-prod"),{type:"bar",data:{labels:prodC.map(p=>p.k.slice(0,18)),datasets:[{label:"Cantidad devuelta",data:prodC.map(p=>p.full.cant),backgroundColor:"#0E2A47"}]},options:{indexAxis:"y",plugins:{legend:{display:false}},responsive:true,maintainAspectRatio:true}});
+    new Chart($("chart-cli"),{type:"bar",data:{labels:cli.map(c=>c.k.slice(0,18)),datasets:[{label:"Monto devuelto",data:cli.map(c=>c.v),backgroundColor:"#D61F26"}]},options:{indexAxis:"y",plugins:{legend:{display:false}},responsive:true,maintainAspectRatio:true}});
+  },100);
 }
 function excelIndicadores(desde,hasta){
-  const tks=ticketsDevolucionEnRango(desde,hasta);
-  // Hoja detalle (campos solicitados)
-  const detalle=[];
-  tks.forEach(t=>{
-    itemsAceptados(t).forEach(i=>{
-      detalle.push({
-        "FECHA DEVOLUCION":fdate(t.fechas?.nc||t.fechas?.devolucion||t.fechaTicket),
-        "N° TICKET":t.numero,"FACTURA ORIGINAL":t.factura,"SUCURSAL":nombreSucursal(t.sucursal),
-        "RUC":t.ruc||"","CLIENTE":t.razonSocial,"VENDEDOR":t.vendedor,
-        "CODIGO":i.codigo,"DESCRIPCION":i.desc,"MARCA/SUBGRUPO":i.sub,
-        "CANT. DEVUELTA":i.cantNC,"PRECIO NETO":+i.neto.toFixed(2),"IVA":+i.iva.toFixed(2),"TOTAL DEVUELTO":+i.total.toFixed(2),
-        "MOTIVO":t.motivo,"N° NC":t.nc?.numero||""
+  const datos=datosIndicadores(desde||"",hasta||"");
+  if(datos.length===0){ toast("Sin datos."); return; }
+  const wb=XLSX.utils.book_new();
+  // Hoja 1: detalle por línea
+  const det=[];
+  datos.forEach(d=>{
+    const t=d.t; const suc=d.suc;
+    const its=itemsAceptados(t).length?itemsAceptados(t):t.items.map(i=>({...i,cantNC:i.cantidad}));
+    its.forEach(i=>{
+      det.push({
+        "FECHA DEVOLUCION":fdate(t.fechaTicket),"FACTURA":t.factura,"SUCURSAL":suc.nombre,"COD SUCURSAL":suc.codigo,
+        "RUC":t.ruc||"","CLIENTE":t.razonSocial,"VENDEDOR":t.vendedor,"MOTIVO":t.motivo,
+        "COD PRODUCTO":i.codigo,"DESCRIPCION":i.desc,"MARCA/SUBGRUPO":i.sub,
+        "CANTIDAD DEVUELTA":i.cantNC||i.cantidad,"PRECIO NETO":+(+i.neto).toFixed(2),"IVA":+(+i.iva).toFixed(2),"TOTAL DEVUELTO":+(+i.total).toFixed(2),
+        "N° NC":t.nc?.numero||"","GUIA":t.guiaNumero||""
       });
     });
   });
-  if(detalle.length===0){ toast("No hay datos en ese rango."); return; }
-  const wb=XLSX.utils.book_new();
-  const ws1=XLSX.utils.json_to_sheet(detalle);
-  ws1["!cols"]=Object.keys(detalle[0]).map(k=>({wch:Math.max(13,k.length+2)}));
+  const ws1=XLSX.utils.json_to_sheet(det);
+  ws1["!cols"]=Object.keys(det[0]||{"x":1}).map(k=>({wch:Math.max(12,k.length+1)}));
   XLSX.utils.book_append_sheet(wb,ws1,"Detalle devoluciones");
-  // Resumen indicadores
-  const ventaBruta=montoVendidoBase();
-  const totalDev=detalle.reduce((s,r)=>s+r["TOTAL DEVUELTO"],0);
-  const resumen=[
-    {"INDICADOR":"Venta bruta (base facturas)","VALOR":+ventaBruta.toFixed(2)},
-    {"INDICADOR":"Total devuelto","VALOR":+totalDev.toFixed(2)},
-    {"INDICADOR":"Tasa de devolución global %","VALOR":ventaBruta>0?+(totalDev/ventaBruta*100).toFixed(2):0},
-    {"INDICADOR":"Venta neta real","VALOR":+(ventaBruta-totalDev).toFixed(2)},
-    {"INDICADOR":"Productos devueltos","VALOR":detalle.reduce((s,r)=>s+r["CANT. DEVUELTA"],0)},
-    {"INDICADOR":"N° tickets devolución","VALOR":tks.length},
-  ];
-  const ws2=XLSX.utils.json_to_sheet(resumen); ws2["!cols"]=[{wch:34},{wch:16}];
+  // Hoja 2: resumen por sucursal, vendedor, cliente, producto, motivo
+  const agrupar=(campoFn)=>{ const o={}; datos.forEach(d=>{ const k=campoFn(d); o[k]=(o[k]||0)+d.monto; }); return o; };
+  const sucO=agrupar(d=>d.suc.nombre), venO=agrupar(d=>d.t.vendedor), motO=agrupar(d=>d.t.motivo);
+  const cliO={}; datos.forEach(d=>{ cliO[d.t.razonSocial]=(cliO[d.t.razonSocial]||0)+d.monto; });
+  const prodO={}; datos.forEach(d=>d.t.items.forEach(i=>{ const k=i.codigo+" "+i.desc; if(!prodO[k])prodO[k]={cant:0,monto:0}; prodO[k].cant+=i.cantidad; prodO[k].monto+=i.total; }));
+  const toRows=(o,c1,c2)=>Object.entries(o).sort((a,b)=>b[1]-a[1]).map(([k,v])=>({[c1]:k,[c2]:+v.toFixed(2)}));
+  const resumen=[];
+  resumen.push({"INDICADOR":"=== POR SUCURSAL ==="});
+  toRows(sucO,"SUCURSAL","MONTO DEVUELTO").forEach(r=>resumen.push({"INDICADOR":r.SUCURSAL,"VALOR":r["MONTO DEVUELTO"]}));
+  resumen.push({});resumen.push({"INDICADOR":"=== POR VENDEDOR ==="});
+  toRows(venO,"VENDEDOR","MONTO").forEach(r=>resumen.push({"INDICADOR":r.VENDEDOR,"VALOR":r.MONTO}));
+  resumen.push({});resumen.push({"INDICADOR":"=== POR CLIENTE ==="});
+  toRows(cliO,"CLIENTE","MONTO").forEach(r=>resumen.push({"INDICADOR":r.CLIENTE,"VALOR":r.MONTO}));
+  resumen.push({});resumen.push({"INDICADOR":"=== POR MOTIVO ==="});
+  toRows(motO,"MOTIVO","MONTO").forEach(r=>resumen.push({"INDICADOR":r.MOTIVO,"VALOR":r.MONTO}));
+  resumen.push({});resumen.push({"INDICADOR":"=== TOP PRODUCTOS (cantidad) ==="});
+  Object.entries(prodO).sort((a,b)=>b[1].cant-a[1].cant).slice(0,30).forEach(([k,v])=>resumen.push({"INDICADOR":k,"VALOR":v.cant,"MONTO":+v.monto.toFixed(2)}));
+  const ws2=XLSX.utils.json_to_sheet(resumen);
+  ws2["!cols"]=[{wch:50},{wch:16},{wch:14}];
   XLSX.utils.book_append_sheet(wb,ws2,"Resumen indicadores");
   const suf=(desde||hasta)?("_"+(desde||"inicio")+"_a_"+(hasta||"hoy")):"";
   XLSX.writeFile(wb,"Indicadores_Devoluciones"+suf+".xlsx");
 }
 
-function reporteConsolidado(){
   if(state.tickets.length===0){toast("No hay tickets.");return;}
   const desde=$("rep-desde")?$("rep-desde").value:"";
   const hasta=$("rep-hasta")?$("rep-hasta").value:"";
@@ -1815,6 +1806,7 @@ function reporteConsolidado(){
   if(tks.length===0){toast("No hay tickets en ese rango de fechas.");return;}
   const rows=tks.map(t=>({
     "N° TICKET":t.numero,"GUIA":t.guiaNumero||"","SOBRE":t.sobre?"SÍ":"NO","SOBRE LLEGÓ":t.sobre?(t.sobreLlego===true?"SÍ":t.sobreLlego===false?"NO":"PENDIENTE"):"",
+    "SUCURSAL":sucursalDe(t.factura).nombre,
     "FECHA CREACION":fdatetime(t.fechaTicket),"FACTURA":t.factura,"FACTURADOR":t.facturador||"",
     "EMISION":fdate(t.emision),"RAZON SOCIAL":t.razonSocial,"RUC":t.ruc||"","VENDEDOR":t.vendedor,"MOTIVO":t.motivo,
     "FECHA MERCADERIA":t.fechas?.mercaderia?fdatetime(t.fechas.mercaderia):"",
@@ -1899,10 +1891,8 @@ async function ejecutarLimpiarTodo(){
 }
 
 /* ============================================================ INIT ============================================================ */
+precargarLogo();
 initLogin();
-// Respaldo: asegurar que los usuarios se carguen aunque algo haya fallado antes
-window.addEventListener("DOMContentLoaded",function(){ try{ if($("login-user")&&$("login-user").options.length===0) initLogin(); }catch(e){} });
-setTimeout(function(){ try{ if($("login-user")&&$("login-user").options.length===0) initLogin(); }catch(e){} },300);
 </script>
 </body>
 </html>
