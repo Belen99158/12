@@ -146,24 +146,17 @@ const CSV_EXPORT = `https://docs.google.com/spreadsheets/d/${SHEETS_ID}/export?f
 const CSV_URLS = [CSV_PUB, CSV_GVIZ, CSV_EXPORT];
 
 /* ============================================================ USUARIOS ============================================================ */
-const USERS = [
- ...[["JOSUE PINEDA","1999"],["CARLOS HERRERA","2000"],["MOISES MOLINA","5003"],["SEBASTIAN VANEGAS","8001"],
- ["DANIEL ESPAÑA","1552"],["FERNANDO MEZA","3225"],["PABLO PERALTA","4550"],["CRISTIAN SALAZAR","4888"],
- ["CARLOS GRANJA","7810"],["CRISTINA CIFUENTES","8520"],["EDISON MAYORGA","6588"],["EDUARDO PICO","0458"],
- ["STALIN COBA","2150"],["MABEL JACOME","0545"],["DIEGO ACHACHI","0254"],["CALL CENTER 1","8054"]]
-   .map(([n,p])=>({name:n,pass:p,role:"ASESOR"})),
- {name:"ANTHONY SANTILLAN (Mercadería)",pass:"1125",role:"MERCADERIA"},
- {name:"REVISOR MER1",pass:"1126",role:"MERCADERIA"},
- {name:"ANTHONY SANTILLAN (Devolución)",pass:"1255",role:"DEVOLUCION"},
- {name:"REVISOR DEV1",pass:"1256",role:"DEVOLUCION"},
- {name:"WILLIAM MANOTOA",pass:"5554",role:"GARANTIA"},
- {name:"REVISOR GAR1",pass:"5556",role:"GARANTIA"},
- {name:"JESSICA ANJA",pass:"1984",role:"NC"},
- {name:"REVISOR NC1",pass:"1985",role:"NC"},
- {name:"BELEN MANZANO",pass:"1112",role:"ADMIN"},
- {name:"WILLIAM ACHACHI",pass:"1113",role:"ADMIN"},
- {name:"TANNIA BASSANTES",pass:"1114",role:"ADMIN"},
-];
+var USERS = [
+ ["JOSUE PINEDA","1999","ASESOR"],["CARLOS HERRERA","2000","ASESOR"],["MOISES MOLINA","5003","ASESOR"],["SEBASTIAN VANEGAS","8001","ASESOR"],
+ ["DANIEL ESPANA","1552","ASESOR"],["FERNANDO MEZA","3225","ASESOR"],["PABLO PERALTA","4550","ASESOR"],["CRISTIAN SALAZAR","4888","ASESOR"],
+ ["CARLOS GRANJA","7810","ASESOR"],["CRISTINA CIFUENTES","8520","ASESOR"],["EDISON MAYORGA","6588","ASESOR"],["EDUARDO PICO","0458","ASESOR"],
+ ["STALIN COBA","2150","ASESOR"],["MABEL JACOME","0545","ASESOR"],["DIEGO ACHACHI","0254","ASESOR"],["CALL CENTER 1","8054","ASESOR"],
+ ["ANTHONY SANTILLAN (Mercaderia)","1125","MERCADERIA"],["REVISOR MER1","1126","MERCADERIA"],
+ ["ANTHONY SANTILLAN (Devolucion)","1255","DEVOLUCION"],["REVISOR DEV1","1256","DEVOLUCION"],
+ ["WILLIAM MANOTOA","5554","GARANTIA"],["REVISOR GAR1","5556","GARANTIA"],
+ ["JESSICA ANJA","1984","NC"],["REVISOR NC1","1985","NC"],
+ ["BELEN MANZANO","1112","ADMIN"],["WILLIAM ACHACHI","1113","ADMIN"],["TANNIA BASSANTES","1114","ADMIN"]
+].map(function(a){return {name:a[0],pass:a[1],role:a[2]};});
 /* Usuarios que pueden cambiar entre TODOS los paneles (no solo admin) */
 const SUPER_ADMINS=["BELEN MANZANO","TANNIA BASSANTES"];
 /* Vista actualmente activa para un super admin (null = su panel normal admin) */
