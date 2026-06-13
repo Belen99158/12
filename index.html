@@ -490,7 +490,8 @@ function tagFor(t){
 
 /* ============================================================ LOGIN ============================================================ */
 function initLogin(){
-  $("login-user").innerHTML=USERS.map((u,i)=>`<option value="${i}">${esc(u.name)} — ${ROLE_LABEL[u.role]}</option>`).join("");
+  var sel=$("login-user"); if(!sel) return;
+  sel.innerHTML=USERS.map(function(u,i){return '<option value="'+i+'">'+esc(u.name)+' — '+ROLE_LABEL[u.role]+'</option>';}).join("");
 }
 async function doLogin(){
   const u=USERS[+$("login-user").value];
@@ -1765,19 +1766,19 @@ function verIndicadores(){
       ${topProductos.map((p,i)=>`<tr><td>${i+1}</td><td><b>${esc(p[0])}</b></td><td style="max-width:280px;font-size:12px">${esc(p[1].desc)}</td><td>${esc(p[1].marca)}</td><td class="num">${p[1].cant}</td><td class="num">${money(p[1].monto)}</td></tr>`).join("")||'<tr><td colspan="6" class="muted">Sin datos</td></tr>'}
       </tbody></table></div>
     </div>
-    <div class="card"><div class="sec-title">Devoluciones por cliente (mayorista ≥ ${money(UMBRAL_MAYORISTA)})</div>
+    <div class="card"><div class="sec-title">Devoluciones por cliente (mayorista alto monto)</div>
       <div style="overflow-x:auto"><table><thead><tr><th>#</th><th>Cliente</th><th>Tipo</th><th class="num">Productos</th><th class="num">Monto</th></tr></thead><tbody>
       ${topClientes.map((c,i)=>`<tr><td>${i+1}</td><td>${esc(c[0])}</td><td>${c[1].monto>=UMBRAL_MAYORISTA?'<span class="tag tag-dev">Mayorista</span>':'<span class="tag tag-fin">Minorista</span>'}</td><td class="num">${c[1].cant}</td><td class="num">${money(c[1].monto)}</td></tr>`).join("")||'<tr><td colspan="5" class="muted">Sin datos</td></tr>'}
       </tbody></table></div>
     </div>
     <div class="card"><div class="sec-title">Devoluciones por vendedor</div>
       <div style="overflow-x:auto"><table><thead><tr><th>Vendedor</th><th class="num">Productos</th><th class="num">Monto devuelto</th><th class="num">% del total</th></tr></thead><tbody>
-      ${vendedores.map(v=>`<tr><td>${esc(v[0])}</td><td class="num">${v[1].cant}</td><td class="num">${money(v[1].monto)}</td><td class="num">${totalDev>0?(v[1].monto/totalDev*100).toFixed(1):0}%</td></tr>`).join("")||'<tr><td colspan="4" class="muted">Sin datos</td></tr>'}
+      ${vendedores.map(function(v){return '<tr><td>'+esc(v[0])+'</td><td class="num">'+v[1].cant+'</td><td class="num">'+money(v[1].monto)+'</td><td class="num">'+(totalDev>0?(v[1].monto/totalDev*100).toFixed(1):0)+'%</td></tr>';}).join("")||'<tr><td colspan="4" class="muted">Sin datos</td></tr>'}
       </tbody></table></div>
     </div>
     <div class="card"><div class="sec-title">Devoluciones por sucursal</div>
       <div style="overflow-x:auto"><table><thead><tr><th>Sucursal</th><th class="num">Productos</th><th class="num">Monto</th><th class="num">% del total</th></tr></thead><tbody>
-      ${sucursales.map(s=>`<tr><td>${esc(nombreSucursal(s[0]))}</td><td class="num">${s[1].cant}</td><td class="num">${money(s[1].monto)}</td><td class="num">${totalDev>0?(s[1].monto/totalDev*100).toFixed(1):0}%</td></tr>`).join("")||'<tr><td colspan="4" class="muted">Sin datos</td></tr>'}
+      ${sucursales.map(function(s){return '<tr><td>'+esc(nombreSucursal(s[0]))+'</td><td class="num">'+s[1].cant+'</td><td class="num">'+money(s[1].monto)+'</td><td class="num">'+(totalDev>0?(s[1].monto/totalDev*100).toFixed(1):0)+'%</td></tr>';}).join("")||'<tr><td colspan="4" class="muted">Sin datos</td></tr>'}
       </tbody></table></div>
     </div>
   </div></div>`;
@@ -1787,20 +1788,14 @@ function verIndicadores(){
 }
 function dibujarCharts(d){
   if(typeof Chart==="undefined"){ toast("Los gráficos no cargaron (revisa conexión)."); return; }
-  const COL=["#D61F26","#0E2A47","#232021","#1E7F4F","#C77F00","#6A2E91","#143A60","#B3261E","#5B6877","#8A6400"];
-  const mk=(id,cfg)=>{ const el=$(id); if(!el)return; chartRefs.push(new Chart(el,cfg)); };
-  // evolución diaria (línea)
-  mk("ch-dia",{type:"line",data:{labels:d.dias.map(x=>x[0].slice(5)),datasets:[{label:"Devuelto $",data:d.dias.map(x=>+x[1].toFixed(2)),borderColor:"#D61F26",backgroundColor:"rgba(214,31,38,.12)",fill:true,tension:.25}]},options:{plugins:{legend:{display:false}},scales:{y:{beginAtZero:true}}}});
-  // sucursal (pastel)
-  mk("ch-suc",{type:"pie",data:{labels:d.sucursales.map(x=>nombreSucursal(x[0])),datasets:[{data:d.sucursales.map(x=>+x[1].monto.toFixed(2)),backgroundColor:COL}]},options:{plugins:{legend:{position:"bottom",labels:{boxWidth:12,font:{size:10}}}}}});
-  // productos (barras)
-  mk("ch-prod",{type:"bar",data:{labels:d.topProductos.map(x=>x[0]),datasets:[{label:"Monto $",data:d.topProductos.map(x=>+x[1].monto.toFixed(2)),backgroundColor:"#D61F26"}]},options:{indexAxis:"y",plugins:{legend:{display:false}}}});
-  // clientes (barras)
-  mk("ch-cli",{type:"bar",data:{labels:d.topClientes.map(x=>x[0].length>22?x[0].slice(0,22)+"…":x[0]),datasets:[{label:"Monto $",data:d.topClientes.map(x=>+x[1].monto.toFixed(2)),backgroundColor:"#0E2A47"}]},options:{indexAxis:"y",plugins:{legend:{display:false}}}});
-  // vendedor (pastel)
-  mk("ch-vend",{type:"pie",data:{labels:d.vendedores.map(x=>x[0]),datasets:[{data:d.vendedores.map(x=>+x[1].monto.toFixed(2)),backgroundColor:COL}]},options:{plugins:{legend:{position:"bottom",labels:{boxWidth:12,font:{size:9}}}}}});
-  // motivo (barras)
-  mk("ch-mot",{type:"bar",data:{labels:d.motivos.map(x=>x[0].length>20?x[0].slice(0,20)+"…":x[0]),datasets:[{label:"Monto $",data:d.motivos.map(x=>+x[1].monto.toFixed(2)),backgroundColor:"#232021"}]},options:{indexAxis:"y",plugins:{legend:{display:false}}}});
+  var COL=["#D61F26","#0E2A47","#232021","#1E7F4F","#C77F00","#6A2E91","#143A60","#B3261E","#5B6877","#8A6400"];
+  var mk=function(id,cfg){ var el=$(id); if(!el)return; chartRefs.push(new Chart(el,cfg)); };
+  mk("ch-dia",{type:"line",data:{labels:d.dias.map(function(x){return x[0].slice(5);}),datasets:[{label:"Devuelto $",data:d.dias.map(function(x){return +x[1].toFixed(2);}),borderColor:"#D61F26",backgroundColor:"rgba(214,31,38,.12)",fill:true,tension:.25}]},options:{plugins:{legend:{display:false}},scales:{y:{beginAtZero:true}}}});
+  mk("ch-suc",{type:"pie",data:{labels:d.sucursales.map(function(x){return nombreSucursal(x[0]);}),datasets:[{data:d.sucursales.map(function(x){return +x[1].monto.toFixed(2);}),backgroundColor:COL}]},options:{plugins:{legend:{position:"bottom",labels:{boxWidth:12,font:{size:10}}}}}});
+  mk("ch-prod",{type:"bar",data:{labels:d.topProductos.map(function(x){return x[0];}),datasets:[{label:"Monto $",data:d.topProductos.map(function(x){return +x[1].monto.toFixed(2);}),backgroundColor:"#D61F26"}]},options:{indexAxis:"y",plugins:{legend:{display:false}}}});
+  mk("ch-cli",{type:"bar",data:{labels:d.topClientes.map(function(x){return x[0].length>22?x[0].slice(0,22)+"…":x[0];}),datasets:[{label:"Monto $",data:d.topClientes.map(function(x){return +x[1].monto.toFixed(2);}),backgroundColor:"#0E2A47"}]},options:{indexAxis:"y",plugins:{legend:{display:false}}}});
+  mk("ch-vend",{type:"pie",data:{labels:d.vendedores.map(function(x){return x[0];}),datasets:[{data:d.vendedores.map(function(x){return +x[1].monto.toFixed(2);}),backgroundColor:COL}]},options:{plugins:{legend:{position:"bottom",labels:{boxWidth:12,font:{size:9}}}}}});
+  mk("ch-mot",{type:"bar",data:{labels:d.motivos.map(function(x){return x[0].length>20?x[0].slice(0,20)+"…":x[0];}),datasets:[{label:"Monto $",data:d.motivos.map(function(x){return +x[1].monto.toFixed(2);}),backgroundColor:"#232021"}]},options:{indexAxis:"y",plugins:{legend:{display:false}}}});
 }
 function excelIndicadores(desde,hasta){
   const tks=ticketsDevolucionEnRango(desde,hasta);
@@ -1941,6 +1936,9 @@ async function ejecutarLimpiarTodo(){
 
 /* ============================================================ INIT ============================================================ */
 initLogin();
+// Respaldo: asegurar que los usuarios se carguen aunque algo haya fallado antes
+window.addEventListener("DOMContentLoaded",function(){ try{ if($("login-user")&&$("login-user").options.length===0) initLogin(); }catch(e){} });
+setTimeout(function(){ try{ if($("login-user")&&$("login-user").options.length===0) initLogin(); }catch(e){} },300);
 </script>
 </body>
 </html>
