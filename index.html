@@ -4,10 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>LUBAMAQUI · Devoluciones y Garantías</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" defer></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js" defer></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js" defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <!-- Firebase (Realtime Database) -->
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
@@ -109,68 +109,12 @@ td{padding:8px;border-bottom:1px solid var(--line);vertical-align:top}
     </div>
     <h1 style="text-align:center">LUBA<span style="color:var(--rojo)">MAQUI</span></h1>
     <div class="sub" style="text-align:center">Devoluciones · Garantías · Notas de crédito</div>
-    <div class="field"><label>Usuario</label><select id="login-user">
-      <option value="0">JOSUE PINEDA — Asesor comercial</option>
-      <option value="1">CARLOS HERRERA — Asesor comercial</option>
-      <option value="2">MOISES MOLINA — Asesor comercial</option>
-      <option value="3">SEBASTIAN VANEGAS — Asesor comercial</option>
-      <option value="4">DANIEL ESPAÑA — Asesor comercial</option>
-      <option value="5">FERNANDO MEZA — Asesor comercial</option>
-      <option value="6">PABLO PERALTA — Asesor comercial</option>
-      <option value="7">CRISTIAN SALAZAR — Asesor comercial</option>
-      <option value="8">CARLOS GRANJA — Asesor comercial</option>
-      <option value="9">CRISTINA CIFUENTES — Asesor comercial</option>
-      <option value="10">EDISON MAYORGA — Asesor comercial</option>
-      <option value="11">EDUARDO PICO — Asesor comercial</option>
-      <option value="12">STALIN COBA — Asesor comercial</option>
-      <option value="13">MABEL JACOME — Asesor comercial</option>
-      <option value="14">DIEGO ACHACHI — Asesor comercial</option>
-      <option value="15">CALL CENTER 1 — Asesor comercial</option>
-      <option value="16">ANTHONY SANTILLAN (Mercadería) — Revisión de mercadería</option>
-      <option value="17">REVISOR MER1 — Revisión de mercadería</option>
-      <option value="18">ANTHONY SANTILLAN (Devolución) — Revisión de devolución</option>
-      <option value="19">REVISOR DEV1 — Revisión de devolución</option>
-      <option value="20">WILLIAM MANOTOA — Revisión de garantía</option>
-      <option value="21">REVISOR GAR1 — Revisión de garantía</option>
-      <option value="22">JESSICA ANJA — Notas de crédito</option>
-      <option value="23">REVISOR NC1 — Notas de crédito</option>
-      <option value="24">BELEN MANZANO — Administrativo</option>
-      <option value="25">WILLIAM ACHACHI — Administrativo</option>
-      <option value="26">TANNIA BASSANTES — Administrativo</option>
-    </select></div>
-    <div class="field"><label>Contraseña</label><input id="login-pass" type="password" placeholder="••••"></div>
+    <div class="field"><label>Usuario</label><select id="login-user"></select></div>
+    <div class="field"><label>Contraseña</label><input id="login-pass" type="password" placeholder="••••" onkeydown="if(event.key==='Enter')doLogin()"></div>
     <div id="login-err" style="color:var(--bad);font-size:13px;margin-bottom:10px;display:none">Contraseña incorrecta.</div>
-    <button id="btn-entrar" class="btn btn-a" style="width:100%;justify-content:center;font-size:15px;padding:12px">Entrar</button>
-    <div id="login-js-err" style="color:#B3261E;font-size:12px;margin-top:10px;display:none;background:#FBE9E7;padding:8px;border-radius:6px"></div>
+    <button class="btn btn-a" style="width:100%;justify-content:center;font-size:15px;padding:12px" onclick="doLogin()">Entrar</button>
   </div>
 </div>
-
-<script>
-(function(){
-  function tryLogin(){
-    try{
-      if(typeof doLogin === "function"){
-        doLogin();
-      } else {
-        var el = document.getElementById("login-js-err");
-        el.style.display="block";
-        el.textContent="Error: el sistema no cargo correctamente. Revisa tu conexion a internet y recarga la pagina (F5).";
-      }
-    }catch(e){
-      var el = document.getElementById("login-js-err");
-      el.style.display="block";
-      el.textContent="Error al iniciar sesion: "+e.message;
-      console.error(e);
-    }
-  }
-  document.addEventListener("DOMContentLoaded", function(){
-    var btn = document.getElementById("btn-entrar");
-    var pass = document.getElementById("login-pass");
-    if(btn) btn.addEventListener("click", tryLogin);
-    if(pass) pass.addEventListener("keydown", function(e){ if(e.key==="Enter") tryLogin(); });
-  });
-})();
-<\/script>
 
 <div id="app-view" style="display:none">
   <div class="topbar">
@@ -546,14 +490,7 @@ function tagFor(t){
 
 /* ============================================================ LOGIN ============================================================ */
 function initLogin(){
-  try{
-    const sel=$("login-user");
-    if(!sel){ console.error("login-user no encontrado"); return; }
-    // Solo regenerar si el select está vacío (si ya tiene opciones del HTML, no duplicar)
-    if(sel.options.length===0){
-      sel.innerHTML=USERS.map((u,i)=>`<option value="${i}">${esc(u.name)} — ${ROLE_LABEL[u.role]}</option>`).join("");
-    }
-  }catch(e){ console.error("initLogin error:",e); }
+  $("login-user").innerHTML=USERS.map((u,i)=>`<option value="${i}">${esc(u.name)} — ${ROLE_LABEL[u.role]}</option>`).join("");
 }
 async function doLogin(){
   const u=USERS[+$("login-user").value];
@@ -1716,6 +1653,7 @@ const SUCURSALES={"004":"Sucursal 004 (El Rey)","002":"Sucursal 002 (Bodega)","0
 const UMBRAL_MAYORISTA=500; // un cliente con devoluciones/compras sobre este monto se considera mayorista
 let chartRefs=[];
 function nombreSucursal(cod){ return SUCURSALES[cod]||("Sucursal "+(cod||"?")); }
+function cerrarIndicadores(){ chartRefs.forEach(function(c){try{c.destroy();}catch(e){}}); chartRefs=[]; $('modal-root').innerHTML=''; }
 /* Devuelve los tickets que representan una devolución/garantía REAL en el rango.
    Se cuentan los que llegaron a NC o ya tienen mercadería recibida con items aceptados. */
 function ticketsDevolucionEnRango(desde,hasta){
@@ -1791,7 +1729,7 @@ function verIndicadores(){
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:6px;flex-wrap:wrap">
       <h2 style="font-size:24px;color:var(--navy);flex:1">📊 Indicadores de devoluciones y garantías</h2>
       <button class="btn btn-ok btn-sm" onclick="excelIndicadores('${desde}','${hasta}')">⬇ Descargar Excel</button>
-      <button class="btn btn-g btn-sm" onclick="chartRefs.forEach(c=>{try{c.destroy()}catch(e){}});chartRefs=[];$('modal-root').innerHTML=''">Cerrar</button>
+      <button class="btn btn-g btn-sm" onclick="cerrarIndicadores()">Cerrar</button>
     </div>
     <div class="muted" style="margin-bottom:16px">Periodo: <b>${esc(rango)}</b> · ${tks.length} ticket(s) de devolución/garantía</div>
 
@@ -1803,7 +1741,7 @@ function verIndicadores(){
     <div class="card" style="background:#F0F3F7">
       <div class="kv" style="grid-template-columns:200px 1fr">
         <b>Venta bruta (base)</b><span>${money(ventaBruta)}</span>
-        <b>Total devoluciones</b><span style="color:var(--bad)">− ${money(totalDev)}</span>
+        <b>Total devoluciones</b><span style="color:var(--bad)">- ${money(totalDev)}</span>
         <b>Venta neta real</b><span style="color:var(--ok);font-weight:700">${money(ventaNeta)}</span>
         <b>Productos devueltos</b><span>${totalProdDev.toLocaleString("es-EC")} unidades</span>
       </div>
@@ -1845,7 +1783,7 @@ function verIndicadores(){
   </div></div>`;
 
   // ---- Dibujar gráficos ----
-  setTimeout(()=>dibujarCharts({dias,sucursales,topProductos,topClientes,vendedores,motivos}),100);
+  setTimeout(function(){ dibujarCharts({dias:dias,sucursales:sucursales,topProductos:topProductos,topClientes:topClientes,vendedores:vendedores,motivos:motivos}); },100);
 }
 function dibujarCharts(d){
   if(typeof Chart==="undefined"){ toast("Los gráficos no cargaron (revisa conexión)."); return; }
@@ -2002,11 +1940,7 @@ async function ejecutarLimpiarTodo(){
 }
 
 /* ============================================================ INIT ============================================================ */
-if(document.readyState==="loading"){
-  document.addEventListener("DOMContentLoaded", initLogin);
-} else {
-  initLogin();
-}
+initLogin();
 </script>
 </body>
 </html>
