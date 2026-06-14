@@ -7,7 +7,6 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <!-- Firebase (Realtime Database) -->
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
@@ -323,7 +322,7 @@ async function leerBaseDeFirebase(onProg){
   if(!fbReady) return null;
   const metaSnap=await fbDB.ref("baseFacturas/meta").get();
   const meta=metaSnap.val();
-  if(!meta||!meta.n) return null;
+  if(!meta || !meta.n) return null;
   if(onProg) onProg("Leyendo base desde Firebase…",20);
   let json="";
   for(let i=0;i<meta.n;i++){
@@ -332,39 +331,36 @@ async function leerBaseDeFirebase(onProg){
     json+=c.val()||"";
   }
   const comp=JSON.parse(json);
-  return {rows:descomprimirBase(comp),meta};
+  return {rows:descomprimirBase(comp),meta:meta};
 }
 
 /* ============================================================ CARGA BASE DESDE GOOGLE SHEETS ============================================================ */
 /* La base de facturas se carga directo del CSV público de Sheets.
    Se cachea en memoria por sesión. El admin puede forzar recarga. */
 /* ============================================================ CARGA DE BASE (Firebase primero, Sheets de respaldo) ============================================================ */
-/* Estrategia rápida: lee la base ya guardada en Firebase (veloz). Si no existe,
-   cae a Google Sheets. El admin actualiza Firebase con el botón correspondiente. */
-async function cargarBase(forzar=false, onProg=null){
-  if(baseLoaded&&!forzar) return;
+async function cargarBase(forzar, onProg){
+  if(baseLoaded && !forzar) return;
   // 1) Intentar Firebase (rápido) con tope de tiempo
   try{
     if(onProg) onProg("Buscando base en Firebase…",10);
     const res=await Promise.race([
       leerBaseDeFirebase(onProg),
-      new Promise((_,rej)=>setTimeout(()=>rej(new Error("timeout Firebase")),20000))
+      new Promise(function(_,rej){ setTimeout(function(){ rej(new Error("timeout Firebase")); },20000); })
     ]);
-    if(res&&res.rows&&res.rows.length){
+    if(res && res.rows && res.rows.length){
       base=res.rows; indexarBase(); baseLoaded=true; baseLineas=base.length;
       baseFechaStr="Firebase · "+(res.meta.ts?new Date(res.meta.ts).toLocaleString("es-EC"):"");
       actualizarChipBase();
       if(onProg) onProg("Base lista: "+base.length.toLocaleString("es-EC")+" líneas (Firebase)",100);
       return;
     }
-  }catch(e){ console.warn("Base Firebase falló o no existe, uso Sheets:",e&&e.message); }
+  }catch(e){ console.warn("Base Firebase no disponible, uso Sheets:", e && e.message); }
   // 2) Respaldo: Google Sheets
   if(onProg) onProg("Cargando desde Google Sheets…",15);
   await cargarBaseDesdeSheets(true,onProg);
 }
 
-async function cargarBaseDesdeSheets(forzar=false, onProg=null){
-  if(baseLoaded&&!forzar) return; // ya en memoria
+async function cargarBaseDesdeSheets(forzar, onProg){
   if(onProg) onProg("Descargando base de facturas desde Google Sheets…", 10);
   let csvText=null, ultimoError="";
 
@@ -422,7 +418,6 @@ function parsearCSV(text){
   const rows=[];
   const lines=text.split(/\r?\n/);
   if(lines.length<2) return [];
-  // Detectar separador
   const sep=lines[0].includes(";")?";":",";
   const headers=splitCSVLine(lines[0],sep).map(norm);
   const idx=h=>headers.indexOf(h);
@@ -459,6 +454,7 @@ function actualizarChipBase(){
   const el=document.getElementById("chip-base");
   if(el) el.textContent=baseLoaded?`📋 ${baseLineas.toLocaleString("es-EC")} líneas`:"";
 }
+/* FIN_SECCION_CARGA_BASE */
 
 /* ============================================================ UTIL ============================================================ */
 const $=id=>document.getElementById(id);
@@ -1628,7 +1624,60 @@ async function confirmarEliminar(id){
   t.historial.push({f:ahora,e:"Eliminado por "+me.name+". Motivo: "+motivo});
   await saveState();$("modal-root").innerHTML="";toast("✓ Ticket "+t.numero+" eliminado.");render();
 }
-/* ============================================================ DASHBOARD DE INDICADORES ============================================================ */
+/* ============================================================ GRÁFICOS SVG (sin librerías, sin eval) ============================================================ */
+const PALETA=["#0E2A47","#D61F26","#143A60","#1A1A1A","#5B6877","#1E7F4F","#C77F00","#6A2E91","#2E7D9B","#A3161B"];
+function svgBarras(datos,opts){
+  // datos: [{label,valor}], horizontal
+  opts=opts||{};
+  const max=Math.max(1,...datos.map(d=>d.valor));
+  const fmt=opts.money?money:(v=>v.toLocaleString("es-EC"));
+  const filas=datos.map((d,i)=>{
+    const pct=(d.valor/max*100);
+    return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+      <div style="width:130px;font-size:11px;text-align:right;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(d.label)}">${esc(d.label)}</div>
+      <div style="flex:1;background:#EEF1F4;border-radius:4px;height:20px;position:relative">
+        <div style="width:${pct}%;background:${opts.color||PALETA[i%PALETA.length]};height:100%;border-radius:4px;min-width:2px"></div>
+      </div>
+      <div style="width:80px;font-size:11px;font-weight:600;text-align:right">${fmt(d.valor)}</div>
+    </div>`;
+  }).join("");
+  return `<div style="padding:6px 0">${filas}</div>`;
+}
+function svgPastel(datos){
+  // datos: [{label,valor}]
+  const total=datos.reduce((s,d)=>s+d.valor,0)||1;
+  let ang=0; const R=70,CX=80,CY=80;
+  const slices=datos.map((d,i)=>{
+    const frac=d.valor/total; const a0=ang; const a1=ang+frac*2*Math.PI; ang=a1;
+    const x0=CX+R*Math.cos(a0), y0=CY+R*Math.sin(a0), x1=CX+R*Math.cos(a1), y1=CY+R*Math.sin(a1);
+    const large=frac>0.5?1:0;
+    return `<path d="M${CX},${CY} L${x0.toFixed(1)},${y0.toFixed(1)} A${R},${R} 0 ${large},1 ${x1.toFixed(1)},${y1.toFixed(1)} Z" fill="${PALETA[i%PALETA.length]}"></path>`;
+  }).join("");
+  const leyenda=datos.map((d,i)=>`<div style="display:flex;align-items:center;gap:6px;font-size:11px;margin-bottom:3px">
+    <span style="width:11px;height:11px;background:${PALETA[i%PALETA.length]};border-radius:2px;display:inline-block"></span>
+    <span style="flex:1">${esc(d.label)}</span><b>${(d.valor/total*100).toFixed(1)}%</b></div>`).join("");
+  return `<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+    <svg width="160" height="160" viewBox="0 0 160 160">${slices}</svg>
+    <div style="flex:1;min-width:150px">${leyenda}</div></div>`;
+}
+function svgLinea(labels,valores){
+  const W=600,H=160,P=30;
+  const max=Math.max(1,...valores);
+  const pts=valores.map((v,i)=>{
+    const x=P+(i/(Math.max(1,valores.length-1)))*(W-2*P);
+    const y=H-P-(v/max)*(H-2*P);
+    return [x,y];
+  });
+  const linea=pts.map((p,i)=>(i?"L":"M")+p[0].toFixed(1)+","+p[1].toFixed(1)).join(" ");
+  const area=linea+` L${pts[pts.length-1][0].toFixed(1)},${H-P} L${pts[0][0].toFixed(1)},${H-P} Z`;
+  const dots=pts.map(p=>`<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="3" fill="#D61F26"></circle>`).join("");
+  const xlabels=labels.map((l,i)=>{ if(labels.length>12 && i%Math.ceil(labels.length/12)!==0) return ""; const x=P+(i/(Math.max(1,labels.length-1)))*(W-2*P); return `<text x="${x.toFixed(1)}" y="${H-8}" font-size="9" text-anchor="middle" fill="#5B6877">${esc(l)}</text>`; }).join("");
+  return `<svg width="100%" viewBox="0 0 ${W} ${H}" style="max-width:100%">
+    <path d="${area}" fill="rgba(214,31,38,.1)"></path>
+    <path d="${linea}" fill="none" stroke="#D61F26" stroke-width="2"></path>
+    ${dots}${xlabels}</svg>`;
+}
+
 /* Calcula los datos de devoluciones aceptadas (tickets que llegaron a NC o tienen items aceptados) */
 function datosIndicadores(desde,hasta){
   // Tickets considerados "devolución/garantía con monto" = los que tienen total aceptado
@@ -1712,18 +1761,18 @@ function abrirIndicadores(){
     </div>
 
     <div class="sec-title">Evolución diaria de devoluciones</div>
-    <div class="card" style="margin-bottom:14px"><canvas id="chart-dia" height="90"></canvas></div>
+    <div class="card" style="margin-bottom:14px">${svgLinea(dias.map(d=>d.slice(5)),dias.map(d=>porDia[d]))}</div>
 
     <div class="grid2" style="margin-bottom:14px">
-      <div class="card" style="margin:0"><div class="sec-title" style="margin-top:0">Por sucursal</div><canvas id="chart-suc" height="160"></canvas></div>
-      <div class="card" style="margin:0"><div class="sec-title" style="margin-top:0">Por vendedor</div><canvas id="chart-ven" height="160"></canvas></div>
+      <div class="card" style="margin:0"><div class="sec-title" style="margin-top:0">Por sucursal</div>${svgPastel(suc.map(s=>({label:s.k,valor:s.v})))}</div>
+      <div class="card" style="margin:0"><div class="sec-title" style="margin-top:0">Por vendedor</div>${svgPastel(ven.map(v=>({label:v.k,valor:v.v})))}</div>
     </div>
 
     <div class="sec-title">Top productos más devueltos (por cantidad)</div>
-    <div class="card" style="margin-bottom:14px"><canvas id="chart-prod" height="110"></canvas></div>
+    <div class="card" style="margin-bottom:14px">${svgBarras(prodC.map(p=>({label:p.k.slice(0,30),valor:p.full.cant})),{color:"#0E2A47"})}</div>
 
     <div class="sec-title">Top clientes que más devolvieron (por monto)</div>
-    <div class="card" style="margin-bottom:14px"><canvas id="chart-cli" height="110"></canvas></div>
+    <div class="card" style="margin-bottom:14px">${svgBarras(cli.map(c=>({label:c.k.slice(0,30),valor:c.v})),{color:"#D61F26",money:true})}</div>
 
     <div class="grid2">
       <div class="card" style="margin:0"><div class="sec-title" style="margin-top:0">Ranking de productos</div>
@@ -1736,17 +1785,6 @@ function abrirIndicadores(){
         </tbody></table></div></div>
     </div>
   </div></div>`;
-
-  // Dibujar gráficos (después de que el DOM exista)
-  setTimeout(()=>{
-    const PAL=["#0E2A47","#D61F26","#143A60","#1A1A1A","#5B6877","#1E7F4F","#C77F00","#6A2E91","#2E7D9B","#A3161B"];
-    if(typeof Chart==="undefined"){ toast("Gráficos no disponibles (sin conexión)."); return; }
-    new Chart($("chart-dia"),{type:"line",data:{labels:dias.map(d=>d.slice(5)),datasets:[{label:"Monto devuelto",data:dias.map(d=>porDia[d]),borderColor:"#D61F26",backgroundColor:"rgba(214,31,38,.1)",fill:true,tension:.3}]},options:{plugins:{legend:{display:false}},responsive:true,maintainAspectRatio:true}});
-    new Chart($("chart-suc"),{type:"pie",data:{labels:suc.map(s=>s.k),datasets:[{data:suc.map(s=>s.v),backgroundColor:PAL}]},options:{responsive:true,maintainAspectRatio:true,plugins:{legend:{position:"right",labels:{font:{size:10}}}}}});
-    new Chart($("chart-ven"),{type:"pie",data:{labels:ven.map(v=>v.k),datasets:[{data:ven.map(v=>v.v),backgroundColor:PAL}]},options:{responsive:true,maintainAspectRatio:true,plugins:{legend:{position:"right",labels:{font:{size:10}}}}}});
-    new Chart($("chart-prod"),{type:"bar",data:{labels:prodC.map(p=>p.k.slice(0,18)),datasets:[{label:"Cantidad devuelta",data:prodC.map(p=>p.full.cant),backgroundColor:"#0E2A47"}]},options:{indexAxis:"y",plugins:{legend:{display:false}},responsive:true,maintainAspectRatio:true}});
-    new Chart($("chart-cli"),{type:"bar",data:{labels:cli.map(c=>c.k.slice(0,18)),datasets:[{label:"Monto devuelto",data:cli.map(c=>c.v),backgroundColor:"#D61F26"}]},options:{indexAxis:"y",plugins:{legend:{display:false}},responsive:true,maintainAspectRatio:true}});
-  },100);
 }
 function excelIndicadores(desde,hasta){
   const datos=datosIndicadores(desde||"",hasta||"");
@@ -1894,6 +1932,16 @@ async function ejecutarLimpiarTodo(){
 }
 
 /* ============================================================ INIT ============================================================ */
+window.addEventListener("error",function(ev){
+  // Si algo falla, al menos avisa en pantalla en vez de quedarse en blanco
+  try{
+    var lv=document.getElementById("login-err");
+    if(lv && document.getElementById("login-view").style.display!=="none"){
+      lv.style.display="block";
+      lv.textContent="Error técnico: "+(ev.message||"desconocido")+". Recarga la página.";
+    }
+  }catch(e){}
+});
 precargarLogo();
 initLogin();
 </script>
