@@ -340,66 +340,61 @@ async function leerBaseDeFirebase(onProg){
 /* ============================================================ CARGA DE BASE (Firebase primero, Sheets de respaldo) ============================================================ */
 async function cargarBase(forzar, onProg){
   if(baseLoaded && !forzar) return;
-  // 1) Intentar Firebase (rápido) con tope de tiempo
   try{
     if(onProg) onProg("Buscando base en Firebase…",10);
-    const res=await Promise.race([
-      leerBaseDeFirebase(onProg),
-      new Promise(function(_,rej){ setTimeout(function(){ rej(new Error("timeout Firebase")); },20000); })
-    ]);
+    var timeout=new Promise(function(resolve,reject){ setTimeout(function(){ reject(new Error("timeout Firebase")); },20000); });
+    var res=await Promise.race([ leerBaseDeFirebase(onProg), timeout ]);
     if(res && res.rows && res.rows.length){
-      base=res.rows; indexarBase(); baseLoaded=true; baseLineas=base.length;
+      base=res.rows;
+      indexarBase();
+      baseLoaded=true;
+      baseLineas=base.length;
       baseFechaStr="Firebase · "+(res.meta.ts?new Date(res.meta.ts).toLocaleString("es-EC"):"");
       actualizarChipBase();
       if(onProg) onProg("Base lista: "+base.length.toLocaleString("es-EC")+" líneas (Firebase)",100);
       return;
     }
   }catch(e){ console.warn("Base Firebase no disponible, uso Sheets:", e && e.message); }
-  // 2) Respaldo: Google Sheets
   if(onProg) onProg("Cargando desde Google Sheets…",15);
   await cargarBaseDesdeSheets(true,onProg);
 }
 
 async function cargarBaseDesdeSheets(forzar, onProg){
   if(onProg) onProg("Descargando base de facturas desde Google Sheets…", 10);
-  let csvText=null, ultimoError="";
-
-  // Probamos cada URL base, y para cada una varios métodos (directo + proxies),
-  // hasta que alguna combinación devuelva un CSV válido.
-  // Se agrega un parámetro único (_=timestamp) para EVITAR caché.
-  const cacheBuster="&_="+Date.now();
-  const conBuster=u=> u + (u.includes("?")?cacheBuster:"?"+cacheBuster.slice(1));
-  const fetchTexto=async(metodo,url)=>{
-    const u=conBuster(url);
-    const opts={cache:"no-store"};
-    if(metodo==="directo"){ const r=await fetch(u,opts); if(!r.ok)throw new Error("HTTP "+r.status); return await r.text(); }
-    if(metodo==="allorigins_raw"){ const r=await fetch("https://api.allorigins.win/raw?url="+encodeURIComponent(u),opts); if(!r.ok)throw new Error("HTTP "+r.status); return await r.text(); }
-    if(metodo==="corsproxy"){ const r=await fetch("https://corsproxy.io/?url="+encodeURIComponent(u),opts); if(!r.ok)throw new Error("HTTP "+r.status); return await r.text(); }
-    if(metodo==="allorigins_get"){ const r=await fetch("https://api.allorigins.win/get?url="+encodeURIComponent(u)+"&_="+Date.now(),opts); if(!r.ok)throw new Error("HTTP "+r.status); const j=await r.json(); return j.contents; }
-    if(metodo==="codetabs"){ const r=await fetch("https://api.codetabs.com/v1/proxy/?quest="+encodeURIComponent(u),opts); if(!r.ok)throw new Error("HTTP "+r.status); return await r.text(); }
-  };
-  const metodos=["directo","allorigins_raw","corsproxy","allorigins_get","codetabs"];
-  const esValido=txt=> txt && txt.length>50 && !txt.trim().toLowerCase().startsWith("<!doctype") && !txt.trim().toLowerCase().startsWith("<html") && txt.includes(",");
-
-  let intento=0; const totalIntentos=CSV_URLS.length*metodos.length;
-  for(const url of CSV_URLS){
-    for(const metodo of metodos){
+  var csvText=null, ultimoError="";
+  var cacheBuster="&_="+Date.now();
+  function conBuster(u){ return u + (u.indexOf("?")>=0 ? cacheBuster : "?"+cacheBuster.slice(1)); }
+  async function fetchTexto(metodo,url){
+    var u=conBuster(url);
+    var opts={cache:"no-store"};
+    if(metodo==="directo"){ var r=await fetch(u,opts); if(!r.ok)throw new Error("HTTP "+r.status); return await r.text(); }
+    if(metodo==="allorigins_raw"){ var r2=await fetch("https://api.allorigins.win/raw?url="+encodeURIComponent(u),opts); if(!r2.ok)throw new Error("HTTP "+r2.status); return await r2.text(); }
+    if(metodo==="corsproxy"){ var r3=await fetch("https://corsproxy.io/?url="+encodeURIComponent(u),opts); if(!r3.ok)throw new Error("HTTP "+r3.status); return await r3.text(); }
+    if(metodo==="allorigins_get"){ var r4=await fetch("https://api.allorigins.win/get?url="+encodeURIComponent(u)+"&_="+Date.now(),opts); if(!r4.ok)throw new Error("HTTP "+r4.status); var j=await r4.json(); return j.contents; }
+    if(metodo==="codetabs"){ var r5=await fetch("https://api.codetabs.com/v1/proxy/?quest="+encodeURIComponent(u),opts); if(!r5.ok)throw new Error("HTTP "+r5.status); return await r5.text(); }
+    return null;
+  }
+  var metodos=["directo","allorigins_raw","corsproxy","allorigins_get","codetabs"];
+  function esValido(txt){ return txt && txt.length>50 && txt.trim().toLowerCase().indexOf("<!doctype")!==0 && txt.trim().toLowerCase().indexOf("<html")!==0 && txt.indexOf(",")>=0; }
+  var intento=0; var totalIntentos=CSV_URLS.length*metodos.length;
+  for(var ui=0; ui<CSV_URLS.length; ui++){
+    var url=CSV_URLS[ui];
+    for(var mi=0; mi<metodos.length; mi++){
       intento++;
       try{
         if(onProg) onProg("Conectando con Google Sheets ("+intento+"/"+totalIntentos+")…", 10+Math.round(intento/totalIntentos*40));
-        const txt=await fetchTexto(metodo,url);
+        var txt=await fetchTexto(metodos[mi],url);
         if(esValido(txt)){ csvText=txt; break; }
         ultimoError="Respuesta no válida (¿hoja sin permiso público?)";
       }catch(e){ ultimoError=(e&&e.message)||String(e); }
     }
     if(csvText) break;
   }
-
   if(!csvText){
     throw new Error("No se pudo descargar la base. "+ultimoError+". Comparte la hoja como 'Cualquiera con el enlace' o publícala como CSV.");
   }
   if(onProg) onProg("Procesando filas…", 60);
-  base = parsearCSV(csvText);   // reemplaza completamente la base anterior
+  base = parsearCSV(csvText);
   indexarBase();
   baseLoaded=true;
   baseLineas=base.length;
@@ -1527,12 +1522,8 @@ function renderAdmin(){
     </div>
     <div class="card" style="border-left:5px solid var(--navy)">
       <h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">📊 Indicadores de devoluciones y garantías</h3>
-      <div class="muted" style="margin-bottom:12px">Dashboard con tasa de devolución, ranking de clientes, productos, vendedores, sucursales, motivos e impacto económico. Con tablas y gráficos. Puedes filtrar por rango de fechas.</div>
-      <div class="grid3" style="margin-bottom:10px">
-        <div class="field" style="margin-bottom:0"><label>Desde</label><input type="date" id="ind-desde"></div>
-        <div class="field" style="margin-bottom:0"><label>Hasta</label><input type="date" id="ind-hasta"></div>
-        <div class="field" style="margin-bottom:0"><label>&nbsp;</label><button class="btn btn-p" style="width:100%;justify-content:center" onclick="abrirIndicadores()">📊 Ver indicadores</button></div>
-      </div>
+      <div class="muted" style="margin-bottom:12px">Dashboard con tasa de devolución, ranking de clientes, productos, vendedores, sucursales, motivos e impacto económico. Con tablas y gráficos. Se abre en una página aparte y lee los mismos datos de Firebase.</div>
+      <a class="btn btn-p" href="dashboard.html" target="_blank">📊 Abrir dashboard de indicadores</a>
     </div>
     <div class="card" style="border-left:5px solid var(--ok)">
       <h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">Reporte consolidado de tickets</h3>
