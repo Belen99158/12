@@ -251,24 +251,32 @@ function parsearVentas(text){
   var H=splitCSVLine(lines[0],sep).map(norm);
   function idx(h){ return H.indexOf(h); }
   var iFact=idx("FACTURA"), iEmi=idx("EMISION"), iRazon=idx("RAZON SOCIAL"), iRuc=idx("IDENTIFICACION");
-  var iTotDoc=idx("TOTAL DOCUMENTO"), iNeto=idx("PRECIO TOTAL NETO");
-  var iCod=idx("CODIGO PRODUCTO"), iTotProd=idx("TOTAL PRODUCTO");
-  var vistas={}, ventas={};
+  var iTotDoc=idx("TOTAL DOCUMENTO"), iNeto=idx("PRECIO TOTAL NETO"), iTotProd=idx("TOTAL PRODUCTO");
+  var iCod=idx("CODIGO PRODUCTO");
   totalProdSheet={};
-  var listaV=[];
+  // Agrupamos por factura: TOTAL DOCUMENTO una sola vez (es el total de la factura),
+  // pero NETO y TOTAL PRODUCTO se SUMAN de todas las líneas de esa factura.
+  var porFactura={};
   for(var i=1;i<lines.length;i++){
     if(!lines[i].trim()) continue;
     var c=splitCSVLine(lines[i],sep);
     var fact=String(c[iFact]||"").trim();
     if(!fact) continue;
-    // total producto por factura+código (de la hoja real)
-    if(iTotProd>=0&&iCod>=0){ var cod=String(c[iCod]||"").trim(); totalProdSheet[fact+"|"+cod]=numEC(c[iTotProd]); }
-    if(vistas[fact]) continue;
-    vistas[fact]=1;
-    var totDoc=iTotDoc>=0?numEC(c[iTotDoc]):0;
-    var neto=iNeto>=0?numEC(c[iNeto]):0;
-    listaV.push({factura:fact,emision:String(c[iEmi]||"").trim(),razon:String(c[iRazon]||"").trim(),ruc:String(c[iRuc]||"").trim(),totalDoc:totDoc,neto:neto});
+    var cod=iCod>=0?String(c[iCod]||"").trim():"";
+    var lnNeto=iNeto>=0?numEC(c[iNeto]):0;
+    var lnTotProd=iTotProd>=0?numEC(c[iTotProd]):0;
+    var lnTotDoc=iTotDoc>=0?numEC(c[iTotDoc]):0;
+    if(cod) totalProdSheet[fact+"|"+cod]=lnTotProd;
+    if(!porFactura[fact]){
+      porFactura[fact]={factura:fact,emision:String(c[iEmi]||"").trim(),razon:String(c[iRazon]||"").trim(),ruc:String(c[iRuc]||"").trim(),totalDoc:lnTotDoc,neto:0,totalProd:0};
+    }
+    // TOTAL DOCUMENTO: nos quedamos con el de la factura (todas las líneas tienen el mismo)
+    // NETO y TOTAL PRODUCTO: acumulamos todas las líneas
+    porFactura[fact].neto+=lnNeto;
+    porFactura[fact].totalProd+=lnTotProd;
   }
+  var listaV=[];
+  for(var k in porFactura){ listaV.push(porFactura[k]); }
   return listaV;
 }
 async function cargarVentas(onProg){
@@ -337,14 +345,14 @@ function render(){
 
   function nombreMes(m){ if(!m) return "—"; var p=m.split("-"); return MESES[+p[1]-1]+" "+p[0]; }
 
-  /* ===== VENTAS: TODA la hoja, por fecha de EMISIÓN. Bruta=TOTAL DOCUMENTO, Neta=PRECIO TOTAL NETO ===== */
-  var ventaBruta=0, ventaNetaVtas=0, ventasPorMes={}, ventasNetoMes={}, ventasPorSucursal={}, ventasNetoSuc={}, nFacturas=0;
+  /* ===== VENTAS: por factura. Bruta=TOTAL DOCUMENTO (1 vez), Neta=PRECIO TOTAL NETO (suma), TOTAL PRODUCTO (suma) ===== */
+  var ventaBruta=0, ventaNetaVtas=0, ventaTotalProd=0, ventasPorMes={}, ventasNetoMes={}, ventasPorSucursal={}, ventasNetoSuc={}, nFacturas=0;
   if(ventasCargadas){
     ventasBase.forEach(function(v){
       var fe=v.emision?hoyStr(v.emision):"";
       if(desde&&fe&&fe<desde) return;
       if(hasta&&fe&&fe>hasta) return;
-      ventaBruta+=v.totalDoc; ventaNetaVtas+=v.neto; nFacturas++;
+      ventaBruta+=v.totalDoc; ventaNetaVtas+=v.neto; ventaTotalProd+=(v.totalProd||0); nFacturas++;
       if(fe){ var fm=mesStr(v.emision); ventasPorMes[fm]=(ventasPorMes[fm]||0)+v.totalDoc; ventasNetoMes[fm]=(ventasNetoMes[fm]||0)+v.neto; }
       var sn=sucursalDe(v.factura).nombre;
       ventasPorSucursal[sn]=(ventasPorSucursal[sn]||0)+v.totalDoc;
@@ -399,8 +407,8 @@ function render(){
   // VENTAS y TASA DE DEVOLUCIÓN GLOBAL
   if(ventasCargadas){
     h+='<div class="card" style="border-left:5px solid var(--rojo)"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><div class="sec-title" style="margin-top:0;flex:1;border:none">Tasa de devolución global e impacto sobre ventas</div><button class="btn btn-g btn-sm" onclick="diagnosticoVentas()">🔍 Verificar facturas contadas</button></div>';
-    h+='<div class="grid4"><div class="kpi"><div class="disp" style="color:var(--ok)">'+money(ventaBruta)+'</div><div class="lbl">Venta bruta (TOTAL DOCUMENTO con IVA)</div></div><div class="kpi"><div class="disp" style="color:var(--navy)">'+money(ventaNetaVtas)+'</div><div class="lbl">Venta neta (PRECIO TOTAL NETO sin IVA)</div></div><div class="kpi"><div class="disp" style="color:var(--rojo)">'+money(totalDevuelto)+'</div><div class="lbl">Devoluciones</div></div><div class="kpi"><div class="disp" style="color:'+(tasaGlobal>5?"var(--rojo)":"var(--ok)")+'">'+tasaGlobal.toFixed(2)+'%</div><div class="lbl">Tasa de devolución global</div></div></div>';
-    h+='<div class="grid2" style="margin-top:10px"><div class="kpi"><div class="disp" style="color:var(--navy)">'+money(ventaNetaReal)+'</div><div class="lbl">Venta neta real (bruta − devoluciones)</div></div><div class="kpi"><div class="disp" style="color:var(--ink)">'+nFacturas.toLocaleString("es-EC")+'</div><div class="lbl">Facturas únicas en el periodo</div></div></div>';
+    h+='<div class="grid4"><div class="kpi"><div class="disp" style="color:var(--ok)">'+money(ventaBruta)+'</div><div class="lbl">Venta bruta (TOTAL DOCUMENTO, 1 vez por factura)</div></div><div class="kpi"><div class="disp" style="color:var(--navy)">'+money(ventaNetaVtas)+'</div><div class="lbl">PRECIO TOTAL NETO (suma de líneas)</div></div><div class="kpi"><div class="disp" style="color:var(--navy2)">'+money(ventaTotalProd)+'</div><div class="lbl">TOTAL PRODUCTO (suma de líneas)</div></div><div class="kpi"><div class="disp" style="color:'+(tasaGlobal>6?"var(--rojo)":tasaGlobal>3?"#C77F00":"var(--ok)")+'">'+tasaGlobal.toFixed(2)+'%</div><div class="lbl">Tasa de devolución global</div></div></div>';
+    h+='<div class="grid3" style="margin-top:10px"><div class="kpi"><div class="disp" style="color:var(--rojo)">'+money(totalDevuelto)+'</div><div class="lbl">Devoluciones del periodo</div></div><div class="kpi"><div class="disp" style="color:var(--navy)">'+money(ventaNetaReal)+'</div><div class="lbl">Venta neta real (bruta − devuelto)</div></div><div class="kpi"><div class="disp" style="color:var(--ink)">'+nFacturas.toLocaleString("es-EC")+'</div><div class="lbl">Facturas únicas</div></div></div>';
     h+='<div class="muted" style="margin-top:10px;background:#F0F3F7;padding:10px 12px;border-radius:6px"><b>📌 De dónde salen los números:</b><br>• <b>Venta bruta</b> = suma del TOTAL DOCUMENTO de cada factura única (se cuenta una sola vez aunque tenga varios productos), de TODA la hoja, filtrada por fecha de emisión.<br>• <b>Venta neta</b> = igual pero con PRECIO TOTAL NETO (sin IVA).<br>• <b>Devoluciones</b> = total aceptado de los tickets de devolución/garantía en el periodo (fecha del ticket).<br>• <b>Tasa</b> = devoluciones ÷ venta bruta × 100.</div></div>';
     var mesesV=Object.keys(ventasPorMes).sort();
     if(mesesV.length){
@@ -494,12 +502,12 @@ function exportarExcel(){
   // ===== Cálculos para resumen =====
   var totalDevuelto=0, totalProd=0, devAprobado=0, devProceso=0;
   datos.forEach(function(d){ totalDevuelto+=d.monto; totalProd+=d.t.items.reduce(function(a,i){return a+i.cantidad;},0); if(d.t.estado==="NC") devAprobado+=d.monto; else devProceso+=d.monto; });
-  var ventaBruta=0, ventaNeto=0, vMes={}, vNetoMes={}, vSuc={}, vNetoSuc={};
+  var ventaBruta=0, ventaNeto=0, ventaTotProd=0, vMes={}, vNetoMes={}, vSuc={}, vNetoSuc={};
   ventasBase.forEach(function(v){
     var fe=v.emision?hoyStr(v.emision):"";
     if(desde&&fe&&fe<desde) return;
     if(hasta&&fe&&fe>hasta) return;
-    ventaBruta+=v.totalDoc; ventaNeto+=v.neto;
+    ventaBruta+=v.totalDoc; ventaNeto+=v.neto; ventaTotProd+=(v.totalProd||0);
     if(fe){ var fm=mesStr(v.emision); vMes[fm]=(vMes[fm]||0)+v.totalDoc; vNetoMes[fm]=(vNetoMes[fm]||0)+v.neto; }
     var sn=sucursalDe(v.factura).nombre; vSuc[sn]=(vSuc[sn]||0)+v.totalDoc; vNetoSuc[sn]=(vNetoSuc[sn]||0)+v.neto;
   });
@@ -517,9 +525,9 @@ function exportarExcel(){
   // --- Bloque KPIs principales ---
   row(["INDICADORES PRINCIPALES","","","",""]); merges.push({s:{r:aoa.length-1,c:0},e:{r:aoa.length-1,c:4}});
   row(["Concepto","Valor","","Concepto","Valor"]);
-  var rVB=aoa.length; row(["Venta bruta (con IVA)",+ventaBruta.toFixed(2),"","Total devuelto",+totalDevuelto.toFixed(2)]);
-  var rVN=aoa.length; row(["Venta neta (sin IVA)",+ventaNeto.toFixed(2),"","  Aprobado (NC)",+devAprobado.toFixed(2)]);
-  row(["N° facturas","","","  En proceso",+devProceso.toFixed(2)]);
+  var rVB=aoa.length; row(["Venta bruta (TOTAL DOCUMENTO)",+ventaBruta.toFixed(2),"","Total devuelto",+totalDevuelto.toFixed(2)]);
+  var rVN=aoa.length; row(["Venta neta (PRECIO TOTAL NETO)",+ventaNeto.toFixed(2),"","  Aprobado (NC)",+devAprobado.toFixed(2)]);
+  row(["Total producto (suma líneas)",+ventaTotProd.toFixed(2),"","  En proceso",+devProceso.toFixed(2)]);
   // Tasa con fórmula: devuelto / venta bruta
   var rTasa=aoa.length;
   row(["Venta neta real","","","Tasa devolución %",""]);
