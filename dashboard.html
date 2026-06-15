@@ -267,8 +267,8 @@ async function cargarVentas(onProg){
 function render(){
   var tks=ticketsFiltrados();
   var datos=datosConMonto(tks);
-  var totalDevuelto=0, totalProductos=0;
-  datos.forEach(function(d){ totalDevuelto+=d.monto; totalProductos+=d.t.items.reduce(function(a,i){return a+i.cantidad;},0); });
+  var totalDevuelto=0, totalProductos=0, devAprobadoG=0, devProcesoG=0;
+  datos.forEach(function(d){ totalDevuelto+=d.monto; totalProductos+=d.t.items.reduce(function(a,i){return a+i.cantidad;},0); if(d.t.estado==="NC") devAprobadoG+=d.monto; else devProcesoG+=d.monto; });
   var nTickets=datos.length;
 
   // Agrupaciones
@@ -335,8 +335,28 @@ function render(){
   h+='<div class="kpi"><div class="disp" style="color:var(--navy)">'+money(montoMesActual)+'</div><div class="lbl">'+nombreMes(mesActual)+(mesAnterior?(' · <span class="'+(deltaMes>=0?"delta-up":"delta-dn")+'">'+(deltaMes>=0?"▲":"▼")+' '+Math.abs(deltaMes).toFixed(1)+'%</span> vs '+nombreMes(mesAnterior)):'')+'</div></div>';
   h+='</div>';
 
-  // Evolución diaria
-  h+='<div class="card"><div class="sec-title">1. Evolución diaria de devoluciones</div>'+svgLinea(dias.map(function(d){return d.slice(5);}),dias.map(function(d){return porDia[d];}))+'</div>';
+  // DIAGNÓSTICO GERENCIAL (alertas y recomendaciones)
+  var alertas=[];
+  function al(p,area,hallazgo,rec){ alertas.push({p:p,area:area,h:hallazgo,r:rec}); }
+  if(ventasCargadas){
+    if(tasaGlobal>6) al("alta","Tasa global","Tasa de devolución "+tasaGlobal.toFixed(1)+"% (sobre el 6%)","Revisar urgente el proceso de venta y despacho. Identifica las causas en las tablas de abajo.");
+    else if(tasaGlobal>3) al("media","Tasa global","Tasa de devolución "+tasaGlobal.toFixed(1)+"% (entre 3-6%)","Monitorear semanalmente. Atacar las 2-3 causas principales.");
+    else if(ventaBruta>0) al("ok","Tasa global","Tasa de devolución "+tasaGlobal.toFixed(1)+"% (saludable, bajo 3%)","Mantener los controles actuales.");
+    Object.keys(vSuc).forEach(function(s){ var vb=vSuc[s]||0, dev=porSucursal[s]||0, ta=vb>0?dev/vb*100:0; if(ta>6&&vb>0) al("alta","Sucursal "+s,"Tasa "+ta.toFixed(1)+"% (devuelto "+money(dev)+" de "+money(vb)+")","Auditar despacho y verificación de pedidos antes de facturar en esta sucursal."); });
+  }
+  if(devProcesoG>0&&devProcesoG>devAprobadoG) al("media","Operación","Hay más monto en proceso ("+money(devProcesoG)+") que aprobado ("+money(devAprobadoG)+")","Agilizar la revisión de tickets estancados en mercadería/devolución/garantía.");
+  var motTop2=topN(porMotivo,1)[0];
+  if(motTop2&&totalDevuelto>0){ var pm=motTop2.v/totalDevuelto*100; if(pm>40) al(pm>50?"alta":"media","Motivo "+motTop2.k,"Causa #1: "+pm.toFixed(0)+"% de las devoluciones",motTop2.k.indexOf("IMPORTAC")>=0?"Revisar el proceso de importaciones, hay errores recurrentes.":(motTop2.k.indexOf("GARANTIA")>=0?"Alto nivel de garantías: revisar calidad de proveedores.":"Atacar esta causa raíz reduce la mayoría de devoluciones.")); }
+  var prodTop2=Object.keys(porProducto).sort(function(a,b){return porProducto[b].cant-porProducto[a].cant;})[0];
+  if(prodTop2&&porProducto[prodTop2].cant>=5) al("alta","Producto "+porProducto[prodTop2].codigo,"El más devuelto: "+porProducto[prodTop2].cant+" und ("+money(porProducto[prodTop2].monto)+")","Revisar calidad del lote, catálogo y compatibilidad. Posible problema de proveedor.");
+  if(alertas.length){
+    var col={alta:"var(--rojo)",media:"#C77F00",ok:"var(--ok)"};
+    var ic={alta:"🔴",media:"🟡",ok:"🟢"};
+    h+='<div class="card" style="border-left:5px solid var(--rojo)"><div class="sec-title" style="margin-top:0">🎯 Diagnóstico gerencial — qué falla y qué mejorar</div>';
+    alertas.sort(function(a,b){ var o={alta:0,media:1,ok:2}; return o[a.p]-o[b.p]; });
+    alertas.forEach(function(a){ h+='<div style="border-left:4px solid '+col[a.p]+';background:#FAFBFC;padding:10px 14px;margin-bottom:8px;border-radius:0 6px 6px 0"><div style="font-weight:700;font-size:13px">'+ic[a.p]+' '+esc(a.area)+'</div><div style="font-size:13px;margin:2px 0">'+esc(a.h)+'</div><div style="font-size:12px;color:var(--mut)"><b>Recomendación:</b> '+esc(a.r)+'</div></div>'; });
+    h+='<div class="muted" style="margin-top:6px">Umbrales: 🟢 sano &lt;3% · 🟡 atención 3-6% · 🔴 alerta &gt;6% (ajustables).</div></div>';
+  }
 
   // VENTAS y TASA DE DEVOLUCIÓN GLOBAL
   if(ventasCargadas){
@@ -354,6 +374,7 @@ function render(){
   }
 
   // Sucursal y vendedor (pastel)
+  h+='<div class="card"><div class="sec-title">1. Evolución diaria de devoluciones</div>'+svgLinea(dias.map(function(d){return d.slice(5);}),dias.map(function(d){return porDia[d];}))+'</div>';
   h+='<div class="grid2"><div class="card"><div class="sec-title">2. Devoluciones por sucursal</div>'+svgPastel(suc.map(function(s){return {label:s.k,valor:s.v};}))+'</div><div class="card"><div class="sec-title">3. Devoluciones por vendedor</div>'+svgPastel(ven.map(function(v){return {label:v.k,valor:v.v};}))+'</div></div>';
 
   // Productos
@@ -397,14 +418,15 @@ function exportarExcel(){
   var docPorFactura={};
   ventasBase.forEach(function(v){ docPorFactura[v.factura]={bruto:v.totalDoc,neto:v.neto}; });
 
-  // ===== Hoja 1: DETALLE (con N° ticket y total documento) =====
+  // ===== Hoja 1: DETALLE (con N° ticket, total documento y total producto) =====
   var det=[];
   datos.forEach(function(d){
     var t=d.t, suc=d.suc;
     var doc=docPorFactura[t.factura]||{bruto:0,neto:0};
     var its=itemsAceptados(t).length?itemsAceptados(t):t.items.map(function(i){ return Object.assign({},i,{cantNC:i.cantidad}); });
+    var estadoTxt=(t.estado==="NC"&&t.nc&&t.nc.hecha)?"APROBADO (NC hecha)":(t.estado==="NC"?"APROBADO (NC pendiente)":"EN PROCESO");
     its.forEach(function(i){
-      det.push({"N° TICKET":t.numero,"FECHA TICKET":fdate(t.fechaTicket),"FACTURA":t.factura,"TOTAL DOCUMENTO":+doc.bruto.toFixed(2),"NETO DOCUMENTO":+doc.neto.toFixed(2),"EMISION":fdate(t.emision),"SUCURSAL":suc.nombre,"COD SUC":suc.codigo,"RUC":t.ruc||"","CLIENTE":t.razonSocial,"TIPO CLIENTE":clienteTipo(t),"VENDEDOR":t.vendedor,"MOTIVO":t.motivo,"COD PRODUCTO":i.codigo,"DESCRIPCION":i.desc,"MARCA":i.sub,"CANT DEVUELTA":i.cantNC||i.cantidad,"NETO DEVUELTO":+(+i.neto).toFixed(2),"IVA DEVUELTO":+(+i.iva).toFixed(2),"TOTAL DEVUELTO":+(+i.total).toFixed(2),"N° NC":t.nc&&t.nc.numero?t.nc.numero:"","GUIA":t.guiaNumero||"","ESTADO":t.estado});
+      det.push({"N° TICKET":t.numero,"FECHA TICKET":fdate(t.fechaTicket),"ESTADO DEVOLUCION":estadoTxt,"FACTURA":t.factura,"TOTAL DOCUMENTO":+doc.bruto.toFixed(2),"NETO DOCUMENTO":+doc.neto.toFixed(2),"EMISION":fdate(t.emision),"SUCURSAL":suc.nombre,"COD SUC":suc.codigo,"RUC":t.ruc||"","CLIENTE":t.razonSocial,"TIPO CLIENTE":clienteTipo(t),"VENDEDOR":t.vendedor,"MOTIVO":t.motivo,"COD PRODUCTO":i.codigo,"DESCRIPCION":i.desc,"MARCA":i.sub,"CANT DEVUELTA":i.cantNC||i.cantidad,"NETO DEVUELTO":+(+i.neto).toFixed(2),"IVA DEVUELTO":+(+i.iva).toFixed(2),"TOTAL PRODUCTO DEVUELTO":+(+i.total).toFixed(2),"% PRODUCTO VS FACTURA":doc.bruto>0?+((+i.total)/doc.bruto*100).toFixed(2):0,"N° NC":t.nc&&t.nc.numero?t.nc.numero:"","GUIA":t.guiaNumero||""});
     });
   });
   var ws1=XLSX.utils.json_to_sheet(det);
@@ -412,8 +434,8 @@ function exportarExcel(){
   XLSX.utils.book_append_sheet(wb,ws1,"Detalle");
 
   // ===== Cálculos para resumen =====
-  var totalDevuelto=0, totalProd=0;
-  datos.forEach(function(d){ totalDevuelto+=d.monto; totalProd+=d.t.items.reduce(function(a,i){return a+i.cantidad;},0); });
+  var totalDevuelto=0, totalProd=0, devAprobado=0, devProceso=0;
+  datos.forEach(function(d){ totalDevuelto+=d.monto; totalProd+=d.t.items.reduce(function(a,i){return a+i.cantidad;},0); if(d.t.estado==="NC") devAprobado+=d.monto; else devProceso+=d.monto; });
   var ventaBruta=0, ventaNeto=0, vMes={}, vNetoMes={}, vSuc={}, vNetoSuc={};
   ventasBase.forEach(function(v){
     var fe=v.emision?hoyStr(v.emision):"";
@@ -423,58 +445,85 @@ function exportarExcel(){
     if(fe){ var fm=mesStr(v.emision); vMes[fm]=(vMes[fm]||0)+v.totalDoc; vNetoMes[fm]=(vNetoMes[fm]||0)+v.neto; }
     var sn=sucursalDe(v.factura).nombre; vSuc[sn]=(vSuc[sn]||0)+v.totalDoc; vNetoSuc[sn]=(vNetoSuc[sn]||0)+v.neto;
   });
-  var sucD={},venD={},motD={},cliD={},prodD={},mesD={};
-  datos.forEach(function(d){ var t=d.t; sucD[d.suc.nombre]=(sucD[d.suc.nombre]||0)+d.monto; venD[t.vendedor]=(venD[t.vendedor]||0)+d.monto; motD[t.motivo]=(motD[t.motivo]||0)+d.monto; cliD[t.razonSocial]=(cliD[t.razonSocial]||0)+d.monto; mesD[mesStr(t.fechaTicket)]=(mesD[mesStr(t.fechaTicket)]||0)+d.monto; t.items.forEach(function(i){ var k=i.codigo+" "+i.desc; if(!prodD[k])prodD[k]={cant:0,monto:0}; prodD[k].cant+=i.cantidad; prodD[k].monto+=i.total; }); });
+  var sucD={},venD={},motD={},cliD={},prodD={},mesD={},cliInfo={};
+  datos.forEach(function(d){ var t=d.t; sucD[d.suc.nombre]=(sucD[d.suc.nombre]||0)+d.monto; venD[t.vendedor]=(venD[t.vendedor]||0)+d.monto; motD[t.motivo]=(motD[t.motivo]||0)+d.monto; cliD[t.razonSocial]=(cliD[t.razonSocial]||0)+d.monto; mesD[mesStr(t.fechaTicket)]=(mesD[mesStr(t.fechaTicket)]||0)+d.monto; if(!cliInfo[t.razonSocial]) cliInfo[t.razonSocial]={monto:0,prod:0,tipo:clienteTipo(t)}; cliInfo[t.razonSocial].monto+=d.monto; cliInfo[t.razonSocial].prod+=t.items.reduce(function(a,i){return a+i.cantidad;},0); t.items.forEach(function(i){ var k=i.codigo+" | "+i.desc; if(!prodD[k])prodD[k]={cant:0,monto:0,marca:i.sub}; prodD[k].cant+=i.cantidad; prodD[k].monto+=i.total; }); });
+  var tasaGlobal=ventaBruta>0?(totalDevuelto/ventaBruta*100):0;
 
-  // ===== Hoja 2: RESUMEN GENERAL =====
+  // ===== Hoja 2: RESUMEN GERENCIAL (todo en una hoja) =====
   var R=[];
-  function fila(a,b,c){ R.push({"INDICADOR":a,"VALOR":b===undefined?"":b,"DETALLE":c===undefined?"":c}); }
-  fila("PERIODO",(desde||"inicio")+" a "+(hasta||"hoy"));
-  fila("");
-  fila("=== VENTAS (toda la hoja, por fecha de emisión) ===");
-  fila("Venta bruta (TOTAL DOCUMENTO con IVA)",+ventaBruta.toFixed(2),"Suma del TOTAL DOCUMENTO de cada factura única");
-  fila("Venta neta (PRECIO TOTAL NETO sin IVA)",+ventaNeto.toFixed(2),"Suma del NETO de cada factura única");
-  fila("");
-  fila("=== DEVOLUCIONES ===");
-  fila("Total devuelto",+totalDevuelto.toFixed(2),"Total aceptado de tickets del periodo");
-  fila("Productos devueltos",totalProd);
-  fila("N° de tickets",datos.length);
-  fila("Venta neta real",+(ventaBruta-totalDevuelto).toFixed(2),"Venta bruta − devoluciones");
-  fila("TASA DE DEVOLUCIÓN GLOBAL %",ventaBruta>0?+(totalDevuelto/ventaBruta*100).toFixed(2):0,"Devuelto ÷ venta bruta × 100");
+  function f(a,b,c){ R.push({" ":a===undefined?"":a,"VALOR":b===undefined?"":b,"NOTA / CÓMO SE CALCULA":c===undefined?"":c}); }
+  f("REPORTE GERENCIAL DE DEVOLUCIONES — LUBAMAQUI");
+  f("Periodo",(desde||"inicio")+" a "+(hasta||"hoy"));
+  f("Generado",new Date().toLocaleString("es-EC"));
+  f("");
+  f("──────── VENTAS DEL PERIODO ────────");
+  f("Venta bruta (con IVA)",+ventaBruta.toFixed(2),"Suma TOTAL DOCUMENTO de cada factura única, por fecha de emisión");
+  f("Venta neta (sin IVA)",+ventaNeto.toFixed(2),"Suma PRECIO TOTAL NETO de cada factura única");
+  f("");
+  f("──────── DEVOLUCIONES ────────");
+  f("Total devuelto",+totalDevuelto.toFixed(2),"Proceso + aprobado, por fecha de ticket");
+  f("  → Aprobado (en NC)",+devAprobado.toFixed(2),"Tickets que llegaron a notas de crédito");
+  f("  → En proceso",+devProceso.toFixed(2),"Aún en revisión, podría cambiar");
+  f("N° de tickets",datos.length);
+  f("Productos devueltos",totalProd);
+  f("Ticket promedio",+(datos.length?totalDevuelto/datos.length:0).toFixed(2),"Total devuelto ÷ N° tickets");
+  f("");
+  f("──────── INDICADOR CLAVE ────────");
+  f("TASA DE DEVOLUCIÓN GLOBAL %",+tasaGlobal.toFixed(2),"Devuelto ÷ venta bruta × 100");
+  f("Venta neta real",+(ventaBruta-totalDevuelto).toFixed(2),"Venta bruta − devoluciones");
+  f("Semáforo",tasaGlobal>6?"🔴 ALERTA":(tasaGlobal>3?"🟡 ATENCIÓN":"🟢 SANO"),"Verde <3% · Amarillo 3-6% · Rojo >6%");
+  f("");
+  f("──────── POR SUCURSAL (venta / devuelto / tasa) ────────");
+  Object.keys(vSuc).concat(Object.keys(sucD)).filter(function(v,i,a){return a.indexOf(v)===i;}).sort(function(a,b){return (vSuc[b]||0)-(vSuc[a]||0);}).forEach(function(s){ var vb=vSuc[s]||0, dev=sucD[s]||0, ta=vb>0?dev/vb*100:0; f(s,+ta.toFixed(2)+"%","Venta "+money(vb)+" · Devuelto "+money(dev)); });
+  f("");
+  f("──────── POR VENDEDOR ────────");
+  Object.keys(venD).sort(function(a,b){return venD[b]-venD[a];}).forEach(function(k){ f(k,+venD[k].toFixed(2),(totalDevuelto>0?(venD[k]/totalDevuelto*100).toFixed(1):0)+"% del total devuelto"); });
+  f("");
+  f("──────── TOP 15 CLIENTES QUE MÁS DEVUELVEN ────────");
+  Object.keys(cliInfo).sort(function(a,b){return cliInfo[b].monto-cliInfo[a].monto;}).slice(0,15).forEach(function(k){ f(k,+cliInfo[k].monto.toFixed(2),cliInfo[k].tipo+" · "+cliInfo[k].prod+" productos"); });
+  f("");
+  f("──────── TOP 20 PRODUCTOS MÁS DEVUELTOS ────────");
+  Object.keys(prodD).sort(function(a,b){return prodD[b].cant-prodD[a].cant;}).slice(0,20).forEach(function(k){ f(k,prodD[k].cant+" und",money(prodD[k].monto)+" · "+(prodD[k].marca||"")); });
+  f("");
+  f("──────── POR MOTIVO ────────");
+  Object.keys(motD).sort(function(a,b){return motD[b]-motD[a];}).forEach(function(k){ f(k,+motD[k].toFixed(2),(totalDevuelto>0?(motD[k]/totalDevuelto*100).toFixed(1):0)+"%"); });
+  f("");
+  f("──────── POR MES ────────");
+  Object.keys(vMes).concat(Object.keys(mesD)).filter(function(v,i,a){return a.indexOf(v)===i;}).sort().forEach(function(m){ var vb=vMes[m]||0, dev=mesD[m]||0, ta=vb>0?dev/vb*100:0; f(m,+ta.toFixed(2)+"%","Venta "+money(vb)+" · Devuelto "+money(dev)); });
   var ws2=XLSX.utils.json_to_sheet(R);
-  ws2["!cols"]=[{wch:42},{wch:18},{wch:48}];
-  XLSX.utils.book_append_sheet(wb,ws2,"Resumen general");
+  ws2["!cols"]=[{wch:50},{wch:16},{wch:55}];
+  XLSX.utils.book_append_sheet(wb,ws2,"Resumen gerencial");
 
-  // ===== Hoja 3: POR MES =====
-  var mesesAll={}; Object.keys(vMes).forEach(function(m){mesesAll[m]=1;}); Object.keys(mesD).forEach(function(m){mesesAll[m]=1;});
-  var rMes=Object.keys(mesesAll).sort().map(function(m){ var vb=vMes[m]||0, vn=vNetoMes[m]||0, dev=mesD[m]||0; return {"MES":m,"VENTA BRUTA":+vb.toFixed(2),"VENTA NETA":+vn.toFixed(2),"DEVOLUCIONES":+dev.toFixed(2),"TASA %":vb>0?+(dev/vb*100).toFixed(2):0}; });
-  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(rMes),"Por mes");
-
-  // ===== Hoja 4: POR SUCURSAL =====
-  var sucAll={}; Object.keys(vSuc).forEach(function(s){sucAll[s]=1;}); Object.keys(sucD).forEach(function(s){sucAll[s]=1;});
-  var rSuc=Object.keys(sucAll).map(function(s){ var vb=vSuc[s]||0, vn=vNetoSuc[s]||0, dev=sucD[s]||0; return {"SUCURSAL":s,"VENTA BRUTA":+vb.toFixed(2),"VENTA NETA":+vn.toFixed(2),"DEVOLUCIONES":+dev.toFixed(2),"TASA %":vb>0?+(dev/vb*100).toFixed(2):0}; }).sort(function(a,b){return b["VENTA BRUTA"]-a["VENTA BRUTA"];});
-  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(rSuc),"Por sucursal");
-
-  // ===== Hoja 5: POR VENDEDOR =====
-  var rVen=Object.keys(venD).sort(function(a,b){return venD[b]-venD[a];}).map(function(k){ return {"VENDEDOR":k,"DEVOLUCIONES":+venD[k].toFixed(2),"% DEL TOTAL":totalDevuelto>0?+(venD[k]/totalDevuelto*100).toFixed(2):0}; });
-  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(rVen),"Por vendedor");
-
-  // ===== Hoja 6: POR CLIENTE =====
-  var cliInfo={};
-  datos.forEach(function(d){ var t=d.t; if(!cliInfo[t.razonSocial]) cliInfo[t.razonSocial]={monto:0,prod:0,tipo:clienteTipo(t)}; cliInfo[t.razonSocial].monto+=d.monto; cliInfo[t.razonSocial].prod+=t.items.reduce(function(a,i){return a+i.cantidad;},0); });
-  var rCli=Object.keys(cliInfo).sort(function(a,b){return cliInfo[b].monto-cliInfo[a].monto;}).map(function(k){ return {"CLIENTE":k,"TIPO":cliInfo[k].tipo,"PRODUCTOS":cliInfo[k].prod,"MONTO DEVUELTO":+cliInfo[k].monto.toFixed(2)}; });
-  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(rCli),"Por cliente");
-
-  // ===== Hoja 7: POR PRODUCTO =====
-  var rProd=Object.keys(prodD).sort(function(a,b){return prodD[b].cant-prodD[a].cant;}).map(function(k){ return {"PRODUCTO":k,"CANTIDAD DEVUELTA":prodD[k].cant,"MONTO DEVUELTO":+prodD[k].monto.toFixed(2)}; });
-  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(rProd),"Por producto");
-
-  // ===== Hoja 8: POR MOTIVO =====
-  var rMot=Object.keys(motD).sort(function(a,b){return motD[b]-motD[a];}).map(function(k){ return {"MOTIVO":k,"MONTO DEVUELTO":+motD[k].toFixed(2)}; });
-  XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(rMot),"Por motivo");
+  // ===== Hoja 3: DIAGNÓSTICO (qué falla y qué mejorar) =====
+  var diag=[];
+  function dg(tipo,area,hallazgo,recomendacion){ diag.push({"PRIORIDAD":tipo,"ÁREA":area,"HALLAZGO":hallazgo,"RECOMENDACIÓN":recomendacion}); }
+  // Tasa global
+  if(tasaGlobal>6) dg("🔴 ALTA","General","Tasa de devolución global "+tasaGlobal.toFixed(1)+"% (sobre 6%)","Revisar urgente proceso de venta y despacho. Cada punto sobre 3% son ventas que se pierden.");
+  else if(tasaGlobal>3) dg("🟡 MEDIA","General","Tasa de devolución "+tasaGlobal.toFixed(1)+"% (entre 3-6%)","Monitorear semanal. Identificar las 2-3 causas principales abajo.");
+  else dg("🟢 OK","General","Tasa de devolución "+tasaGlobal.toFixed(1)+"% (bajo 3%)","Nivel saludable. Mantener controles actuales.");
+  // Sucursales en alerta
+  Object.keys(vSuc).forEach(function(s){ var vb=vSuc[s]||0, dev=sucD[s]||0, ta=vb>0?dev/vb*100:0; if(ta>6&&vb>0) dg("🔴 ALTA","Sucursal: "+s,"Tasa "+ta.toFixed(1)+"% (venta "+money(vb)+", devuelto "+money(dev)+")","Auditar esta sucursal: capacitación en despacho y verificación de pedidos antes de facturar."); });
+  // Vendedores con más devolución
+  var venTop=Object.keys(venD).sort(function(a,b){return venD[b]-venD[a];});
+  if(venTop.length&&totalDevuelto>0){ var pct=venD[venTop[0]]/totalDevuelto*100; if(pct>25) dg("🟡 MEDIA","Vendedor: "+venTop[0],"Concentra "+pct.toFixed(0)+"% de las devoluciones ("+money(venD[venTop[0]])+")","Revisar con el vendedor: ¿errores de pedido, mala asesoría o productos específicos? Reforzar verificación."); }
+  // Producto problemático
+  var prodTop=Object.keys(prodD).sort(function(a,b){return prodD[b].cant-prodD[a].cant;});
+  if(prodTop.length){ var p=prodD[prodTop[0]]; if(p.cant>=5) dg("🔴 ALTA","Producto: "+prodTop[0].slice(0,40),"Es el más devuelto: "+p.cant+" unidades, "+money(p.monto),"Revisar calidad del lote, descripción en catálogo y compatibilidad. Posible problema de proveedor o info de venta errónea."); }
+  // Motivo dominante
+  var motTop=Object.keys(motD).sort(function(a,b){return motD[b]-motD[a];});
+  if(motTop.length&&totalDevuelto>0){ var pm=motD[motTop[0]]/totalDevuelto*100; dg(pm>40?"🔴 ALTA":"🟡 MEDIA","Motivo: "+motTop[0],"Es la causa #1: "+pm.toFixed(0)+"% de las devoluciones",motTop[0].indexOf("IMPORTAC")>=0?"Revisar proceso de importaciones: errores recurrentes están generando devoluciones.":(motTop[0].indexOf("GARANTIA")>=0?"Alto nivel de garantías: revisar calidad de proveedores.":"Atacar esta causa raíz reduciría la mayor parte de las devoluciones.")); }
+  // Proceso en trámite
+  if(devProceso>devAprobado&&devProceso>0) dg("🟡 MEDIA","Operación","Hay más monto EN PROCESO ("+money(devProceso)+") que aprobado ("+money(devAprobado)+")","Agilizar revisión de mercadería/devolución/garantía. Tickets estancados afectan el flujo y la visibilidad real.");
+  // Cliente concentrado
+  var cliTop=Object.keys(cliInfo).sort(function(a,b){return cliInfo[b].monto-cliInfo[a].monto;});
+  if(cliTop.length&&totalDevuelto>0){ var pc=cliInfo[cliTop[0]].monto/totalDevuelto*100; if(pc>20) dg("🟡 MEDIA","Cliente: "+cliTop[0],"Concentra "+pc.toFixed(0)+"% de las devoluciones","Reunión comercial con este cliente: entender por qué devuelve tanto y si conviene ajustar la relación."); }
+  if(diag.length===0) dg("🟢 OK","General","Sin alertas críticas en el periodo","Operación saludable.");
+  var ws3=XLSX.utils.json_to_sheet(diag);
+  ws3["!cols"]=[{wch:12},{wch:28},{wch:55},{wch:65}];
+  XLSX.utils.book_append_sheet(wb,ws3,"Diagnóstico y mejoras");
 
   var suf=(desde||hasta)?("_"+(desde||"inicio")+"_a_"+(hasta||"hoy")):"";
-  XLSX.writeFile(wb,"Dashboard_Indicadores"+suf+".xlsx");
+  XLSX.writeFile(wb,"Reporte_Gerencial_Devoluciones"+suf+".xlsx");
 }
 
 /* ===== INIT ===== */
