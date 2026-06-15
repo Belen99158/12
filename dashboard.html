@@ -87,21 +87,29 @@ function money(n){ return "$"+(Number(n)||0).toFixed(2); }
 function fdate(d){ if(!d) return ""; var x=new Date(d); return isNaN(x)?String(d):x.toLocaleDateString("es-EC",{day:"2-digit",month:"2-digit",year:"numeric"}); }
 function hoyStr(d){ var x=parseFecha(d); if(!x) return ""; return x.getFullYear()+"-"+String(x.getMonth()+1).padStart(2,"0")+"-"+String(x.getDate()).padStart(2,"0"); }
 function mesStr(d){ var x=parseFecha(d); if(!x) return ""; return x.getFullYear()+"-"+String(x.getMonth()+1).padStart(2,"0"); }
-/* Parser de fecha robusto: maneja DD/MM/YYYY, YYYY-MM-DD, ISO, etc. */
+/* Parser de fecha robusto. Tu hoja usa SIEMPRE formato DD/MM/YYYY (día/mes/año),
+   a veces con hora al lado (ej. "06/01/2026 10:02:28"). La hora se ignora. */
 function parseFecha(d){
   if(!d) return null;
   if(d instanceof Date) return isNaN(d)?null:d;
   var s=String(d).trim();
-  // formato DD/MM/YYYY o DD-MM-YYYY (lo común en Ecuador)
-  var m=s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+  // Tomar solo la parte de la fecha (antes del primer espacio), descartando la hora
+  var soloFecha=s.split(" ")[0].split("T")[0];
+  // formato DD/MM/YYYY o DD-MM-YYYY → primer número SIEMPRE es día (estándar Ecuador)
+  var m=soloFecha.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
   if(m){
-    var dd=+m[1], mm=+m[2], yy=+m[3]; if(yy<100) yy+=2000;
-    // si el primer número es >12 es claramente día; si el segundo >12, formato MM/DD
-    if(mm>12&&dd<=12){ var t=dd; dd=mm; mm=t; }
-    var x=new Date(yy,mm-1,dd); return isNaN(x)?null:x;
+    var dd=+m[1], mm=+m[2], yy=+m[3];
+    if(yy<100) yy+=2000;
+    if(mm<1||mm>12||dd<1||dd>31) return null;
+    var x=new Date(yy,mm-1,dd);
+    return isNaN(x)?null:x;
   }
-  // formato YYYY-MM-DD o ISO
-  var x2=new Date(s); return isNaN(x2)?null:x2;
+  // formato YYYY-MM-DD (lo que usan los tickets de Firebase en ISO)
+  var m2=soloFecha.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if(m2){ var x2=new Date(+m2[1],+m2[2]-1,+m2[3]); return isNaN(x2)?null:x2; }
+  // último recurso: dejar que el navegador intente
+  var x3=new Date(s);
+  return isNaN(x3)?null:x3;
 }
 function arr(v){ if(Array.isArray(v)) return v; if(v&&typeof v==="object") return Object.keys(v).map(function(k){return v[k];}); return []; }
 function sucursalDe(factura){ var m=String(factura||"").match(/(\d{3})/); var cod=m?m[1]:""; return {codigo:cod,nombre:SUCURSALES[cod]||(cod?"Sucursal "+cod:"Sin sucursal")}; }
