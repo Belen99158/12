@@ -85,8 +85,24 @@ function $(id){ return document.getElementById(id); }
 function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];}); }
 function money(n){ return "$"+(Number(n)||0).toFixed(2); }
 function fdate(d){ if(!d) return ""; var x=new Date(d); return isNaN(x)?String(d):x.toLocaleDateString("es-EC",{day:"2-digit",month:"2-digit",year:"numeric"}); }
-function hoyStr(d){ var x=d?new Date(d):new Date(); return x.getFullYear()+"-"+String(x.getMonth()+1).padStart(2,"0")+"-"+String(x.getDate()).padStart(2,"0"); }
-function mesStr(d){ var x=new Date(d); return x.getFullYear()+"-"+String(x.getMonth()+1).padStart(2,"0"); }
+function hoyStr(d){ var x=parseFecha(d); if(!x) return ""; return x.getFullYear()+"-"+String(x.getMonth()+1).padStart(2,"0")+"-"+String(x.getDate()).padStart(2,"0"); }
+function mesStr(d){ var x=parseFecha(d); if(!x) return ""; return x.getFullYear()+"-"+String(x.getMonth()+1).padStart(2,"0"); }
+/* Parser de fecha robusto: maneja DD/MM/YYYY, YYYY-MM-DD, ISO, etc. */
+function parseFecha(d){
+  if(!d) return null;
+  if(d instanceof Date) return isNaN(d)?null:d;
+  var s=String(d).trim();
+  // formato DD/MM/YYYY o DD-MM-YYYY (lo común en Ecuador)
+  var m=s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+  if(m){
+    var dd=+m[1], mm=+m[2], yy=+m[3]; if(yy<100) yy+=2000;
+    // si el primer número es >12 es claramente día; si el segundo >12, formato MM/DD
+    if(mm>12&&dd<=12){ var t=dd; dd=mm; mm=t; }
+    var x=new Date(yy,mm-1,dd); return isNaN(x)?null:x;
+  }
+  // formato YYYY-MM-DD o ISO
+  var x2=new Date(s); return isNaN(x2)?null:x2;
+}
 function arr(v){ if(Array.isArray(v)) return v; if(v&&typeof v==="object") return Object.keys(v).map(function(k){return v[k];}); return []; }
 function sucursalDe(factura){ var m=String(factura||"").match(/(\d{3})/); var cod=m?m[1]:""; return {codigo:cod,nombre:SUCURSALES[cod]||(cod?"Sucursal "+cod:"Sin sucursal")}; }
 function llegoQ(i){ if(!i.merc) return 0; return i.merc.cantLlegada!==undefined?i.merc.cantLlegada:(i.merc.llego?i.cantidad:0); }
@@ -382,7 +398,7 @@ function render(){
 
   // VENTAS y TASA DE DEVOLUCIÓN GLOBAL
   if(ventasCargadas){
-    h+='<div class="card" style="border-left:5px solid var(--rojo)"><div class="sec-title" style="margin-top:0">Tasa de devolución global e impacto sobre ventas</div>';
+    h+='<div class="card" style="border-left:5px solid var(--rojo)"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><div class="sec-title" style="margin-top:0;flex:1;border:none">Tasa de devolución global e impacto sobre ventas</div><button class="btn btn-g btn-sm" onclick="diagnosticoVentas()">🔍 Verificar facturas contadas</button></div>';
     h+='<div class="grid4"><div class="kpi"><div class="disp" style="color:var(--ok)">'+money(ventaBruta)+'</div><div class="lbl">Venta bruta (TOTAL DOCUMENTO con IVA)</div></div><div class="kpi"><div class="disp" style="color:var(--navy)">'+money(ventaNetaVtas)+'</div><div class="lbl">Venta neta (PRECIO TOTAL NETO sin IVA)</div></div><div class="kpi"><div class="disp" style="color:var(--rojo)">'+money(totalDevuelto)+'</div><div class="lbl">Devoluciones</div></div><div class="kpi"><div class="disp" style="color:'+(tasaGlobal>5?"var(--rojo)":"var(--ok)")+'">'+tasaGlobal.toFixed(2)+'%</div><div class="lbl">Tasa de devolución global</div></div></div>';
     h+='<div class="grid2" style="margin-top:10px"><div class="kpi"><div class="disp" style="color:var(--navy)">'+money(ventaNetaReal)+'</div><div class="lbl">Venta neta real (bruta − devoluciones)</div></div><div class="kpi"><div class="disp" style="color:var(--ink)">'+nFacturas.toLocaleString("es-EC")+'</div><div class="lbl">Facturas únicas en el periodo</div></div></div>';
     h+='<div class="muted" style="margin-top:10px;background:#F0F3F7;padding:10px 12px;border-radius:6px"><b>📌 De dónde salen los números:</b><br>• <b>Venta bruta</b> = suma del TOTAL DOCUMENTO de cada factura única (se cuenta una sola vez aunque tenga varios productos), de TODA la hoja, filtrada por fecha de emisión.<br>• <b>Venta neta</b> = igual pero con PRECIO TOTAL NETO (sin IVA).<br>• <b>Devoluciones</b> = total aceptado de los tickets de devolución/garantía en el periodo (fecha del ticket).<br>• <b>Tasa</b> = devoluciones ÷ venta bruta × 100.</div></div>';
@@ -428,6 +444,204 @@ function render(){
   $("main").innerHTML=h;
 }
 function aplicarFiltro(){ desde=$("f-desde")?$("f-desde").value:""; hasta=$("f-hasta")?$("f-hasta").value:""; render(); }
+
+/* Diagnóstico: muestra qué facturas se cuentan como venta en el periodo */
+function diagnosticoVentas(){
+  var conta=[], total=0, sinFecha=0;
+  ventasBase.forEach(function(v){
+    var fe=v.emision?hoyStr(v.emision):"";
+    if(!fe){ sinFecha++; }
+    if(desde&&fe&&fe<desde) return;
+    if(hasta&&fe&&fe>hasta) return;
+    if((desde||hasta)&&!fe) return; // sin fecha no entra si hay filtro
+    conta.push(v); total+=v.totalDoc;
+  });
+  conta.sort(function(a,b){ return b.totalDoc-a.totalDoc; });
+  var win=window.open("","_blank","width=800,height=600");
+  if(!win){ alert("Activa los popups para ver el diagnóstico."); return; }
+  var html='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Diagnóstico de ventas</title><style>body{font-family:Arial;font-size:13px;padding:20px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccc;padding:4px 8px;text-align:left}th{background:#0E2A47;color:#fff}.num{text-align:right}h2{color:#0E2A47}</style></head><body>';
+  html+='<h2>Diagnóstico de venta bruta</h2>';
+  html+='<p>Periodo: <b>'+(desde||"inicio")+' a '+(hasta||"hoy")+'</b></p>';
+  html+='<p>Facturas únicas contadas: <b>'+conta.length+'</b> · Total: <b>
+
+/* ===== EXPORTAR EXCEL (completo) ===== */
+function exportarExcel(){
+  var tks=ticketsFiltrados();
+  var datos=datosConMonto(tks);
+  if(datos.length===0){ alert("Sin datos para exportar."); return; }
+  var wb=XLSX.utils.book_new();
+
+  // Mapa de TOTAL DOCUMENTO por factura (de la base de ventas)
+  var docPorFactura={};
+  ventasBase.forEach(function(v){ docPorFactura[v.factura]={bruto:v.totalDoc,neto:v.neto}; });
+
+  // ===== Hoja 1: DETALLE (con N° ticket, total documento y total producto) =====
+  var det=[];
+  datos.forEach(function(d){
+    var t=d.t, suc=d.suc;
+    var doc=docPorFactura[t.factura]||{bruto:0,neto:0};
+    var its=itemsAceptados(t).length?itemsAceptados(t):t.items.map(function(i){ return Object.assign({},i,{cantNC:i.cantidad}); });
+    var estadoTxt=(t.estado==="NC"&&t.nc&&t.nc.hecha)?"APROBADO (NC hecha)":(t.estado==="NC"?"APROBADO (NC pendiente)":"EN PROCESO");
+    its.forEach(function(i){
+      var totProdReal=totalProdSheet[t.factura+"|"+i.codigo];
+      det.push({"N° TICKET":t.numero,"FECHA TICKET":fdate(t.fechaTicket),"ESTADO DEVOLUCION":estadoTxt,"FACTURA":t.factura,"TOTAL DOCUMENTO":+doc.bruto.toFixed(2),"NETO DOCUMENTO":+doc.neto.toFixed(2),"EMISION":fdate(t.emision),"SUCURSAL":suc.nombre,"COD SUC":suc.codigo,"RUC":t.ruc||"","CLIENTE":t.razonSocial,"TIPO CLIENTE":clienteTipo(t),"VENDEDOR":t.vendedor,"MOTIVO":t.motivo,"COD PRODUCTO":i.codigo,"DESCRIPCION":i.desc,"MARCA":i.sub,"TOTAL PRODUCTO (SHEET)":totProdReal!==undefined?+totProdReal.toFixed(2):"","CANT DEVUELTA":i.cantNC||i.cantidad,"NETO DEVUELTO":+(+i.neto).toFixed(2),"IVA DEVUELTO":+(+i.iva).toFixed(2),"TOTAL DEVUELTO":+(+i.total).toFixed(2),"% PRODUCTO VS FACTURA":doc.bruto>0?+((+i.total)/doc.bruto*100).toFixed(2):0,"N° NC":t.nc&&t.nc.numero?t.nc.numero:"","GUIA":t.guiaNumero||""});
+    });
+  });
+  var ws1=XLSX.utils.json_to_sheet(det);
+  ws1["!cols"]=Object.keys(det[0]||{x:1}).map(function(k){ return {wch:Math.max(11,k.length+1)}; });
+  XLSX.utils.book_append_sheet(wb,ws1,"Detalle");
+
+  // ===== Cálculos para resumen =====
+  var totalDevuelto=0, totalProd=0, devAprobado=0, devProceso=0;
+  datos.forEach(function(d){ totalDevuelto+=d.monto; totalProd+=d.t.items.reduce(function(a,i){return a+i.cantidad;},0); if(d.t.estado==="NC") devAprobado+=d.monto; else devProceso+=d.monto; });
+  var ventaBruta=0, ventaNeto=0, vMes={}, vNetoMes={}, vSuc={}, vNetoSuc={};
+  ventasBase.forEach(function(v){
+    var fe=v.emision?hoyStr(v.emision):"";
+    if(desde&&fe&&fe<desde) return;
+    if(hasta&&fe&&fe>hasta) return;
+    ventaBruta+=v.totalDoc; ventaNeto+=v.neto;
+    if(fe){ var fm=mesStr(v.emision); vMes[fm]=(vMes[fm]||0)+v.totalDoc; vNetoMes[fm]=(vNetoMes[fm]||0)+v.neto; }
+    var sn=sucursalDe(v.factura).nombre; vSuc[sn]=(vSuc[sn]||0)+v.totalDoc; vNetoSuc[sn]=(vNetoSuc[sn]||0)+v.neto;
+  });
+  var sucD={},venD={},motD={},cliD={},prodD={},mesD={},cliInfo={};
+  datos.forEach(function(d){ var t=d.t; sucD[d.suc.nombre]=(sucD[d.suc.nombre]||0)+d.monto; venD[t.vendedor]=(venD[t.vendedor]||0)+d.monto; motD[t.motivo]=(motD[t.motivo]||0)+d.monto; cliD[t.razonSocial]=(cliD[t.razonSocial]||0)+d.monto; mesD[mesStr(t.fechaTicket)]=(mesD[mesStr(t.fechaTicket)]||0)+d.monto; if(!cliInfo[t.razonSocial]) cliInfo[t.razonSocial]={monto:0,prod:0,tipo:clienteTipo(t)}; cliInfo[t.razonSocial].monto+=d.monto; cliInfo[t.razonSocial].prod+=t.items.reduce(function(a,i){return a+i.cantidad;},0); t.items.forEach(function(i){ var k=i.codigo+" | "+i.desc; if(!prodD[k])prodD[k]={cant:0,monto:0,marca:i.sub}; prodD[k].cant+=i.cantidad; prodD[k].monto+=i.total; }); });
+  var tasaGlobal=ventaBruta>0?(totalDevuelto/ventaBruta*100):0;
+
+  // ===== Hoja 2: RESUMEN GERENCIAL (presentación de tablas, con fórmulas) =====
+  // Construimos por matriz de celdas (AOA) para controlar formato y fórmulas
+  var aoa=[], merges=[];
+  function row(arr){ aoa.push(arr||[]); return aoa.length-1; }
+  row(["REPORTE GERENCIAL DE DEVOLUCIONES — LUBAMAQUI"]); merges.push({s:{r:0,c:0},e:{r:0,c:4}});
+  row(["Periodo: "+(desde||"inicio")+" a "+(hasta||"hoy")+"   |   Generado: "+new Date().toLocaleString("es-EC")]); merges.push({s:{r:1,c:0},e:{r:1,c:4}});
+  row([]);
+  // --- Bloque KPIs principales ---
+  row(["INDICADORES PRINCIPALES","","","",""]); merges.push({s:{r:aoa.length-1,c:0},e:{r:aoa.length-1,c:4}});
+  row(["Concepto","Valor","","Concepto","Valor"]);
+  var rVB=aoa.length; row(["Venta bruta (con IVA)",+ventaBruta.toFixed(2),"","Total devuelto",+totalDevuelto.toFixed(2)]);
+  var rVN=aoa.length; row(["Venta neta (sin IVA)",+ventaNeto.toFixed(2),"","  Aprobado (NC)",+devAprobado.toFixed(2)]);
+  row(["N° facturas","","","  En proceso",+devProceso.toFixed(2)]);
+  // Tasa con fórmula: devuelto / venta bruta
+  var rTasa=aoa.length;
+  row(["Venta neta real","","","Tasa devolución %",""]);
+  // fórmulas se asignan luego por referencia
+  row([]);
+  // --- Tabla por sucursal ---
+  row(["DEVOLUCIONES POR SUCURSAL"]); merges.push({s:{r:aoa.length-1,c:0},e:{r:aoa.length-1,c:4}});
+  row(["Sucursal","Venta bruta","Venta neta","Devuelto","Tasa %"]);
+  var sucKeys=Object.keys(vSuc).concat(Object.keys(sucD)).filter(function(v,i,a){return a.indexOf(v)===i;}).sort(function(a,b){return (vSuc[b]||0)-(vSuc[a]||0);});
+  var sucStart=aoa.length;
+  sucKeys.forEach(function(s){ row([s,+(vSuc[s]||0).toFixed(2),+(vNetoSuc[s]||0).toFixed(2),+(sucD[s]||0).toFixed(2),""]); });
+  var sucEnd=aoa.length-1;
+  row([]);
+  // --- Tabla por vendedor ---
+  row(["DEVOLUCIONES POR VENDEDOR"]); merges.push({s:{r:aoa.length-1,c:0},e:{r:aoa.length-1,c:4}});
+  row(["Vendedor","Devuelto","% del total","",""]);
+  var venKeys=Object.keys(venD).sort(function(a,b){return venD[b]-venD[a];});
+  var venStart=aoa.length;
+  venKeys.forEach(function(k){ row([k,+venD[k].toFixed(2),"","",""]); });
+  var venEnd=aoa.length-1;
+  row([]);
+  // --- Top clientes ---
+  row(["TOP 15 CLIENTES QUE MÁS DEVUELVEN"]); merges.push({s:{r:aoa.length-1,c:0},e:{r:aoa.length-1,c:4}});
+  row(["Cliente","Tipo","Productos","Monto devuelto",""]);
+  Object.keys(cliInfo).sort(function(a,b){return cliInfo[b].monto-cliInfo[a].monto;}).slice(0,15).forEach(function(k){ row([k,cliInfo[k].tipo,cliInfo[k].prod,+cliInfo[k].monto.toFixed(2),""]); });
+  row([]);
+  // --- Top productos ---
+  row(["TOP 20 PRODUCTOS MÁS DEVUELTOS"]); merges.push({s:{r:aoa.length-1,c:0},e:{r:aoa.length-1,c:4}});
+  row(["Código + Producto","Marca","Cant. devuelta","Monto devuelto",""]);
+  Object.keys(prodD).sort(function(a,b){return prodD[b].cant-prodD[a].cant;}).slice(0,20).forEach(function(k){ row([k,prodD[k].marca||"",prodD[k].cant,+prodD[k].monto.toFixed(2),""]); });
+  row([]);
+  // --- Por motivo ---
+  row(["DEVOLUCIONES POR MOTIVO"]); merges.push({s:{r:aoa.length-1,c:0},e:{r:aoa.length-1,c:4}});
+  row(["Motivo","Devuelto","% del total","",""]);
+  Object.keys(motD).sort(function(a,b){return motD[b]-motD[a];}).forEach(function(k){ row([k,+motD[k].toFixed(2),totalDevuelto>0?+(motD[k]/totalDevuelto*100).toFixed(1):0,"",""]); });
+  row([]);
+  // --- Por mes ---
+  row(["TASA POR MES"]); merges.push({s:{r:aoa.length-1,c:0},e:{r:aoa.length-1,c:4}});
+  row(["Mes","Venta bruta","Devuelto","Tasa %",""]);
+  Object.keys(vMes).concat(Object.keys(mesD)).filter(function(v,i,a){return a.indexOf(v)===i;}).sort().forEach(function(m){ var vb=vMes[m]||0,dev=mesD[m]||0; row([m,+vb.toFixed(2),+dev.toFixed(2),vb>0?+(dev/vb*100).toFixed(2):0,""]); });
+
+  var ws2=XLSX.utils.aoa_to_sheet(aoa);
+  ws2["!cols"]=[{wch:42},{wch:16},{wch:14},{wch:18},{wch:12}];
+  ws2["!merges"]=merges;
+  // Fórmulas: venta neta real (B = venta bruta - total devuelto), tasa global
+  function cell(r,c){ return XLSX.utils.encode_cell({r:r,c:c}); }
+  ws2[cell(rTasa,1)]={t:"n",f:"B"+(rVB+1)+"-E"+(rVB+1)}; // venta neta real = ventaBruta - totalDevuelto
+  ws2[cell(rTasa,4)]={t:"n",f:"IF(B"+(rVB+1)+"=0,0,E"+(rVB+1)+"/B"+(rVB+1)+"*100)",z:"0.00"}; // tasa %
+  // Tasa por sucursal con fórmula (col E = D/B*100)
+  for(var rr=sucStart;rr<=sucEnd;rr++){ ws2[cell(rr,4)]={t:"n",f:"IF(B"+(rr+1)+"=0,0,D"+(rr+1)+"/B"+(rr+1)+"*100)",z:"0.00"}; }
+  // % por vendedor (col C = B / totalDevuelto)
+  for(var rv=venStart;rv<=venEnd;rv++){ ws2[cell(rv,2)]={t:"n",f:totalDevuelto>0?("B"+(rv+1)+"/"+totalDevuelto.toFixed(2)+"*100"):"0",z:"0.00"}; }
+  XLSX.utils.book_append_sheet(wb,ws2,"Resumen gerencial");
+
+  // ===== Hoja 3: DIAGNÓSTICO (qué falla y qué mejorar) =====
+  var diag=[];
+  function dg(tipo,area,hallazgo,recomendacion){ diag.push({"PRIORIDAD":tipo,"ÁREA":area,"HALLAZGO":hallazgo,"RECOMENDACIÓN":recomendacion}); }
+  // Tasa global
+  if(tasaGlobal>6) dg("🔴 ALTA","General","Tasa de devolución global "+tasaGlobal.toFixed(1)+"% (sobre 6%)","Revisar urgente proceso de venta y despacho. Cada punto sobre 3% son ventas que se pierden.");
+  else if(tasaGlobal>3) dg("🟡 MEDIA","General","Tasa de devolución "+tasaGlobal.toFixed(1)+"% (entre 3-6%)","Monitorear semanal. Identificar las 2-3 causas principales abajo.");
+  else dg("🟢 OK","General","Tasa de devolución "+tasaGlobal.toFixed(1)+"% (bajo 3%)","Nivel saludable. Mantener controles actuales.");
+  // Sucursales en alerta
+  Object.keys(vSuc).forEach(function(s){ var vb=vSuc[s]||0, dev=sucD[s]||0, ta=vb>0?dev/vb*100:0; if(ta>6&&vb>0) dg("🔴 ALTA","Sucursal: "+s,"Tasa "+ta.toFixed(1)+"% (venta "+money(vb)+", devuelto "+money(dev)+")","Auditar esta sucursal: capacitación en despacho y verificación de pedidos antes de facturar."); });
+  // Vendedores con más devolución
+  var venTop=Object.keys(venD).sort(function(a,b){return venD[b]-venD[a];});
+  if(venTop.length&&totalDevuelto>0){ var pct=venD[venTop[0]]/totalDevuelto*100; if(pct>25) dg("🟡 MEDIA","Vendedor: "+venTop[0],"Concentra "+pct.toFixed(0)+"% de las devoluciones ("+money(venD[venTop[0]])+")","Revisar con el vendedor: ¿errores de pedido, mala asesoría o productos específicos? Reforzar verificación."); }
+  // Producto problemático
+  var prodTop=Object.keys(prodD).sort(function(a,b){return prodD[b].cant-prodD[a].cant;});
+  if(prodTop.length){ var p=prodD[prodTop[0]]; if(p.cant>=5) dg("🔴 ALTA","Producto: "+prodTop[0].slice(0,40),"Es el más devuelto: "+p.cant+" unidades, "+money(p.monto),"Revisar calidad del lote, descripción en catálogo y compatibilidad. Posible problema de proveedor o info de venta errónea."); }
+  // Motivo dominante
+  var motTop=Object.keys(motD).sort(function(a,b){return motD[b]-motD[a];});
+  if(motTop.length&&totalDevuelto>0){ var pm=motD[motTop[0]]/totalDevuelto*100; dg(pm>40?"🔴 ALTA":"🟡 MEDIA","Motivo: "+motTop[0],"Es la causa #1: "+pm.toFixed(0)+"% de las devoluciones",motTop[0].indexOf("IMPORTAC")>=0?"Revisar proceso de importaciones: errores recurrentes están generando devoluciones.":(motTop[0].indexOf("GARANTIA")>=0?"Alto nivel de garantías: revisar calidad de proveedores.":"Atacar esta causa raíz reduciría la mayor parte de las devoluciones.")); }
+  // Proceso en trámite
+  if(devProceso>devAprobado&&devProceso>0) dg("🟡 MEDIA","Operación","Hay más monto EN PROCESO ("+money(devProceso)+") que aprobado ("+money(devAprobado)+")","Agilizar revisión de mercadería/devolución/garantía. Tickets estancados afectan el flujo y la visibilidad real.");
+  // Cliente concentrado
+  var cliTop=Object.keys(cliInfo).sort(function(a,b){return cliInfo[b].monto-cliInfo[a].monto;});
+  if(cliTop.length&&totalDevuelto>0){ var pc=cliInfo[cliTop[0]].monto/totalDevuelto*100; if(pc>20) dg("🟡 MEDIA","Cliente: "+cliTop[0],"Concentra "+pc.toFixed(0)+"% de las devoluciones","Reunión comercial con este cliente: entender por qué devuelve tanto y si conviene ajustar la relación."); }
+  if(diag.length===0) dg("🟢 OK","General","Sin alertas críticas en el periodo","Operación saludable.");
+  var ws3=XLSX.utils.json_to_sheet(diag);
+  ws3["!cols"]=[{wch:12},{wch:28},{wch:55},{wch:65}];
+  XLSX.utils.book_append_sheet(wb,ws3,"Diagnóstico y mejoras");
+
+  var suf=(desde||hasta)?("_"+(desde||"inicio")+"_a_"+(hasta||"hoy")):"";
+  XLSX.writeFile(wb,"Reporte_Gerencial_Devoluciones"+suf+".xlsx");
+}
+
+/* ===== INIT ===== */
+window.addEventListener("error",function(ev){ try{ var m=$("load-msg"); if(m) m.textContent="Error: "+(ev.message||"desconocido"); }catch(e){} });
+
+function arrancar(){
+  // Reintenta hasta que el SDK de Firebase esté disponible
+  var intentos=0;
+  function probar(){
+    intentos++;
+    if(typeof firebase!=="undefined"){
+      if(initFirebase()) cargarEstado();
+      else $("main").innerHTML='<div class="card"><div class="empty"><div class="big">Sin conexión a Firebase</div>No se pudo inicializar. Recarga la página.</div></div>';
+      return;
+    }
+    if(intentos>20){
+      $("main").innerHTML='<div class="card"><div class="empty"><div class="big">No se cargó Firebase</div>El navegador no pudo descargar las librerías. Verifica tu conexión a internet y recarga la página. Si usas un antivirus que bloquea scripts, desactívalo para este sitio.</div></div>';
+      return;
+    }
+    var m=$("load-msg"); if(m) m.textContent="Cargando librerías… ("+intentos+")";
+    setTimeout(probar,400);
+  }
+  probar();
+}
+if(document.readyState==="loading"){ document.addEventListener("DOMContentLoaded",arrancar); }
+else { arrancar(); }
+</script>
+</body>
+</html>
++total.toFixed(2)+'</b>';
+  if(sinFecha>0) html+=' · <span style="color:red">'+sinFecha+' facturas SIN fecha de emisión válida</span>';
+  html+='</p>';
+  html+='<p style="color:#888">Compara este total con tu Excel. Si una factura no debería estar, revisa su fecha de emisión.</p>';
+  html+='<table><thead><tr><th>#</th><th>Factura</th><th>Emisión</th><th>Cliente</th><th class="num">TOTAL DOCUMENTO</th></tr></thead><tbody>';
+  conta.forEach(function(v,i){ html+='<tr><td>'+(i+1)+'</td><td>'+v.factura+'</td><td>'+(v.emision||"(vacía)")+'</td><td>'+(v.razon||"")+'</td><td class="num">'+v.totalDoc.toFixed(2)+'</td></tr>'; });
+  html+='</tbody></table></body></html>';
+  win.document.write(html); win.document.close();
+}
 
 /* ===== EXPORTAR EXCEL (completo) ===== */
 function exportarExcel(){
