@@ -119,7 +119,7 @@ function sucursalDe(factura){ var m=String(factura||"").match(/(\d{3})/); var co
 function llegoQ(i){ if(!i.merc) return 0; return i.merc.cantLlegada!==undefined?i.merc.cantLlegada:(i.merc.llego?i.cantidad:0); }
 function clienteTipo(t){ var ruc=String(t.ruc||""); if(ruc.length===13) return "Mayorista"; return "Minorista"; }
 function itemsAceptados(t){
-  if(t.motivo==="GARANTIAS") return t.items.filter(function(i){return llegoQ(i)>0;}).map(function(i){ var q=llegoQ(i),f=i.cantidad?q/i.cantidad:0; return Object.assign({},i,{cantNC:q,neto:i.neto*f,iva:i.iva*f,total:i.total*f}); });
+  if(t.motivo==="GARANTIAS"){ if(!(t.gar&&t.gar.acepta)) return []; return t.items.filter(function(i){return llegoQ(i)>0;}).map(function(i){ var q=llegoQ(i),f=i.cantidad?q/i.cantidad:0; return Object.assign({},i,{cantNC:q,neto:i.neto*f,iva:i.iva*f,total:i.total*f}); }); }
   return t.items.filter(function(i){return i.dev&&i.dev.acepta&&i.dev.cantAcep>0;}).map(function(i){ var f=i.cantidad?i.dev.cantAcep/i.cantidad:0; return Object.assign({},i,{cantNC:i.dev.cantAcep,neto:i.neto*f,iva:i.iva*f,total:i.total*f}); });
 }
 function totalAceptado(t){ return itemsAceptados(t).reduce(function(s,i){return s+i.total;},0); }
@@ -206,10 +206,11 @@ function setFiltro(tipo,val){
 function limpiarFiltros(){ filtroSucursal=""; filtroVendedor=""; filtroMotivo=""; render(); }
 function datosConMonto(tks){
   return tks.map(function(t){
-    var aceptado=(t.estado==="NC"||(t.fechas&&t.fechas.nc))?totalAceptado(t):0;
+    var esAceptado=(t.estado==="NC")||(t.fechas&&t.fechas.nc);
+    var aceptado=esAceptado?totalAceptado(t):0;
     var totalTicket=t.items.reduce(function(s,i){return s+i.total;},0);
-    var monto=aceptado||totalTicket;
-    return {t:t,monto:monto,aceptado:aceptado,totalTicket:totalTicket,suc:sucursalDe(t.factura)};
+    /* REQ 5: el dashboard suma SOLO lo aceptado (garantías/devoluciones aceptadas → NC). */
+    return {t:t,monto:aceptado,aceptado:aceptado,esAceptado:!!esAceptado,totalTicket:totalTicket,suc:sucursalDe(t.factura)};
   });
 }
 function topN(obj,n){
@@ -374,26 +375,36 @@ function render(){
   var tks=ticketsFiltrados();
   var datos=datosConMonto(tks);
   var totalDevuelto=0, totalProductos=0, devAprobadoG=0, devProcesoG=0;
-  datos.forEach(function(d){ totalDevuelto+=d.monto; totalProductos+=d.t.items.reduce(function(a,i){return a+i.cantidad;},0); if(d.t.estado==="NC") devAprobadoG+=d.monto; else devProcesoG+=d.monto; });
+  var acepGarantia=0, acepDevolucion=0, nAcept=0;
+  datos.forEach(function(d){
+    var t=d.t;
+    if(d.esAceptado){
+      totalDevuelto+=d.aceptado; devAprobadoG+=d.aceptado; nAcept++;
+      if(t.motivo==="GARANTIAS") acepGarantia+=d.aceptado; else acepDevolucion+=d.aceptado;
+      totalProductos+=itemsAceptados(t).reduce(function(a,i){return a+(i.cantNC||0);},0);
+    } else { devProcesoG+=d.totalTicket; }
+  });
   var nTickets=datos.length;
 
-  /* --- Agrupaciones --- */
+  /* --- Agrupaciones (SOLO lo aceptado, para que cuadre con las NC) --- */
   var porCliente={}, porVendedor={}, porSucursal={}, porMotivo={}, porProducto={}, porDia={}, porMes={};
   datos.forEach(function(d){
     var t=d.t;
+    if(!d.esAceptado) return;
     if(!porCliente[t.razonSocial]) porCliente[t.razonSocial]={monto:0,prod:0};
-    porCliente[t.razonSocial].monto+=d.monto;
-    porCliente[t.razonSocial].prod+=t.items.reduce(function(a,i){return a+i.cantidad;},0);
-    porVendedor[t.vendedor]=(porVendedor[t.vendedor]||0)+d.monto;
-    porSucursal[d.suc.nombre]=(porSucursal[d.suc.nombre]||0)+d.monto;
-    porMotivo[t.motivo]=(porMotivo[t.motivo]||0)+d.monto;
-    t.items.forEach(function(i){
+    porCliente[t.razonSocial].monto+=d.aceptado;
+    porVendedor[t.vendedor]=(porVendedor[t.vendedor]||0)+d.aceptado;
+    porSucursal[d.suc.nombre]=(porSucursal[d.suc.nombre]||0)+d.aceptado;
+    porMotivo[t.motivo]=(porMotivo[t.motivo]||0)+d.aceptado;
+    var fd=hoyStr(t.fechaTicket); porDia[fd]=(porDia[fd]||0)+d.aceptado;
+    var fm=mesStr(t.fechaTicket); porMes[fm]=(porMes[fm]||0)+d.aceptado;
+    var acItems=itemsAceptados(t);
+    porCliente[t.razonSocial].prod+=acItems.reduce(function(a,i){return a+(i.cantNC||0);},0);
+    acItems.forEach(function(i){
       var k=i.codigo+" — "+i.desc;
       if(!porProducto[k]) porProducto[k]={cant:0,monto:0,marca:i.sub,codigo:i.codigo};
-      porProducto[k].cant+=i.cantidad; porProducto[k].monto+=i.total;
+      porProducto[k].cant+=(i.cantNC||0); porProducto[k].monto+=i.total;
     });
-    var fd=hoyStr(t.fechaTicket); porDia[fd]=(porDia[fd]||0)+d.monto;
-    var fm=mesStr(t.fechaTicket); porMes[fm]=(porMes[fm]||0)+d.monto;
   });
 
   var meses=Object.keys(porMes).sort();
@@ -449,11 +460,21 @@ function render(){
   if(chips.length) h+='<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center"><span class="muted">Filtros activos:</span>'+chips.join("")+'<button class="btn btn-g" onclick="limpiarFiltros()" style="padding:3px 10px">Limpiar todo</button></div>';
   h+='<div class="muted" style="margin-top:8px">'+(desde||hasta?("Periodo: "+(desde||"inicio")+" a "+(hasta||"hoy")):"Todo el histórico")+' · '+nTickets+' tickets · <b>Haz clic en sucursales, vendedores o motivos para filtrar el tablero.</b></div></div>';
 
-  /* KPIs */
+  /* KPIs (solo lo aceptado) */
   h+='<div class="grid4">';
-  h+='<div class="kpi"><div class="disp" style="color:var(--rojo)">'+money(totalDevuelto)+'</div><div class="lbl">Monto total devuelto</div></div>';
-  h+='<div class="kpi"><div class="disp" style="color:var(--navy)">'+totalProductos.toLocaleString("es-EC")+'</div><div class="lbl">Artículos devueltos</div></div>';
-  h+='<div class="kpi"><div class="disp" style="color:var(--ink)">'+nTickets+'</div><div class="lbl">Tickets devolución/garantía</div></div>';
+  h+='<div class="kpi"><div class="disp" style="color:var(--rojo)">'+money(devAprobadoG)+'</div><div class="lbl">Monto aprobado (NC)</div></div>';
+  h+='<div class="kpi"><div class="disp" style="color:var(--navy)">'+money(acepDevolucion)+'</div><div class="lbl">Devoluciones aceptadas</div></div>';
+  h+='<div class="kpi"><div class="disp" style="color:#6A2E91">'+money(acepGarantia)+'</div><div class="lbl">Garantías aceptadas</div></div>';
+  h+='<div class="kpi"><div class="disp" style="color:var(--ink)">'+nAcept+'</div><div class="lbl">Tickets aprobados (NC)</div></div>';
+  h+='</div>';
+  /* Cuadre: Devoluciones aceptadas + Garantías aceptadas = Total aprobado (NC) */
+  var sumaDesglose=acepDevolucion+acepGarantia;
+  var cuadra=Math.abs(sumaDesglose-devAprobadoG)<0.01;
+  h+='<div class="card" style="border-left:5px solid '+(cuadra?"var(--ok)":"var(--rojo)")+'"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:14px"><b>'+(cuadra?"✓ Cuadre correcto:":"⚠ Descuadre:")+'</b><span>Devoluciones aceptadas '+money(acepDevolucion)+'</span><span>+</span><span>Garantías aceptadas '+money(acepGarantia)+'</span><span>=</span><b>'+money(sumaDesglose)+'</b><span class="muted">vs Total aprobado por NC '+money(devAprobadoG)+'</span></div><div class="muted" style="margin-top:6px">Estos importes corresponden únicamente a los registros aceptados (los mismos que figuran en la pestaña de Notas de crédito del sistema). Tickets en proceso o no aceptados no se suman.</div></div>';
+  h+='<div class="grid4" style="margin-top:2px">';
+  h+='<div class="kpi"><div class="disp" style="color:var(--navy)">'+totalProductos.toLocaleString("es-EC")+'</div><div class="lbl">Artículos aprobados</div></div>';
+  h+='<div class="kpi"><div class="disp" style="color:var(--ink)">'+nTickets+'</div><div class="lbl">Tickets generados (devol./garantía)</div></div>';
+  h+='<div class="kpi"><div class="disp" style="color:#C77F00">'+money(devProcesoG)+'</div><div class="lbl">Valor en proceso (aún no aprobado)</div></div>';
   h+='<div class="kpi"><div class="disp" style="color:var(--navy)">'+money(montoMesActual)+'</div><div class="lbl">'+nombreMes(mesActual)+(mesAnterior?(' · <span class="'+(deltaMes>=0?"delta-up":"delta-dn")+'">'+(deltaMes>=0?"▲":"▼")+' '+Math.abs(deltaMes).toFixed(1)+'%</span> vs '+nombreMes(mesAnterior)):'')+'</div></div>';
   h+='</div>';
 
@@ -491,7 +512,7 @@ function render(){
 
     /* CANTIDAD DE ARTÍCULOS: facturados vs devueltos */
     h+='<div class="card"><div class="sec-title">Cantidad de artículos: facturados vs devueltos</div>';
-    h+='<div class="grid4"><div class="kpi"><div class="disp" style="color:var(--navy)">'+artFacturados.toLocaleString("es-EC")+'</div><div class="lbl">Artículos facturados (CANTIDAD del Sheet)</div></div><div class="kpi"><div class="disp" style="color:var(--rojo)">'+totalProductos.toLocaleString("es-EC")+'</div><div class="lbl">Artículos devueltos (tickets)</div></div><div class="kpi"><div class="disp" style="color:'+colorTasa(tasaArticulos)+'">'+tasaArticulos.toFixed(2)+'%</div><div class="lbl">% de unidades devueltas</div></div><div class="kpi"><div class="disp" style="color:var(--navy)">'+(totalProductos>0?dnum(artFacturados/totalProductos):"—")+'</div><div class="lbl">Cantidad total ÷ devuelta (facturados por cada 1 devuelto)</div></div></div>';
+    h+='<div class="grid4"><div class="kpi"><div class="disp" style="color:var(--navy)">'+artFacturados.toLocaleString("es-EC")+'</div><div class="lbl">Artículos facturados (CANTIDAD del Sheet)</div></div><div class="kpi"><div class="disp" style="color:var(--rojo)">'+totalProductos.toLocaleString("es-EC")+'</div><div class="lbl">Artículos aprobados (NC)</div></div><div class="kpi"><div class="disp" style="color:'+colorTasa(tasaArticulos)+'">'+tasaArticulos.toFixed(2)+'%</div><div class="lbl">% de unidades devueltas</div></div><div class="kpi"><div class="disp" style="color:var(--navy)">'+(totalProductos>0?dnum(artFacturados/totalProductos):"—")+'</div><div class="lbl">Cantidad total ÷ devuelta (facturados por cada 1 devuelto)</div></div></div>';
     if(!columnasCSV.cantidad) h+='<div class="muted" style="margin-top:8px;color:var(--rojo)">⚠ No se detectó la columna <b>CANTIDAD</b> en el Google Sheets. Revisa que exista y se llame exactamente así para que este indicador funcione.</div>';
     h+='</div>';
 
@@ -541,7 +562,7 @@ function render(){
 
   h+='<div class="card"><div class="sec-title">Devoluciones por vendedor <span class="muted" style="font-weight:400">(clic para filtrar)</span></div><div style="max-height:300px;overflow:auto"><table><thead><tr><th>Vendedor</th><th class="num">Monto devuelto</th><th class="num">% del total</th></tr></thead><tbody>'+ven.map(function(v){ var sel=filtroVendedor===v.k; return '<tr style="cursor:pointer;'+(sel?"background:#FFF1F1":"")+'" onclick="setFiltro(\'vendedor\',\''+esc(v.k)+'\')"><td>'+(sel?"▶ ":"")+esc(v.k)+'</td><td class="num">'+money(v.v)+'</td><td class="num">'+(totalDevuelto>0?(v.v/totalDevuelto*100).toFixed(1):0)+'%</td></tr>'; }).join("")+'</tbody></table></div></div>';
   h+='<div class="card"><div class="sec-title">Devoluciones por sucursal</div><div style="overflow-x:auto"><table><thead><tr><th>Sucursal</th><th class="num">Monto devuelto</th><th class="num">% del total</th></tr></thead><tbody>'+suc.map(function(s){ return '<tr><td>'+esc(s.k)+'</td><td class="num">'+money(s.v)+'</td><td class="num">'+(totalDevuelto>0?(s.v/totalDevuelto*100).toFixed(1):0)+'%</td></tr>'; }).join("")+'</tbody></table></div></div>';
-  h+='<div class="card"><div class="sec-title">Impacto económico</div><div style="padding:8px 0"><div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line)"><span class="muted">Total devuelto en el periodo</span><b style="color:var(--rojo)">'+money(totalDevuelto)+'</b></div><div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line)"><span class="muted">Tickets procesados</span><b>'+nTickets+'</b></div><div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line)"><span class="muted">Promedio por ticket</span><b>'+money(nTickets?totalDevuelto/nTickets:0)+'</b></div><div style="display:flex;justify-content:space-between;padding:8px 0"><span class="muted">Artículos devueltos</span><b>'+totalProductos.toLocaleString("es-EC")+'</b></div></div></div>';
+  h+='<div class="card"><div class="sec-title">Impacto económico (aprobado)</div><div style="padding:8px 0"><div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line)"><span class="muted">Total aprobado (NC) en el periodo</span><b style="color:var(--rojo)">'+money(devAprobadoG)+'</b></div><div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line)"><span class="muted">› Devoluciones aceptadas</span><b>'+money(acepDevolucion)+'</b></div><div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line)"><span class="muted">› Garantías aceptadas</span><b>'+money(acepGarantia)+'</b></div><div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line)"><span class="muted">Tickets aprobados (NC)</span><b>'+nAcept+'</b></div><div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line)"><span class="muted">Promedio por ticket aprobado</span><b>'+money(nAcept?devAprobadoG/nAcept:0)+'</b></div><div style="display:flex;justify-content:space-between;padding:8px 0"><span class="muted">Artículos aprobados</span><b>'+totalProductos.toLocaleString("es-EC")+'</b></div></div></div>';
 
   if(nTickets===0){ h='<div class="card"><div class="empty"><div class="big">Sin datos en este periodo</div>Ajusta el rango de fechas o crea tickets en el sistema.</div></div>'+'<div class="card"><div class="grid4" style="align-items:end"><div><label>Desde</label><input type="date" id="f-desde" value="'+desde+'"></div><div><label>Hasta</label><input type="date" id="f-hasta" value="'+hasta+'"></div><div><button class="btn btn-p" style="width:100%;justify-content:center" onclick="aplicarFiltro()">Aplicar filtro</button></div><div><button class="btn btn-g" style="width:100%;justify-content:center" onclick="desde=\'\';hasta=\'\';render()">Limpiar</button></div></div></div>'; }
 
@@ -615,11 +636,12 @@ function exportarExcel(){
       "DIAS MERC-REV":dd.mercRev==null?null:+dd.mercRev.toFixed(1),
       "DIAS REV-NC":dd.revNC==null?null:+dd.revNC.toFixed(1),
       "DIAS CICLO":dd.ciclo==null?null:+dd.ciclo.toFixed(1),
-      "TOTAL DEVUELTO":+d.monto.toFixed(2)
+      "TOTAL APROBADO":+d.aceptado.toFixed(2),
+      "VALOR TICKET":+d.totalTicket.toFixed(2)
     };
   });
   var wsT=XLSX.utils.json_to_sheet(tRows.length?tRows:[{}]);
-  wsT["!cols"]=[{wch:12},{wch:18},{wch:18},{wch:14},{wch:20},{wch:12},{wch:12},{wch:14},{wch:14},{wch:12},{wch:13},{wch:14},{wch:13},{wch:11},{wch:11},{wch:14}];
+  wsT["!cols"]=[{wch:12},{wch:18},{wch:18},{wch:14},{wch:20},{wch:12},{wch:12},{wch:14},{wch:14},{wch:12},{wch:13},{wch:14},{wch:13},{wch:11},{wch:11},{wch:14},{wch:14}];
   XLSX.utils.book_append_sheet(wb,wsT,"Datos Tickets");
   var nT=tRows.length, tEnd=(nT||1)+1, ST="'Datos Tickets'";
 
@@ -627,7 +649,8 @@ function exportarExcel(){
   var dRows=[];
   datos.forEach(function(d){
     var t=d.t, suc=d.suc;
-    var its=itemsAceptados(t).length?itemsAceptados(t):t.items.map(function(i){ return Object.assign({},i,{cantNC:i.cantidad}); });
+    if(!d.esAceptado) return;
+    var its=itemsAceptados(t);
     its.forEach(function(i){
       var totProdReal=totalProdSheet[t.factura+"|"+i.codigo];
       dRows.push({
@@ -806,7 +829,7 @@ function exportarExcel(){
   /* ===================== HOJA: DIAGNÓSTICO ===================== */
   var ventaBruta=0, totalDevuelto=0, devAprobado=0, devProceso=0, vSucX={}, sucD={}, venD={}, motD={}, prodCx={}, cliInfo={};
   facts.forEach(function(v){ ventaBruta+=v.totalDoc; var sn=sucursalDe(v.factura).nombre; vSucX[sn]=(vSucX[sn]||0)+v.totalDoc; });
-  datos.forEach(function(d){ var t=d.t; totalDevuelto+=d.monto; if(t.estado==="NC") devAprobado+=d.monto; else devProceso+=d.monto; sucD[d.suc.nombre]=(sucD[d.suc.nombre]||0)+d.monto; venD[t.vendedor]=(venD[t.vendedor]||0)+d.monto; motD[t.motivo]=(motD[t.motivo]||0)+d.monto; if(!cliInfo[t.razonSocial]) cliInfo[t.razonSocial]={monto:0}; cliInfo[t.razonSocial].monto+=d.monto; t.items.forEach(function(i){ if(!prodCx[i.codigo]) prodCx[i.codigo]={cant:0,monto:0,desc:i.desc}; prodCx[i.codigo].cant+=i.cantidad; prodCx[i.codigo].monto+=i.total; }); });
+  datos.forEach(function(d){ var t=d.t; totalDevuelto+=d.monto; if(d.esAceptado) devAprobado+=d.aceptado; else devProceso+=d.totalTicket; sucD[d.suc.nombre]=(sucD[d.suc.nombre]||0)+d.monto; venD[t.vendedor]=(venD[t.vendedor]||0)+d.monto; motD[t.motivo]=(motD[t.motivo]||0)+d.monto; if(!cliInfo[t.razonSocial]) cliInfo[t.razonSocial]={monto:0}; cliInfo[t.razonSocial].monto+=d.monto; if(d.esAceptado) itemsAceptados(t).forEach(function(i){ if(!prodCx[i.codigo]) prodCx[i.codigo]={cant:0,monto:0,desc:i.desc}; prodCx[i.codigo].cant+=(i.cantNC||0); prodCx[i.codigo].monto+=i.total; }); });
   var tasaG=ventaBruta>0?(totalDevuelto/ventaBruta*100):0;
   var diag=[];
   function dg(p,a,hh,r){ diag.push({"PRIORIDAD":p,"ÁREA":a,"HALLAZGO":hh,"RECOMENDACIÓN":r}); }
