@@ -340,6 +340,18 @@ function findT(id){ for(var i=0;i<state.tickets.length;i++){ if(state.tickets[i]
 function findGuia(id){ var g=state.guias||[]; for(var i=0;i<g.length;i++){ if(g[i].id===id) return g[i]; } return null; }
 function sucursalDe(factura){ var m=String(factura||"").match(/(\d{3})/); var cod=m?m[1]:""; return {codigo:cod,nombre:SUCURSALES[cod]||(cod?"Sucursal "+cod:"Sin sucursal")}; }
 function codigosUsados(factura){ var s={}; state.tickets.forEach(function(t){ if(t.factura===factura&&t.estado!=="ELIMINADO") t.items.forEach(function(i){ s[i.codigo]=t.numero; }); }); return s; }
+/* Suma, por código, la cantidad YA devuelta en tickets activos (no ELIMINADO) de esa factura, y guarda en qué tickets se devolvió. Permite reutilizar el mismo código en varios tickets controlando el saldo. */
+function devolucionesPorCodigo(factura){
+  var cant={}, nums={};
+  state.tickets.forEach(function(t){
+    if(t.factura!==factura||t.estado==="ELIMINADO") return;
+    t.items.forEach(function(i){
+      cant[i.codigo]=(cant[i.codigo]||0)+(+i.cantidad||0);
+      (nums[i.codigo]=nums[i.codigo]||[]).push(t.numero);
+    });
+  });
+  return {cant:cant,nums:nums};
+}
 function guiasSeleccionables(asesor){ var hoy=hoyStr(); return (state.guias||[]).filter(function(g){ return g.asesor===asesor&&g.estado!=="ANULADA"&&hoyStr(g.fechaCreacion)===hoy; }); }
 function guiaUsadaEnTickets(id){ return state.tickets.some(function(t){ return t.estado!=="ELIMINADO"&&t.guiaId===id; }); }
 function tagFor(t){
@@ -502,23 +514,33 @@ function limpiarBusquedaItems(){ capturarItemsNuevo(); filtroItems=""; var si=$(
 function totalLinea(r,q){ q=Math.max(0,Math.min(r.cant,+q||0)); var f=r.cant?q/r.cant:0; return r.total*f; }
 function renderItemsBody(){
   var tbody=$("n-tbody"); if(!tbody) return;
-  var usados=codigosUsados(nuevo.factura), q=filtroItems.trim().toUpperCase(), lineas=nuevo.lineas;
+  var dev=devolucionesPorCodigo(nuevo.factura), q=filtroItems.trim().toUpperCase(), lineas=nuevo.lineas;
+  nuevo.restante=nuevo.restante||{};
   tbody.innerHTML=""; var shown=0;
   lineas.forEach(function(r,i){
-    var dup=usados[r.codigo];
+    var yaDev=dev.cant[r.codigo]||0;
+    var restante=Math.max(0,r.cant-yaDev);
+    nuevo.restante[i]=restante;
+    var agotado=restante<=0;
     var txt=(r.codigo+" "+r.desc+" "+r.sub).toUpperCase();
     if(q&&txt.indexOf(q)<0) return;
     shown++;
-    var qv=dup?0:(nuevo.cant[i]!==undefined&&nuevo.cant[i]!==""?nuevo.cant[i]:0);
-    var cv=dup?"":(nuevo.com[i]!==undefined?nuevo.com[i]:"");
+    var qvRaw=(nuevo.cant[i]!==undefined&&nuevo.cant[i]!=="")?+nuevo.cant[i]:0;
+    var qv=agotado?0:Math.min(qvRaw,restante);
+    var cv=agotado?"":(nuevo.com[i]!==undefined?nuevo.com[i]:"");
+    var info="";
+    if(yaDev>0){
+      info='<br><span class="tag '+(agotado?"tag-bad":"tag-merc")+'">'+(agotado?"Devuelto completo":"Quedan "+restante+" de "+r.cant)+'</span><div class="muted" style="font-size:11px">Ya en: '+esc((dev.nums[r.codigo]||[]).join(", "))+'</div>';
+    }
+    var cantCol=r.cant+(yaDev>0?'<div class="muted" style="font-size:11px">disp. '+restante+'</div>':'');
     var tr=document.createElement("tr");
-    tr.innerHTML='<td><b>'+esc(r.codigo)+'</b>'+(dup?'<br><span class="tag tag-bad">En '+esc(dup)+'</span>':'')+'</td><td style="max-width:280px;font-size:12px">'+esc(r.desc)+'<div class="muted">'+esc(r.sub)+'</div></td><td class="num">'+r.cant+'</td><td><input type="number" min="0" max="'+r.cant+'" value="'+esc(qv)+'" id="q-'+i+'" oninput="nCalc('+i+')" style="text-align:right" '+(dup?"disabled":"")+'></td><td><input id="c-'+i+'" value="'+esc(cv)+'" placeholder="Comentario" oninput="nCom('+i+')" '+(dup?"disabled":"")+'></td><td class="num" id="tt-'+i+'">'+money(totalLinea(r,qv))+'</td>';
+    tr.innerHTML='<td><b>'+esc(r.codigo)+'</b>'+info+'</td><td style="max-width:280px;font-size:12px">'+esc(r.desc)+'<div class="muted">'+esc(r.sub)+'</div></td><td class="num">'+cantCol+'</td><td><input type="number" min="0" max="'+restante+'" value="'+esc(qv)+'" id="q-'+i+'" oninput="nCalc('+i+')" style="text-align:right" '+(agotado?"disabled":"")+'></td><td><input id="c-'+i+'" value="'+esc(cv)+'" placeholder="Comentario" oninput="nCom('+i+')" '+(agotado?"disabled":"")+'></td><td class="num" id="tt-'+i+'">'+money(totalLinea(r,qv))+'</td>';
     tbody.appendChild(tr);
   });
   if($("n-count")) $("n-count").textContent=q?("Mostrando "+shown+" de "+lineas.length+" productos"):(lineas.length+" productos en esta factura");
   if(shown===0&&q) tbody.innerHTML='<tr><td colspan="6" class="muted" style="text-align:center;padding:20px">Sin resultados</td></tr>';
 }
-function nCalc(i){ var r=nuevo.lineas[i]; if(!r) return; var el=$("q-"+i); var q=Math.max(0,Math.min(r.cant,+(el?el.value:0))); if(el) el.value=q; nuevo.cant=nuevo.cant||{}; nuevo.cant[i]=q; if($("tt-"+i)) $("tt-"+i).textContent=money(totalLinea(r,q)); }
+function nCalc(i){ var r=nuevo.lineas[i]; if(!r) return; var max=(nuevo.restante&&nuevo.restante[i]!==undefined)?nuevo.restante[i]:r.cant; var el=$("q-"+i); var q=Math.max(0,Math.min(max,+(el?el.value:0))); if(el) el.value=q; nuevo.cant=nuevo.cant||{}; nuevo.cant[i]=q; if($("tt-"+i)) $("tt-"+i).textContent=money(totalLinea(r,q)); }
 function nCom(i){ var el=$("c-"+i); if(!el) return; nuevo.com=nuevo.com||{}; nuevo.com[i]=el.value; }
 function nNum(){ var m=$("n-motivo").value; nuevo.motivo=m; if(!m){ $("n-num").value=""; return; } var gar=m==="GARANTIAS"; var nx=gar?state.seq5200+1:state.seq3200+1; $("n-num").value=(gar?"5200":"3200")+"-"+String(nx).padStart(4,"0"); }
 async function guardarTicket(){
@@ -532,15 +554,17 @@ async function guardarTicket(){
   }
   if(!nuevo.razon||!nuevo.factura){ toast("Selecciona razón social y factura."); return; }
   if(!nuevo.motivo){ toast("Selecciona el motivo."); return; }
-  var usados=codigosUsados(nuevo.factura), items=[], repetido=null;
+  var dev=devolucionesPorCodigo(nuevo.factura), items=[], excedido=null, entradoPorCod={};
   nuevo.cant=nuevo.cant||{}; nuevo.com=nuevo.com||{};
   nuevo.lineas.forEach(function(r,i){
     var q=Math.max(0,Math.min(r.cant,+(nuevo.cant[i]||0))); if(q<=0) return;
-    if(usados[r.codigo]){ repetido=r.codigo+" (ticket "+usados[r.codigo]+")"; return; }
+    var restante=r.cant-(dev.cant[r.codigo]||0)-(entradoPorCod[r.codigo]||0);
+    if(q>restante){ excedido=r.codigo+" (disponible "+Math.max(0,restante)+" de "+r.cant+")"; return; }
+    entradoPorCod[r.codigo]=(entradoPorCod[r.codigo]||0)+q;
     var f=q/r.cant, com=(nuevo.com[i]||"").trim();
     items.push({codigo:r.codigo,desc:r.desc,sub:r.sub,cantidad:q,comVendedor:com,neto:+(r.neto*f).toFixed(4),iva:+(r.iva*f).toFixed(4),total:+(r.total*f).toFixed(4)});
   });
-  if(repetido){ toast("El código "+repetido+" ya está en otro ticket activo."); return; }
+  if(excedido){ toast("El código "+excedido+" supera la cantidad disponible para devolver."); return; }
   if(items.length===0){ toast("Ingresa cantidad en al menos un producto."); return; }
   var gar=nuevo.motivo==="GARANTIAS";
   if(gar) state.seq5200++; else state.seq3200++;
