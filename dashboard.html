@@ -829,7 +829,7 @@ function exportarExcel(){
   /* ===================== HOJA: DIAGNÓSTICO ===================== */
   var ventaBruta=0, totalDevuelto=0, devAprobado=0, devProceso=0, vSucX={}, sucD={}, venD={}, motD={}, prodCx={}, cliInfo={};
   facts.forEach(function(v){ ventaBruta+=v.totalDoc; var sn=sucursalDe(v.factura).nombre; vSucX[sn]=(vSucX[sn]||0)+v.totalDoc; });
-  datos.forEach(function(d){ var t=d.t; totalDevuelto+=d.monto; if(d.esAceptado) devAprobado+=d.aceptado; else devProceso+=d.totalTicket; sucD[d.suc.nombre]=(sucD[d.suc.nombre]||0)+d.monto; venD[t.vendedor]=(venD[t.vendedor]||0)+d.monto; motD[t.motivo]=(motD[t.motivo]||0)+d.monto; if(!cliInfo[t.razonSocial]) cliInfo[t.razonSocial]={monto:0}; cliInfo[t.razonSocial].monto+=d.monto; if(d.esAceptado) itemsAceptados(t).forEach(function(i){ if(!prodCx[i.codigo]) prodCx[i.codigo]={cant:0,monto:0,desc:i.desc}; prodCx[i.codigo].cant+=(i.cantNC||0); prodCx[i.codigo].monto+=i.total; }); });
+  datos.forEach(function(d){ var t=d.t; if(d.esAceptado){ totalDevuelto+=d.aceptado; devAprobado+=d.aceptado; sucD[d.suc.nombre]=(sucD[d.suc.nombre]||0)+d.aceptado; venD[t.vendedor]=(venD[t.vendedor]||0)+d.aceptado; motD[t.motivo]=(motD[t.motivo]||0)+d.aceptado; if(!cliInfo[t.razonSocial]) cliInfo[t.razonSocial]={monto:0}; cliInfo[t.razonSocial].monto+=d.aceptado; itemsAceptados(t).forEach(function(i){ if(!prodCx[i.codigo]) prodCx[i.codigo]={cant:0,monto:0,desc:i.desc}; prodCx[i.codigo].cant+=(i.cantNC||0); prodCx[i.codigo].monto+=i.total; }); } else { devProceso+=d.totalTicket; } });
   var tasaG=ventaBruta>0?(totalDevuelto/ventaBruta*100):0;
   var diag=[];
   function dg(p,a,hh,r){ diag.push({"PRIORIDAD":p,"ÁREA":a,"HALLAZGO":hh,"RECOMENDACIÓN":r}); }
