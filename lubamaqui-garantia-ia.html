@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Análisis de garantía con IA · LUBAMAQUI</title>
+<style>
+  :root{
+    --bg:#EDEFF2;
+    --surface:#FFFFFF;
+    --ink:#161B22;
+    --muted:#5C6573;
+    --line:#DCE0E6;
+    --line-strong:#C3C9D2;
+    --accent:#B5651D;       /* aceite / lubricante */
+    --accent-dark:#8F4E12;
+    --accent-soft:#F6ECE0;
+    --steel:#2E5468;
+    --ok:#1F7A4D;
+    --warn:#B23B2E;
+    --shadow:0 1px 2px rgba(20,24,30,.06),0 8px 24px rgba(20,24,30,.07);
+    --radius:10px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    font-family:"Segoe UI",system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg); color:var(--ink); line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1120px;margin:0 auto;padding:24px 20px 64px}
+
+  /* Header */
+  header.top{
+    display:flex;align-items:center;gap:14px;
+    padding:18px 0 22px;border-bottom:2px solid var(--ink);margin-bottom:24px;
+  }
+  .logo{
+    width:42px;height:42px;border-radius:9px;flex:0 0 auto;
+    background:var(--ink);color:#fff;display:grid;place-items:center;
+    font-weight:800;font-size:18px;letter-spacing:.5px;
+  }
+  .titles h1{font-size:19px;margin:0;font-weight:800;letter-spacing:-.2px}
+  .titles p{margin:2px 0 0;font-size:13px;color:var(--muted)}
+  .pill{
+    margin-left:auto;font-size:11.5px;font-weight:700;text-transform:uppercase;
+    letter-spacing:.6px;color:var(--accent-dark);background:var(--accent-soft);
+    border:1px solid #E6D3BE;padding:5px 11px;border-radius:999px;
+  }
+
+  /* Layout */
+  .grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.05fr);gap:22px}
+  @media (max-width:860px){.grid{grid-template-columns:1fr}}
+
+  .card{
+    background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:20px;
+  }
+  .card + .card{margin-top:18px}
+  .card h2{
+    font-size:12px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);
+    margin:0 0 14px;font-weight:700;display:flex;align-items:center;gap:8px;
+  }
+  .card h2 .n{
+    width:20px;height:20px;border-radius:5px;background:var(--ink);color:#fff;
+    display:grid;place-items:center;font-size:11px;font-weight:800;
+  }
+
+  label{display:block;font-size:13px;font-weight:600;margin:0 0 5px;color:var(--ink)}
+  .field{margin-bottom:14px}
+  .field:last-child{margin-bottom:0}
+  input[type=text],textarea,select{
+    width:100%;font:inherit;font-size:14px;color:var(--ink);background:#fff;
+    border:1px solid var(--line-strong);border-radius:8px;padding:9px 11px;
+  }
+  textarea{resize:vertical;min-height:84px;line-height:1.55}
+  input:focus,textarea:focus,select:focus{
+    outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent);
+  }
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media (max-width:480px){.row2{grid-template-columns:1fr}}
+  .hint{font-size:12px;color:var(--muted);margin:5px 0 0}
+
+  /* API key */
+  .keybar{
+    display:flex;gap:10px;align-items:center;flex-wrap:wrap;
+    background:var(--accent-soft);border:1px solid #E6D3BE;border-radius:8px;padding:12px 14px;margin-bottom:18px;
+  }
+  .keybar label{margin:0;white-space:nowrap}
+  .keybar input{flex:1;min-width:200px;border-color:#D9C3A8}
+  .keybar .hint{flex-basis:100%;margin-top:2px}
+  .keybar a{color:var(--accent-dark);font-weight:600}
+
+  /* Photos */
+  .drop{
+    border:2px dashed var(--line-strong);border-radius:10px;padding:22px;text-align:center;
+    cursor:pointer;background:#FAFBFC;transition:border-color .15s,background .15s;
+  }
+  .drop:hover,.drop.over{border-color:var(--accent);background:var(--accent-soft)}
+  .drop strong{color:var(--accent-dark)}
+  .drop span{display:block;font-size:12.5px;color:var(--muted);margin-top:4px}
+  .thumbs{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}
+  .thumb{position:relative;width:84px;height:84px;border-radius:8px;overflow:hidden;border:1px solid var(--line-strong)}
+  .thumb img{width:100%;height:100%;object-fit:cover;display:block}
+  .thumb-noimg{
+    width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    background:#EEF1F4;color:var(--muted);font-size:13px;font-weight:700;gap:2px;
+  }
+  .thumb-noimg small{font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.4px}
+  .thumb button{
+    position:absolute;top:3px;right:3px;width:20px;height:20px;border:0;border-radius:5px;
+    background:rgba(22,27,34,.78);color:#fff;font-size:13px;line-height:1;cursor:pointer;
+  }
+  .thumb button:hover{background:var(--warn)}
+
+  /* Buttons */
+  .btn{
+    font:inherit;font-weight:700;font-size:15px;border:0;border-radius:9px;cursor:pointer;
+    padding:12px 18px;display:inline-flex;align-items:center;gap:9px;
+  }
+  .btn-primary{background:var(--accent);color:#fff;width:100%;justify-content:center}
+  .btn-primary:hover{background:var(--accent-dark)}
+  .btn-primary:disabled{background:#C9B49C;cursor:not-allowed}
+  .btn .spin{
+    width:16px;height:16px;border:2.5px solid rgba(255,255,255,.45);border-top-color:#fff;
+    border-radius:50%;animation:sp .7s linear infinite;display:none;
+  }
+  .btn.loading .spin{display:block}
+  .btn.loading .lbl{opacity:.85}
+  @keyframes sp{to{transform:rotate(360deg)}}
+
+  /* Results */
+  #results{display:none}
+  .verdict{
+    display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+    border-radius:9px;padding:13px 15px;margin-bottom:6px;border:1px solid;
+  }
+  .verdict .vlabel{font-size:12px;text-transform:uppercase;letter-spacing:.6px;font-weight:700;opacity:.8}
+  .verdict select{width:auto;flex:1;min-width:170px;font-weight:700}
+  .v-defecto_fabrica{background:#FDEEE9;border-color:#F0C3B5;color:#9A3322}
+  .v-mal_uso{background:#FBE9E7;border-color:#F1B7AF;color:#A12C20}
+  .v-desgaste_normal{background:#EEF1F4;border-color:#D2D9E1;color:#3A4654}
+  .v-no_concluyente{background:#F4F0E9;border-color:#E0D6C5;color:#6B5A3C}
+
+  .out-field{margin-top:14px}
+  .out-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:5px}
+  .out-head label{margin:0}
+  .copy{
+    font:inherit;font-size:12px;font-weight:600;color:var(--steel);background:none;border:0;
+    cursor:pointer;padding:3px 6px;border-radius:5px;
+  }
+  .copy:hover{background:#EAF0F3}
+  .copy.done{color:var(--ok)}
+
+  .note{
+    font-size:12.5px;color:var(--muted);background:#F4F6F8;border-left:3px solid var(--steel);
+    padding:10px 13px;border-radius:0 7px 7px 0;margin-top:18px;
+  }
+  .alert{
+    display:none;background:#FBE9E7;border:1px solid #F1B7AF;color:#A12C20;
+    border-radius:8px;padding:11px 14px;font-size:13.5px;margin-top:14px;
+  }
+  .empty{color:var(--muted);font-size:14px;text-align:center;padding:34px 10px}
+  .empty .big{font-size:30px;display:block;margin-bottom:8px;opacity:.5}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div class="logo">L</div>
+    <div class="titles">
+      <h1>Análisis de garantía con IA</h1>
+      <p>LUBAMAQUI · borrador de informe técnico a partir de fotos</p>
+    </div>
+    <div class="pill">Asistente</div>
+  </header>
+
+  <!-- Clave -->
+  <div class="keybar" id="keybar">
+    <label for="apikey">Clave de Gemini</label>
+    <input type="text" id="apikey" placeholder="Pega aquí tu clave gratis (AIza...)" autocomplete="off" spellcheck="false">
+    <p class="hint">Gratis desde <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a> (sin tarjeta). Se guarda solo en este navegador, nunca se sube a internet.</p>
+  </div>
+  <button type="button" id="changeKey" style="display:none;background:none;border:0;color:var(--steel);font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;margin:-6px 0 16px;padding:0">🔑 Cambiar clave de IA</button>
+
+  <div class="grid">
+
+    <!-- Izquierda: datos + fotos -->
+    <div>
+      <div class="card">
+        <h2><span class="n">1</span>Contexto del caso</h2>
+        <div class="row2">
+          <div class="field"><label for="marca">Marca</label><input type="text" id="marca" placeholder="Ej. LUBAMAQUI"></div>
+          <div class="field"><label for="modelo">Producto / referencia</label><input type="text" id="modelo" placeholder="Ej. SAE 15W40 CI-4"></div>
+        </div>
+        <div class="row2">
+          <div class="field"><label for="aplicacion">Aplicación / máquina</label><input type="text" id="aplicacion" placeholder="Ej. Motor diésel, 12.000 km"></div>
+          <div class="field"><label for="distribuidor">Distribuidor</label><input type="text" id="distribuidor" placeholder="Ej. Sucursal Quito"></div>
+        </div>
+        <div class="field">
+          <label for="obs">Observaciones del reclamo</label>
+          <textarea id="obs" placeholder="Lo que reporta el cliente, condiciones de uso, síntomas... (evita datos personales del cliente)"></textarea>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2><span class="n">2</span>Fotos de la pieza / producto</h2>
+        <div class="drop" id="drop" tabindex="0" role="button" aria-label="Agregar fotos">
+          <strong>Toca para agregar fotos</strong>
+          <span>o arrástralas aquí · JPG/PNG · varias permitidas</span>
+        </div>
+        <input type="file" id="file" accept="image/*" multiple hidden>
+        <div class="thumbs" id="thumbs"></div>
+      </div>
+
+      <button class="btn btn-primary" id="analyze" disabled>
+        <span class="spin"></span><span class="lbl">🤖 Analizar con IA</span>
+      </button>
+      <div class="alert" id="alert"></div>
+    </div>
+
+    <!-- Derecha: resultados -->
+    <div>
+      <div class="card">
+        <h2><span class="n">3</span>Borrador del informe</h2>
+
+        <div class="empty" id="empty">
+          <span class="big">📋</span>
+          Agrega fotos y contexto, luego pulsa <strong>Analizar con IA</strong>.<br>El resultado aparece aquí, editable.
+        </div>
+
+        <div id="results">
+          <div class="verdict v-no_concluyente" id="verdictBox">
+            <span class="vlabel">Veredicto sugerido</span>
+            <select id="veredicto">
+              <option value="defecto_fabrica">Posible defecto de fábrica</option>
+              <option value="mal_uso">Indicios de mal uso</option>
+              <option value="desgaste_normal">Desgaste normal</option>
+              <option value="no_concluyente">No concluyente</option>
+            </select>
+          </div>
+
+          <div class="out-field">
+            <div class="out-head"><label for="r-ant">Antecedentes</label><button class="copy" data-for="r-ant">Copiar</button></div>
+            <textarea id="r-ant"></textarea>
+          </div>
+          <div class="out-field">
+            <div class="out-head"><label for="r-rev">Revisión técnica</label><button class="copy" data-for="r-rev">Copiar</button></div>
+            <textarea id="r-rev" style="min-height:120px"></textarea>
+          </div>
+          <div class="out-field">
+            <div class="out-head"><label for="r-conclu">Conclusiones</label><button class="copy" data-for="r-conclu">Copiar</button></div>
+            <textarea id="r-conclu"></textarea>
+          </div>
+
+          <div class="note">
+            La IA redacta un <strong>borrador</strong> a partir de las fotos. Revísalo, corrígelo y cópialo a tu sistema. La decisión de aceptar o no la garantía es siempre del revisor.
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  // ============================================================
+  //  NO escribas tu clave aquí (este archivo está en GitHub público).
+  //  Pégala una sola vez en la página: tu navegador la recuerda
+  //  guardándola solo en tu computadora, nunca en GitHub.
+  // ============================================================
+  let API_KEY = "";
+  const MODEL = "gemini-3.5-flash";
+
+  const $ = id => document.getElementById(id);
+  const fotos = [];               // { b64, mime, url }
+  const keyInput = $("apikey");
+
+  // Recupera la clave guardada en ESTE navegador (no en el archivo).
+  try { API_KEY = localStorage.getItem("lubamaqui_gemini_key") || API_KEY; } catch(e){}
+  if (API_KEY){
+    keyInput.value = API_KEY;
+    $("keybar").style.display = "none";
+    $("changeKey").style.display = "inline-block";
+  }
+  keyInput.addEventListener("input", () => {
+    API_KEY = keyInput.value.trim();
+    try { localStorage.setItem("lubamaqui_gemini_key", API_KEY); } catch(e){}
+  });
+  $("changeKey").addEventListener("click", () => {
+    $("keybar").style.display = "flex";
+    $("changeKey").style.display = "none";
+    keyInput.focus();
+  });
+
+  // ---- Fotos ----
+  const drop = $("drop"), fileInput = $("file"), thumbs = $("thumbs");
+  drop.addEventListener("click", () => fileInput.click());
+  drop.addEventListener("keydown", e => { if(e.key==="Enter"||e.key===" "){e.preventDefault();fileInput.click();} });
+  drop.addEventListener("dragover", e => { e.preventDefault(); drop.classList.add("over"); });
+  drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+  drop.addEventListener("drop", e => {
+    e.preventDefault(); drop.classList.remove("over");
+    handleFiles(e.dataTransfer.files);
+  });
+  fileInput.addEventListener("change", () => handleFiles(fileInput.files));
+
+  async function handleFiles(list){
+    clearError();
+    let fallaron = 0;
+    for (const f of list){
+      if (f.type && !f.type.startsWith("image/")){ fallaron++; continue; }
+      try {
+        fotos.push(await fileToPart(f));
+      } catch(e){ console.error(e); fallaron++; }
+    }
+    fileInput.value = "";
+    renderThumbs();
+    if (fallaron) showError(fallaron + " archivo(s) no se pudieron leer. Usa fotos JPG o PNG. (Las fotos HEIC del iPhone a veces fallan: cámbialas a JPG o tómales captura.)");
+  }
+
+  // Reduce la foto si el navegador la puede abrir; si no (ej. HEIC), manda el archivo tal cual.
+  async function fileToPart(f){
+    try {
+      const b64 = await resize(f, 1024, 0.82);
+      return { b64, mime: "image/jpeg", url: "data:image/jpeg;base64,"+b64 };
+    } catch(e){
+      const b64 = await rawBase64(f);
+      return { b64, mime: f.type || "image/jpeg", url: null };
+    }
+  }
+
+  function rawBase64(f){
+    return new Promise((res,rej) => {
+      const r = new FileReader();
+      r.onload = () => res(String(r.result).split(",")[1]);
+      r.onerror = () => rej(new Error("No se pudo leer el archivo."));
+      r.readAsDataURL(f);
+    });
+  }
+
+  function renderThumbs(){
+    thumbs.innerHTML = "";
+    fotos.forEach((f,i) => {
+      const d = document.createElement("div");
+      d.className = "thumb";
+      const inner = f.url
+        ? `<img src="${f.url}" alt="foto ${i+1}">`
+        : `<div class="thumb-noimg">IMG<small>${(f.mime||"").replace("image/","")||"foto"}</small></div>`;
+      d.innerHTML = inner + `<button title="Quitar" aria-label="Quitar foto">×</button>`;
+      d.querySelector("button").onclick = () => { fotos.splice(i,1); renderThumbs(); };
+      thumbs.appendChild(d);
+    });
+    $("analyze").disabled = fotos.length === 0;
+  }
+
+  function resize(file, maxDim, quality){
+    return new Promise((resolve,reject) => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          let {width,height} = img;
+          if (!width || !height) throw new Error("Imagen vacía.");
+          if (width > height && width > maxDim){ height = Math.round(height*maxDim/width); width = maxDim; }
+          else if (height > maxDim){ width = Math.round(width*maxDim/height); height = maxDim; }
+          const c = document.createElement("canvas");
+          c.width = width; c.height = height;
+          c.getContext("2d").drawImage(img,0,0,width,height);
+          URL.revokeObjectURL(img.src);
+          resolve(c.toDataURL("image/jpeg",quality).split(",")[1]);
+        } catch(err){ URL.revokeObjectURL(img.src); reject(err); }
+      };
+      img.onerror = () => { URL.revokeObjectURL(img.src); reject(new Error("El navegador no pudo abrir esta imagen.")); };
+      img.src = URL.createObjectURL(file);
+    });
+  }
+
+  // ---- Análisis ----
+  const btn = $("analyze"), alertBox = $("alert");
+
+  btn.addEventListener("click", analizar);
+
+  function showError(msg){ alertBox.textContent = msg; alertBox.style.display = "block"; }
+  function clearError(){ alertBox.style.display = "none"; }
+
+  async function analizar(){
+    clearError();
+    const key = (API_KEY || keyInput.value).trim();
+    if (!key){ showError("Falta la clave de Gemini. Pégala en el recuadro de arriba."); return; }
+    if (!fotos.length){ showError("Agrega al menos una foto."); return; }
+
+    btn.classList.add("loading"); btn.disabled = true;
+
+    const ctx = [
+      $("marca").value && "Marca: "+$("marca").value,
+      $("modelo").value && "Producto/referencia: "+$("modelo").value,
+      $("aplicacion").value && "Aplicación/máquina: "+$("aplicacion").value,
+      $("distribuidor").value && "Distribuidor: "+$("distribuidor").value,
+      $("obs").value && "Observaciones del reclamo: "+$("obs").value,
+    ].filter(Boolean).join(". ") || "Sin contexto adicional.";
+
+    const prompt =
+      "Eres un perito tecnico senior especializado en lubricantes y maquinaria. " +
+      "Analiza las fotos de la pieza o producto en reclamo de garantia y redacta un informe tecnico objetivo, en español. " +
+      "Describe unicamente la evidencia visible en las imagenes; NO decidas tu la garantia, solo aporta el analisis. " +
+      "Responde UNICAMENTE con un objeto JSON valido con esta forma exacta, sin texto adicional: " +
+      '{"antecedentes":"...","revision":"...","conclusiones":"...","veredicto":"defecto_fabrica|mal_uso|desgaste_normal|no_concluyente"}. ' +
+      "El campo veredicto debe ser exactamente uno de esos cuatro valores. " +
+      "Contexto del caso: " + ctx;
+
+    const parts = [{ text: prompt }];
+    fotos.forEach(f => parts.push({ inline_data: { mime_type: f.mime || "image/jpeg", data: f.b64 } }));
+
+    try {
+      const resp = await fetch(
+        "https://generativelanguage.googleapis.com/v1beta/models/" + MODEL + ":generateContent",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+          body: JSON.stringify({
+            contents: [{ parts }],
+            generationConfig: { responseMimeType: "application/json", temperature: 0.3 }
+          })
+        }
+      );
+      const data = await resp.json();
+
+      if (!resp.ok){
+        const m = data && data.error && data.error.message ? data.error.message : ("Error " + resp.status);
+        if (resp.status === 400 && /api key/i.test(m)) throw new Error("La clave no es válida. Revísala en Google AI Studio.");
+        if (resp.status === 429) throw new Error("Se agotó la cuota gratis por ahora. Espera un momento y reintenta.");
+        throw new Error(m);
+      }
+
+      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!text) throw new Error("La IA no devolvió contenido. Intenta de nuevo.");
+
+      let r;
+      try { r = JSON.parse(text); }
+      catch(e){ throw new Error("La respuesta no vino en formato esperado. Reintenta."); }
+
+      pintarResultado(r);
+    } catch(err){
+      const msg = (err && err.message) ? err.message
+        : (typeof err === "string" ? err
+        : "No se pudo conectar. Revisa tu internet y que la página esté abierta como archivo (no dentro del chat).");
+      showError(msg);
+    } finally {
+      btn.classList.remove("loading"); btn.disabled = false;
+    }
+  }
+
+  function pintarResultado(r){
+    $("empty").style.display = "none";
+    $("results").style.display = "block";
+    $("r-ant").value = r.antecedentes || "";
+    $("r-rev").value = r.revision || "";
+    $("r-conclu").value = r.conclusiones || "";
+    const v = ["defecto_fabrica","mal_uso","desgaste_normal","no_concluyente"].includes(r.veredicto) ? r.veredicto : "no_concluyente";
+    $("veredicto").value = v;
+    setVerdictColor(v);
+    $("results").scrollIntoView({ behavior:"smooth", block:"nearest" });
+  }
+
+  $("veredicto").addEventListener("change", e => setVerdictColor(e.target.value));
+  function setVerdictColor(v){
+    const box = $("verdictBox");
+    box.className = "verdict v-" + v;
+  }
+
+  // ---- Copiar ----
+  document.querySelectorAll(".copy").forEach(b => {
+    b.addEventListener("click", async () => {
+      const ta = $(b.dataset.for);
+      try { await navigator.clipboard.writeText(ta.value); }
+      catch(e){ ta.select(); document.execCommand("copy"); }
+      const old = b.textContent; b.textContent = "✓ Copiado"; b.classList.add("done");
+      setTimeout(() => { b.textContent = old; b.classList.remove("done"); }, 1400);
+    });
+  });
+</script>
+</body>
+</html>
