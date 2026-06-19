@@ -706,7 +706,7 @@ function verTicket(id){
 
 /* ===== BANDEJAS ===== */
 function renderBandeja(role,titulo,sub){
-  $("main").innerHTML='<h2 style="font-size:28px;color:var(--navy)">'+titulo+'</h2><div class="muted" style="margin-bottom:18px">'+sub+'</div><div class="card"><div class="srch-bar"><span>🔍</span><input type="text" id="band-srch" placeholder="Buscar por asesor, cliente, N° ticket, factura o guía…" value="'+esc(filtroBandeja)+'" oninput="filtroBandeja=this.value;renderBandejaTabla(\''+role+'\')">'+(filtroBandeja?'<button class="btn btn-sm btn-g" onclick="filtroBandeja=\'\';renderBandejaTabla(\''+role+'\')">✕</button>':'')+'</div><div id="band-tabla"></div></div><div class="card"><h3 style="font-size:18px;color:var(--navy);margin-bottom:8px">Historial procesado</h3>'+histTable(role)+'</div>';
+  $("main").innerHTML='<h2 style="font-size:28px;color:var(--navy)">'+titulo+'</h2><div class="muted" style="margin-bottom:'+(role==="GARANTIA"?"10px":"18px")+'">'+sub+'</div>'+(role==="GARANTIA"?'<div style="margin-bottom:18px"><a class="btn btn-a" href="lubamaqui-garantia-ia.html" target="_blank">🤖 Analizar fotos con IA</a></div>':'')+'<div class="card"><div class="srch-bar"><span>🔍</span><input type="text" id="band-srch" placeholder="Buscar por asesor, cliente, N° ticket, factura o guía…" value="'+esc(filtroBandeja)+'" oninput="filtroBandeja=this.value;renderBandejaTabla(\''+role+'\')">'+(filtroBandeja?'<button class="btn btn-sm btn-g" onclick="filtroBandeja=\'\';renderBandejaTabla(\''+role+'\')">✕</button>':'')+'</div><div id="band-tabla"></div></div><div class="card"><h3 style="font-size:18px;color:var(--navy);margin-bottom:8px">Historial procesado</h3>'+histTable(role)+'</div>';
   renderBandejaTabla(role);
 }
 function renderBandejaTabla(role){
