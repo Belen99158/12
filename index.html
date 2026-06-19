@@ -9,6 +9,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root{--navy:#0E2A47;--navy2:#143A60;--amber:#D61F26;--bg:#EDF0F3;--card:#FFFFFF;--ink:#1B2430;--mut:#5B6877;--line:#D7DDE4;--ok:#1E7F4F;--ok-bg:#E2F3EA;--bad:#B3261E;--bad-bg:#FBE9E7;--warn-bg:#FFF4D6;--rojo:#D61F26;--negro:#1A1A1A}
@@ -167,11 +168,11 @@ function requiereGuia(nombre){ return SIN_GUIA_NOMBRES.indexOf(normNombre(nombre
 
 /* ===== FIREBASE ===== */
 var fbApp=null, fbDB=null, fbReady=false, fbSuscrito=false;
-function initFirebase(){
+async function initFirebase(){
   try{
     if(typeof firebase==="undefined") throw new Error("SDK no cargó");
-    fbApp=firebase.initializeApp(firebaseConfig);
-    fbDB=firebase.database();
+    if(!fbApp){ fbApp=firebase.initializeApp(firebaseConfig); fbDB=firebase.database(); }
+    await firebase.auth().signInAnonymously();
     fbReady=true;
     return true;
   }catch(e){ console.error(e); toast("⚠ No se pudo conectar a Firebase: "+(e&&e.message||e),6000); return false; }
@@ -376,7 +377,7 @@ async function doLogin(){
   $("login-view").style.display="none"; $("app-view").style.display="block";
   $("chip-role").textContent=ROLE_LABEL[u.role]; $("chip-user").textContent=u.name;
   $("main").innerHTML='<div class="empty" style="padding:60px 20px"><div class="big">Cargando…</div><div id="load-msg" class="muted">Conectando…</div><div class="prog-bar" style="max-width:340px;margin:12px auto"><div class="prog-fill" id="load-prog" style="width:0%"></div></div></div>';
-  if(!fbReady) initFirebase();
+  if(!fbReady) await initFirebase();
   await new Promise(function(resolve){
     if(!fbReady){ resolve(); return; }
     if(fbSuscrito){ resolve(); return; }
@@ -1078,10 +1079,4 @@ async function ejecutarLimpiarTodo(){
 
 /* ===== INIT ===== */
 window.addEventListener("error",function(ev){
-  try{ var lv=$("login-err"); if(lv&&$("login-view").style.display!=="none"){ lv.style.display="block"; lv.textContent="Error técnico: "+(ev.message||"desconocido")+". Recarga la página."; } }catch(e){}
-});
-precargarLogo();
-initLogin();
-</script>
-</body>
-</html>
+  try{ var lv=$("login-err"); if(lv&&$("login-view").style.display!=="none"){ lv.style.display="block";
