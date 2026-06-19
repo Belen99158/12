@@ -158,7 +158,7 @@ var me=null, base=[], RAZONES=[];
 var state={seq3200:0,seq5200:0,tickets:[],guias:[]};
 var baseLoaded=false, baseLineas=0, baseFechaStr="";
 var vistaActiva=null;
-var nuevo=null, filtroItems="", filtroMisTickets="", filtroBandeja="", ncTab="pend", ncVista="tickets", guiaFiltroAsesor="", garFotos=[], ncPdfData=null, logoDataUrl=null, pdfUrl=null;
+var nuevo=null, filtroItems="", filtroMisTickets="", filtroBandeja="", ncTab="pend", ncVista="tickets", guiaFiltroAsesor="", garFotos=[], garFotos2=[], ncPdfData=null, logoDataUrl=null, pdfUrl=null;
 var ncFiltroFactura="", ncFiltroDesde="", ncFiltroHasta="";
 
 /* ===== USUARIOS SIN GUÍA OBLIGATORIA (REQ 2) ===== */
@@ -637,6 +637,21 @@ function mostrarPDF(d,nombre){
   pdfUrl=URL.createObjectURL(d.output("blob"));
   $("modal-root").innerHTML='<div class="modal-bg"><div class="modal" style="max-width:880px"><div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap"><h3 style="color:var(--navy);font-size:19px;flex:1">'+esc(nombre)+'</h3><a class="btn btn-a" href="'+pdfUrl+'" download="'+esc(nombre)+'" target="_blank">⬇ Descargar</a><button class="btn btn-g" onclick="cerrarModal()">Cerrar</button></div><iframe src="'+pdfUrl+'" style="width:100%;height:68vh;border:1px solid var(--line);border-radius:8px;background:#fff"></iframe></div></div>';
 }
+function dibujarAnexosPDF(d,fotos,titulo,y2){
+  if(fotos&&fotos.length){
+    if(y2>240){ d.addPage(); y2=20; }
+    d.setFont("helvetica","bold"); d.setFontSize(10); d.text(titulo,14,y2); y2+=5;
+    fotos.forEach(function(f){
+      var foto=typeof f==="string"?{data:f,w:800,h:600}:f;
+      var w=170, h=foto.w&&foto.h?170*foto.h/foto.w:120;
+      if(h>150){ h=150; w=foto.w&&foto.h?150*foto.w/foto.h:170; }
+      if(y2+h>285){ d.addPage(); y2=20; }
+      try{ d.addImage(foto.data,"JPEG",(210-w)/2,y2,w,h); }catch(e){}
+      y2+=h+8;
+    });
+  }
+  return y2;
+}
 function pdfCartaGar(id){
   if(!pdfReady()) return;
   var t=findT(id), g=t.gar, arrI=t.items.filter(function(x){return llegoQ(x)>0;}), i=arrI[0]||t.items[0];
@@ -671,20 +686,16 @@ function pdfCartaGar(id){
   sec("3. ANTECEDENTES",[[{content:g.antecedentes||" ",colSpan:2}]]);
   sec("4. REVISIÓN TÉCNICA",[[{content:g.revTecnica||" ",colSpan:2}]]);
   var y2=d.lastAutoTable.finalY+8;
-  if(g.fotos&&g.fotos.length){
-    if(y2>240){ d.addPage(); y2=20; }
-    d.setFont("helvetica","bold"); d.setFontSize(10); d.text("5. ANEXOS",14,y2); y2+=5;
-    g.fotos.forEach(function(f){
-      var foto=typeof f==="string"?{data:f,w:800,h:600}:f;
-      var w=170, h=foto.w&&foto.h?170*foto.h/foto.w:120;
-      if(h>150){ h=150; w=foto.w&&foto.h?150*foto.w/foto.h:170; }
-      if(y2+h>285){ d.addPage(); y2=20; }
-      try{ d.addImage(foto.data,"JPEG",(210-w)/2,y2,w,h); }catch(e){}
-      y2+=h+8;
-    });
-  }
+  y2=dibujarAnexosPDF(d,g.fotos,"5. ANEXOS",y2);
   if(y2>250){ d.addPage(); y2=20; }
-  d.autoTable({startY:y2,head:[[{content:"6. ANÁLISIS, CONCLUSIONES Y RECOMENDACIONES",styles:{fillColor:[230,234,239],textColor:[0,0,0],fontStyle:"bold"}}]],body:[[g.conclusiones||" "]],theme:"grid",styles:{fontSize:8.5,cellPadding:2,minCellHeight:24}});
+  d.autoTable({startY:y2,head:[[{content:"6. ANÁLISIS TÉCNICO",styles:{fillColor:[230,234,239],textColor:[0,0,0],fontStyle:"bold"}}]],body:[[g.analisisTec||" "]],theme:"grid",styles:{fontSize:8.5,cellPadding:2,minCellHeight:18}});
+  y2=d.lastAutoTable.finalY+8;
+  y2=dibujarAnexosPDF(d,g.fotos2,"7. MÁS ANEXOS",y2);
+  if(y2>250){ d.addPage(); y2=20; }
+  d.autoTable({startY:y2,head:[[{content:"8. CONCLUSIONES",styles:{fillColor:[230,234,239],textColor:[0,0,0],fontStyle:"bold"}}]],body:[[g.conclusiones||" "]],theme:"grid",styles:{fontSize:8.5,cellPadding:2,minCellHeight:18}});
+  y2=d.lastAutoTable.finalY+6;
+  if(y2>250){ d.addPage(); y2=20; }
+  d.autoTable({startY:y2,head:[[{content:"9. RECOMENDACIONES",styles:{fillColor:[230,234,239],textColor:[0,0,0],fontStyle:"bold"}}]],body:[[g.recomendaciones||" "]],theme:"grid",styles:{fontSize:8.5,cellPadding:2,minCellHeight:18}});
   var sFy=d.lastAutoTable.finalY+12;
   if(typeof FIRMA_SOPORTE!=="undefined"&&FIRMA_SOPORTE){ var fw2=46, fh2=fw2*FIRMA_SOPORTE.h/FIRMA_SOPORTE.w; if(sFy+fh2+12>290){ d.addPage(); sFy=24; } try{ d.addImage(FIRMA_SOPORTE.d,"JPEG",105-fw2/2,sFy,fw2,fh2); }catch(e){} sFy+=fh2+2; d.setFont("helvetica","bold"); d.setFontSize(10); d.setTextColor(0,0,0); d.text("Soporte Técnico",105,sFy,{align:"center"}); sFy+=5; d.text("LUBAMAQUI",105,sFy,{align:"center"}); }
   mostrarPDF(d,"Garantia_NoAceptada_"+t.numero+".pdf");
@@ -831,6 +842,7 @@ function editarGar(id){ var t=findT(id); formGar(t,t.gar); }
 function formGar(t,g){
   g=g||{}; var it=g.informe||{};
   garFotos=(g.fotos||[]).map(function(f){ return typeof f==="string"?{data:f,w:800,h:600}:f; });
+  garFotos2=(g.fotos2||[]).map(function(f){ return typeof f==="string"?{data:f,w:800,h:600}:f; });
   var items=t.items.filter(function(i){return llegoQ(i)>0;}), editando=!!t.gar;
   var h='<div class="modal-bg"><div class="modal"><h2 style="font-size:24px;color:var(--navy)">'+(editando?"Editar":"Revisión de")+' garantía · '+esc(t.numero)+'</h2><div class="muted" style="margin-bottom:14px">'+esc(t.razonSocial)+' · Factura '+esc(t.factura)+'</div>';
   h+=items.map(function(i){ return '<div class="itm"><b>'+esc(i.codigo)+'</b> · '+esc(i.desc)+'</div>'; }).join("");
@@ -840,7 +852,7 @@ function formGar(t,g){
   h+='<div class="sec-title">Informe técnico</div><div class="grid3"><div class="field"><label>Contacto</label><input id="i-contacto" value="'+esc(it.contacto||"")+'"></div><div class="field"><label>Dirección</label><input id="i-dir" value="'+esc(it.direccion||"")+'"></div><div class="field"><label>Condición</label><input id="i-cond" value="'+esc(it.condicion||"")+'"></div></div>';
   h+='<div class="field"><label>Aplicación</label><input id="i-apl" value="'+esc(it.aplicacion||"")+'"></div><div class="grid2"><div class="field"><label>Modelo</label><input id="i-mod" value="'+esc(it.modelo||"")+'"></div><div class="field"><label>Distribuidor</label><input id="i-dist" value="'+esc(it.distribuidor||"AUTOREPUESTOS UNIVERSAL")+'"></div></div>';
   h+='<div class="field"><label>Antecedentes</label><textarea id="g-ant" rows="3">'+esc(g.antecedentes||"")+'</textarea></div><div class="field"><label>Revisión técnica</label><textarea id="g-rev" rows="3">'+esc(g.revTecnica||"")+'</textarea></div>';
-  h+='<div class="field"><label>Fotos (anexos)</label><input type="file" accept="image/*" multiple onchange="cargarFotos(this)"><div id="g-fotos" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">'+garFotos.map(function(f,ix){ return fotoThumb(f,ix); }).join("")+'</div></div><div class="field"><label>Análisis, conclusiones y recomendaciones</label><textarea id="g-conclu" rows="4">'+esc(g.conclusiones||"")+'</textarea></div></div>';
+  h+='<div class="field"><label>Fotos (anexos)</label><input type="file" accept="image/*" multiple onchange="cargarFotos(this)"><div id="g-fotos" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">'+garFotos.map(function(f,ix){ return fotoThumb(f,ix); }).join("")+'</div></div><div class="field"><label>Análisis técnico</label><textarea id="g-analisis" rows="4">'+esc(g.analisisTec||"")+'</textarea></div><div class="field"><label>Más anexos</label><input type="file" accept="image/*" multiple onchange="cargarFotos2(this)"><div id="g-fotos2" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">'+garFotos2.map(function(f,ix){ return fotoThumb2(f,ix); }).join("")+'</div></div><div class="field"><label>Conclusiones</label><textarea id="g-conclu" rows="3">'+esc(g.conclusiones||"")+'</textarea></div><div class="field"><label>Recomendaciones</label><textarea id="g-recom" rows="3">'+esc(g.recomendaciones||"")+'</textarea></div></div>';
   h+='<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:10px"><button class="btn btn-g" onclick="cerrarModal()">Cancelar</button><button class="btn btn-p" onclick="guardarGar(\''+t.id+'\')">'+(editando?"Guardar cambios":"Guardar revisión")+'</button></div></div></div>';
   $("modal-root").innerHTML=h;
 }
@@ -850,6 +862,16 @@ function cargarFotos(inp){
   Array.prototype.forEach.call(inp.files,function(f){
     var img=new Image(), rd=new FileReader();
     rd.onload=function(){ img.onload=function(){ var c=document.createElement("canvas"); var s=Math.min(1,1000/Math.max(img.width,img.height)); c.width=img.width*s; c.height=img.height*s; c.getContext("2d").drawImage(img,0,0,c.width,c.height); garFotos.push({data:c.toDataURL("image/jpeg",.72),w:c.width,h:c.height}); $("g-fotos").innerHTML=garFotos.map(function(ff,i){ return fotoThumb(ff,i); }).join(""); }; img.src=rd.result; };
+    rd.readAsDataURL(f);
+  });
+  inp.value="";
+}
+function fotoThumb2(f,ix){ return '<div style="position:relative"><img class="thumb" src="'+f.data+'"><button onclick="quitarFoto2('+ix+')" style="position:absolute;top:-6px;right:-6px;background:var(--bad);color:#fff;border:none;border-radius:99px;width:20px;height:20px;font-size:11px">✕</button></div>'; }
+function quitarFoto2(ix){ garFotos2.splice(ix,1); $("g-fotos2").innerHTML=garFotos2.map(function(f,i){ return fotoThumb2(f,i); }).join(""); }
+function cargarFotos2(inp){
+  Array.prototype.forEach.call(inp.files,function(f){
+    var img=new Image(), rd=new FileReader();
+    rd.onload=function(){ img.onload=function(){ var c=document.createElement("canvas"); var sc=Math.min(1,1000/Math.max(img.width,img.height)); c.width=img.width*sc; c.height=img.height*sc; c.getContext("2d").drawImage(img,0,0,c.width,c.height); garFotos2.push({data:c.toDataURL("image/jpeg",.72),w:c.width,h:c.height}); $("g-fotos2").innerHTML=garFotos2.map(function(ff,i){ return fotoThumb2(ff,i); }).join(""); }; img.src=rd.result; };
     rd.readAsDataURL(f);
   });
   inp.value="";
@@ -864,7 +886,7 @@ async function guardarGar(id){
     t.estado="NC"; t.nc=t.nc||{hecha:false};
     t.historial.push({f:ahora,e:"Garantía aceptada → NC ("+me.name+")"});
   }else{
-    t.gar={acepta:false,com:$("g-com").value,marca:$("g-marca").value,ciudad:$("g-ciudad").value,telefono:$("g-tel").value,email:$("g-email").value,cartaCom:$("g-carta").value,parrafo2:$("g-p2").value,antecedentes:$("g-ant").value,revTecnica:$("g-rev").value,conclusiones:$("g-conclu").value,fotos:garFotos,informe:{contacto:$("i-contacto").value,direccion:$("i-dir").value,condicion:$("i-cond").value,aplicacion:$("i-apl").value,modelo:$("i-mod").value,distribuidor:$("i-dist").value},por:me.name,f:t.gar?t.gar.f:ahora};
+    t.gar={acepta:false,com:$("g-com").value,marca:$("g-marca").value,ciudad:$("g-ciudad").value,telefono:$("g-tel").value,email:$("g-email").value,cartaCom:$("g-carta").value,parrafo2:$("g-p2").value,antecedentes:$("g-ant").value,revTecnica:$("g-rev").value,analisisTec:$("g-analisis").value,conclusiones:$("g-conclu").value,recomendaciones:$("g-recom").value,fotos:garFotos,fotos2:garFotos2,informe:{contacto:$("i-contacto").value,direccion:$("i-dir").value,condicion:$("i-cond").value,aplicacion:$("i-apl").value,modelo:$("i-mod").value,distribuidor:$("i-dist").value},por:me.name,f:t.gar?t.gar.f:ahora};
     t.estado="GAR_RECHAZADA"; t.historial.push({f:ahora,e:"Garantía no aceptada ("+me.name+")"});
   }
   await saveState(); cerrarModal(); render();
