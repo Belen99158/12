@@ -1079,4 +1079,10 @@ async function ejecutarLimpiarTodo(){
 
 /* ===== INIT ===== */
 window.addEventListener("error",function(ev){
-  try{ var lv=$("login-err"); if(lv&&$("login-view").style.display!=="none"){ lv.style.display="block";
+  try{ var lv=$("login-err"); if(lv&&$("login-view").style.display!=="none"){ lv.style.display="block"; lv.textContent="Error técnico: "+(ev.message||"desconocido")+". Recarga la página."; } }catch(e){}
+});
+precargarLogo();
+initLogin();
+</script>
+</body>
+</html>
