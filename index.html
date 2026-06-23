@@ -171,6 +171,9 @@ var baseLoaded=false, baseLineas=0, baseFechaStr="";
 var vistaActiva=null;
 var nuevo=null, filtroItems="", filtroMisTickets="", filtroBandeja="", ncTab="pend", ncVista="tickets", guiaFiltroAsesor="", garFotos=[], garFotos2=[], ncPdfData=null, logoDataUrl=null, pdfUrl=null;
 var ncFiltroFactura="", ncFiltroDesde="", ncFiltroHasta="";
+var filtroMisDesde="", filtroMisHasta="";   /* reportes del asesor: rango de fechas */
+var repDesde="", repHasta="";               /* reportes de bandejas mercadería/devolución/garantía */
+var ctrlDesde="", ctrlHasta="";              /* reporte de control de respuesta de asesores */
 
 /* ===== USUARIOS SIN GUÍA OBLIGATORIA (REQ 2) ===== */
 function normNombre(s){ return String(s||"").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/\s+/g," ").trim(); }
@@ -356,6 +359,16 @@ function fdate(d){ if(!d) return ""; var x=new Date(d); return isNaN(x)?String(d
 function fdatetime(d){ if(!d) return ""; var x=new Date(d); return isNaN(x)?String(d):x.toLocaleDateString("es-EC",{day:"2-digit",month:"2-digit",year:"numeric"})+" "+x.toLocaleTimeString("es-EC",{hour:"2-digit",minute:"2-digit"}); }
 function fechaLarga(d){ var x=d?new Date(d):new Date(); if(isNaN(x))return String(d); return x.getDate()+" de "+MESES[x.getMonth()]+" de "+x.getFullYear()+"."; }
 function hoyStr(d){ var x=d?new Date(d):new Date(); return x.getFullYear()+"-"+String(x.getMonth()+1).padStart(2,"0")+"-"+String(x.getDate()).padStart(2,"0"); }
+/* ===== CONTROL DE TIEMPOS (guía incorrecta / avisos extra) ===== */
+function diasEntreISO(aISO,bISO){
+  var x=new Date(aISO); if(isNaN(x)) return null;
+  var y=bISO?new Date(bISO):new Date();
+  if(isNaN(y)) return null;
+  return Math.max(0,(y-x)/86400000);
+}
+function diasDesde(aISO){ return diasEntreISO(aISO,null); }
+function diasTexto(d){ return d==null?"—":d.toFixed(1)+" d"; }
+function colorDias(d){ return d==null?"var(--mut)":(d>3?"var(--bad)":(d>1?"#C77F00":"var(--ok)")); }
 function toast(m,dur){ var t=document.createElement("div"); t.className="toast"; t.textContent=m; document.body.appendChild(t); setTimeout(function(){t.remove();},dur||3800); }
 function llegoQ(i){ if(!i.merc) return 0; return i.merc.cantLlegada!==undefined?i.merc.cantLlegada:(i.merc.llego?i.cantidad:0); }
 function findT(id){ for(var i=0;i<state.tickets.length;i++){ if(state.tickets[i].id===id) return state.tickets[i]; } return null; }
@@ -407,10 +420,27 @@ function registrarAvisoExtra(t){
     por:me.name, f:new Date().toISOString(), atendido:false
   });
 }
-async function marcarAvisoAtendido(id){
+function abrirMarcarAviso(id){
   var a=(state.avisos||[]).find(function(x){return x.id===id;});
-  if(a){ a.atendido=true; a.atendidoF=new Date().toISOString(); }
-  await saveState(); toast("✓ Aviso marcado como gestionado."); render();
+  if(!a) return;
+  var candidatos=state.tickets.filter(function(t){ return t.vendedor===a.vendedor&&t.factura===a.factura&&t.estado!=="ELIMINADO"; }).slice().reverse().slice(0,15);
+  var d=diasDesde(a.f);
+  $("modal-root").innerHTML='<div class="modal-bg"><div class="modal" style="max-width:540px"><h2 style="font-size:22px;color:var(--navy);margin-bottom:8px">Marcar aviso como gestionado</h2>'+
+    '<div class="muted" style="margin-bottom:12px">Ticket origen: <b>'+esc(a.ticketNumero)+'</b> · Vendedor: <b>'+esc(a.vendedor)+'</b> · Factura '+esc(a.factura)+'<br>Códigos reportados: <b>'+esc(a.codigos)+'</b><br>Reportado el '+fdatetime(a.f)+' · <b style="color:'+colorDias(d)+'">lleva '+diasTexto(d)+' esperando</b></div>'+
+    '<div class="card" style="background:var(--warn-bg);border-color:#E8C766;margin-bottom:14px">⚠ Para que estos ítems no se pierdan, indica el <b>N° de ticket nuevo</b> que cubre estos códigos. Si lo dejas vacío, quedará marcado como "sin ticket vinculado" y será visible en el panel administrativo.</div>'+
+    '<div class="field"><label>N° del ticket nuevo creado (recomendado)</label>'+
+    (candidatos.length?('<select id="av-tk"><option value="">— Sin ticket vinculado —</option>'+candidatos.map(function(t){return '<option value="'+esc(t.numero)+'">'+esc(t.numero)+' · '+fdate(t.fechaTicket)+'</option>';}).join("")+'</select>'):'<input id="av-tk" placeholder="Ej.: 3200-0125 (déjalo vacío si no se creó ticket nuevo)">')+
+    '</div><div class="field"><label>Comentario (opcional)</label><input id="av-com2" placeholder="Detalles de la gestión"></div>'+
+    '<div style="display:flex;gap:10px;justify-content:flex-end"><button class="btn btn-g" onclick="cerrarModal()">Cancelar</button><button class="btn btn-ok" onclick="confirmarMarcarAviso(\''+id+'\')">✓ Confirmar gestionado</button></div></div></div>';
+}
+async function confirmarMarcarAviso(id){
+  var a=(state.avisos||[]).find(function(x){return x.id===id;});
+  if(!a) return;
+  var tkNum=($("av-tk")?$("av-tk").value:"").trim();
+  var com2=($("av-com2")?$("av-com2").value:"").trim();
+  a.atendido=true; a.atendidoF=new Date().toISOString(); a.atendidoPor=me.name;
+  a.ticketNuevoNumero=tkNum||""; if(com2) a.comentarioGestion=com2;
+  await saveState(); cerrarModal(); toast(tkNum?("✓ Aviso gestionado, vinculado al ticket "+tkNum):"⚠ Aviso marcado SIN ticket vinculado."); render();
 }
 
 /* ===== LOGIN ===== */
@@ -471,18 +501,48 @@ function renderAsesor(){
   var avisosExtra=(state.avisos||[]).filter(function(a){ return a.vendedor===me.name&&!a.atendido; }).slice().reverse();
   $("main").innerHTML='<div style="display:flex;align-items:center;gap:14px;margin-bottom:18px;flex-wrap:wrap"><h2 style="font-size:28px;color:var(--navy)">Orden Lubamaqui</h2><div style="flex:1"></div>'+(!baseLoaded?'<button class="btn btn-g" onclick="recargarBase()">🔄 Cargar base</button>':'')+'<button class="btn btn-a" onclick="abrirNuevo()">+ Nuevo ticket</button></div>'+
     (!baseLoaded?'<div class="card" style="background:var(--warn-bg);border-color:#E8C766">⚠ Base no cargada. Presiona "Cargar base" o espera.</div>':'')+
-    gi.map(function(t){ return '<div class="alert-del">⚠ <b>Ticket '+esc(t.numero)+' devuelto por guía incorrecta</b> ('+esc(t.guiaIncorrecta&&t.guiaIncorrecta.por||"")+', '+fdate(t.guiaIncorrecta&&t.guiaIncorrecta.f)+').<br>Motivo: <b>'+esc(t.guiaIncorrecta&&t.guiaIncorrecta.motivo||"")+'</b> · La guía volvió a estar disponible.</div>'; }).join("")+
-    avisosExtra.map(function(a){ return '<div class="alert-del" style="background:#FFF4D6;border-color:#E8C766">📦 <b>Llegaron ítems adicionales en la guía '+esc(a.guiaNumero||"—")+'</b> (factura '+esc(a.factura)+') que NO estaban en el ticket '+esc(a.ticketNumero)+'.<br>Códigos reportados: <b>'+esc(a.codigos)+'</b>'+(a.comentario?('<br>Nota de mercadería: '+esc(a.comentario)):'')+'<br><div style="margin-top:6px"><button class="btn btn-a btn-sm" onclick="abrirNuevo()">+ Crear ticket nuevo</button> <button class="btn btn-g btn-sm" onclick="marcarAvisoAtendido(\''+a.id+'\')">✓ Ya lo gestioné</button></div></div>'; }).join("")+
-    '<div class="card"><h3 style="font-size:19px;color:var(--navy);margin-bottom:10px">Mis tickets</h3><div class="srch-bar"><span>🔍</span><input type="text" id="ase-srch" placeholder="Buscar por cliente, N° ticket, factura o guía…" value="'+esc(filtroMisTickets)+'" oninput="filtroMisTickets=this.value;renderMisTicketsTabla()">'+(filtroMisTickets?'<button class="btn btn-sm btn-g" onclick="filtroMisTickets=\'\';renderMisTicketsTabla()">✕</button>':'')+'</div><div id="mis-tickets-tabla"></div></div>';
+    gi.map(function(t){ var dG=diasDesde(t.guiaIncorrecta&&t.guiaIncorrecta.f); return '<div class="alert-del">⚠ <b>Ticket '+esc(t.numero)+' devuelto por guía incorrecta</b> ('+esc(t.guiaIncorrecta&&t.guiaIncorrecta.por||"")+', '+fdate(t.guiaIncorrecta&&t.guiaIncorrecta.f)+').<br>Motivo: <b>'+esc(t.guiaIncorrecta&&t.guiaIncorrecta.motivo||"")+'</b> · La guía volvió a estar disponible. · <b style="color:'+colorDias(dG)+'">Lleva '+diasTexto(dG)+' sin corregir</b></div>'; }).join("")+
+    avisosExtra.map(function(a){ var dA=diasDesde(a.f); return '<div class="alert-del" style="background:#FFF4D6;border-color:#E8C766">📦 <b>Llegaron ítems adicionales en la guía '+esc(a.guiaNumero||"—")+'</b> (factura '+esc(a.factura)+') que NO estaban en el ticket '+esc(a.ticketNumero)+'.<br>Códigos reportados: <b>'+esc(a.codigos)+'</b>'+(a.comentario?('<br>Nota de mercadería: '+esc(a.comentario)):'')+'<br><b style="color:'+colorDias(dA)+'">Lleva '+diasTexto(dA)+' sin resolverse</b><br><div style="margin-top:6px"><button class="btn btn-a btn-sm" onclick="abrirNuevo()">+ Crear ticket nuevo</button> <button class="btn btn-g btn-sm" onclick="abrirMarcarAviso(\''+a.id+'\')">✓ Ya lo gestioné</button></div></div>'; }).join("")+
+    '<div class="card"><h3 style="font-size:19px;color:var(--navy);margin-bottom:10px">Mis tickets</h3>'+
+    '<div class="grid3" style="margin-bottom:10px"><div class="field" style="margin-bottom:0"><label>Desde</label><input type="date" id="mis-desde" value="'+filtroMisDesde+'" onchange="filtroMisDesde=this.value;renderMisTicketsTabla()"></div><div class="field" style="margin-bottom:0"><label>Hasta</label><input type="date" id="mis-hasta" value="'+filtroMisHasta+'" onchange="filtroMisHasta=this.value;renderMisTicketsTabla()"></div><div style="display:flex;gap:8px;align-items:end"><button class="btn btn-ok" style="flex:1;justify-content:center" onclick="exportarMisTickets()">⬇ Excel</button><button class="btn btn-g" onclick="limpiarFiltrosMis()">✕</button></div></div>'+
+    '<div class="srch-bar"><span>🔍</span><input type="text" id="ase-srch" placeholder="Buscar por cliente, N° ticket, factura o guía…" value="'+esc(filtroMisTickets)+'" oninput="filtroMisTickets=this.value;renderMisTicketsTabla()">'+(filtroMisTickets?'<button class="btn btn-sm btn-g" onclick="filtroMisTickets=\'\';renderMisTicketsTabla()">✕</button>':'')+'</div><div id="mis-tickets-tabla"></div></div>';
   renderMisTicketsTabla();
 }
-function renderMisTicketsTabla(){
+function ticketsAsesorFiltrados(){
   var mios=state.tickets.filter(function(t){ return t.vendedor===me.name; }).slice().reverse();
   var q=filtroMisTickets.trim().toUpperCase();
   if(q) mios=mios.filter(function(t){ return (t.numero+" "+t.razonSocial+" "+t.factura+" "+(t.guiaNumero||"")+" "+t.motivo).toUpperCase().indexOf(q)>=0; });
+  if(filtroMisDesde||filtroMisHasta){
+    mios=mios.filter(function(t){ var f=hoyStr(t.fechaTicket); if(filtroMisDesde&&f<filtroMisDesde) return false; if(filtroMisHasta&&f>filtroMisHasta) return false; return true; });
+  }
+  return mios;
+}
+function limpiarFiltrosMis(){ filtroMisDesde=""; filtroMisHasta=""; var fd=$("mis-desde"); if(fd)fd.value=""; var fh=$("mis-hasta"); if(fh)fh.value=""; renderMisTicketsTabla(); }
+function exportarMisTickets(){
+  var mios=ticketsAsesorFiltrados();
+  if(mios.length===0){ toast("No hay tickets para exportar con este filtro."); return; }
+  var rows=mios.map(function(t){
+    var totTicket=t.items.reduce(function(s,i){return s+i.total;},0);
+    var esAceptado=(t.estado==="NC")||(t.fechas&&t.fechas.nc);
+    return {
+      "N° TICKET":t.numero,"FECHA TICKET":fdate(t.fechaTicket),"GUIA":t.guiaNumero||"","CLIENTE":t.razonSocial,"RUC":t.ruc||"",
+      "FACTURA":t.factura,"SUCURSAL":sucursalDe(t.factura).nombre,"MOTIVO":t.motivo,"ESTADO":ESTADO_LABEL[t.estado]||t.estado,
+      "N° ITEMS":t.items.length,"TOTAL TICKET":+totTicket.toFixed(2),
+      "TOTAL ACEPTADO (NC)":esAceptado?+totalAceptado(t).toFixed(2):"","N° NC":t.nc&&t.nc.numero?t.nc.numero:"",
+      "FECHA NC":t.fechas&&t.fechas.nc?fdate(t.fechas.nc):""
+    };
+  });
+  var ws=XLSX.utils.json_to_sheet(rows);
+  ws["!cols"]=[{wch:12},{wch:12},{wch:14},{wch:30},{wch:14},{wch:14},{wch:20},{wch:30},{wch:22},{wch:9},{wch:13},{wch:16},{wch:16},{wch:12}];
+  var wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,"Mis tickets");
+  var suf=(filtroMisDesde||filtroMisHasta)?("_"+(filtroMisDesde||"inicio")+"_a_"+(filtroMisHasta||"hoy")):"";
+  XLSX.writeFile(wb,"Mis_Tickets_"+normNombre(me.name).replace(/\s+/g,"_")+suf+".xlsx");
+}
+function renderMisTicketsTabla(){
+  var mios=ticketsAsesorFiltrados();
   var cont=$("mis-tickets-tabla"); if(!cont) return;
-  if(mios.length===0){ cont.innerHTML=q?'<div class="empty"><div class="big">Sin resultados</div></div>':'<div class="empty"><div class="big">Sin tickets todavía</div>Crea tu primer ticket.</div>'; return; }
-  cont.innerHTML='<div style="overflow-x:auto"><table><thead><tr><th>N° Ticket</th><th>Fecha</th><th>Guía</th><th>Cliente</th><th>Factura</th><th>Motivo</th><th>Estado</th><th></th></tr></thead><tbody>'+mios.map(function(t){ return '<tr><td><b>'+esc(t.numero)+'</b></td><td>'+fdate(t.fechaTicket)+'</td><td>'+esc(t.guiaNumero||"—")+'</td><td>'+esc(t.razonSocial)+'</td><td>'+esc(t.factura)+'</td><td>'+esc(t.motivo)+'</td><td>'+tagFor(t)+'</td><td style="white-space:nowrap">'+(t.estado==="GUIA_INCORRECTA"?'<button class="btn btn-a btn-sm" onclick="editarGuiaTicket(\''+t.id+'\')">✎ Corregir guía</button> ':'')+'<button class="btn btn-g btn-sm" onclick="verTicket(\''+t.id+'\')">Ver</button> <button class="btn btn-a btn-sm" onclick="imprimirTicket(\''+t.id+'\')">🖨</button></td></tr>'; }).join("")+'</tbody></table></div>';
+  if(mios.length===0){ cont.innerHTML=(filtroMisTickets||filtroMisDesde||filtroMisHasta)?'<div class="empty"><div class="big">Sin resultados</div></div>':'<div class="empty"><div class="big">Sin tickets todavía</div>Crea tu primer ticket.</div>'; return; }
+  cont.innerHTML='<div class="muted" style="margin-bottom:6px">'+mios.length+' ticket(s)</div><div style="overflow-x:auto"><table><thead><tr><th>N° Ticket</th><th>Fecha</th><th>Guía</th><th>Cliente</th><th>Factura</th><th>Motivo</th><th>Estado</th><th></th></tr></thead><tbody>'+mios.map(function(t){ return '<tr><td><b>'+esc(t.numero)+'</b></td><td>'+fdate(t.fechaTicket)+'</td><td>'+esc(t.guiaNumero||"—")+'</td><td>'+esc(t.razonSocial)+'</td><td>'+esc(t.factura)+'</td><td>'+esc(t.motivo)+'</td><td>'+tagFor(t)+'</td><td style="white-space:nowrap">'+(t.estado==="GUIA_INCORRECTA"?'<button class="btn btn-a btn-sm" onclick="editarGuiaTicket(\''+t.id+'\')">✎ Corregir guía</button> ':'')+'<button class="btn btn-g btn-sm" onclick="verTicket(\''+t.id+'\')">Ver</button> <button class="btn btn-a btn-sm" onclick="imprimirTicket(\''+t.id+'\')">🖨</button></td></tr>'; }).join("")+'</tbody></table></div>';
 }
 async function recargarBase(){ toast("Cargando base…"); try{ await cargarBase(true,function(m){toast(m,2000);}); toast("✓ Base: "+base.length.toLocaleString("es-EC")+" líneas"); render(); }catch(e){ toast("Error: "+e.message,6000); } }
 function abrirNuevo(){
@@ -638,6 +698,10 @@ async function guardarGuiaTicket(id){
   var guia=findGuia(guiaId);
   if(!guia||guia.estado==="ANULADA"||hoyStr(guia.fechaCreacion)!==hoyStr()){ toast("Guía no válida hoy."); return; }
   var ahora=new Date().toISOString();
+  if(t.guiaIncidencias&&t.guiaIncidencias.length){
+    var ult=t.guiaIncidencias[t.guiaIncidencias.length-1];
+    if(ult&&!ult.resueltoF){ ult.resueltoF=ahora; ult.resueltoPor=me.name; }
+  }
   t.guiaId=guia.id; t.guiaNumero=guia.numero; t.guiaModificada=true; t.guiaIncorrecta=null; t.estado="MERCADERIA";
   t.historial.push({f:ahora,e:"Vendedor corrigió guía a "+guia.numero+" y reenvió ("+me.name+")"});
   await saveState(); cerrarModal(); toast("✓ Guía corregida. Reenviado a mercadería."); render();
@@ -769,7 +833,11 @@ function verTicket(id){
 
 /* ===== BANDEJAS ===== */
 function renderBandeja(role,titulo,sub){
-  $("main").innerHTML='<h2 style="font-size:28px;color:var(--navy)">'+titulo+'</h2><div class="muted" style="margin-bottom:'+(role==="GARANTIA"?"10px":"18px")+'">'+sub+'</div>'+(role==="GARANTIA"?'<div style="margin-bottom:18px"><a class="btn btn-a" href="lubamaqui-garantia-ia.html" target="_blank">🤖 Analizar fotos con IA</a></div>':'')+'<div class="card"><div class="srch-bar"><span>🔍</span><input type="text" id="band-srch" placeholder="Buscar por asesor, cliente, N° ticket, factura o guía…" value="'+esc(filtroBandeja)+'" oninput="filtroBandeja=this.value;renderBandejaTabla(\''+role+'\')">'+(filtroBandeja?'<button class="btn btn-sm btn-g" onclick="filtroBandeja=\'\';renderBandejaTabla(\''+role+'\')">✕</button>':'')+'</div><div id="band-tabla"></div></div><div class="card"><h3 style="font-size:18px;color:var(--navy);margin-bottom:8px">Historial procesado</h3>'+histTable(role)+'</div>';
+  $("main").innerHTML='<h2 style="font-size:28px;color:var(--navy)">'+titulo+'</h2><div class="muted" style="margin-bottom:'+(role==="GARANTIA"?"10px":"18px")+'">'+sub+'</div>'+(role==="GARANTIA"?'<div style="margin-bottom:18px"><a class="btn btn-a" href="lubamaqui-garantia-ia.html" target="_blank">🤖 Analizar fotos con IA</a></div>':'')+'<div class="card"><div class="srch-bar"><span>🔍</span><input type="text" id="band-srch" placeholder="Buscar por asesor, cliente, N° ticket, factura o guía…" value="'+esc(filtroBandeja)+'" oninput="filtroBandeja=this.value;renderBandejaTabla(\''+role+'\')">'+(filtroBandeja?'<button class="btn btn-sm btn-g" onclick="filtroBandeja=\'\';renderBandejaTabla(\''+role+'\')">✕</button>':'')+'</div><div id="band-tabla"></div></div>'+
+    '<div class="card"><h3 style="font-size:18px;color:var(--navy);margin-bottom:8px">Reporte / Historial procesado</h3>'+
+    '<div class="muted" style="margin-bottom:10px">Filtra por la fecha en que se revisó cada ticket en esta bandeja y descarga el Excel consolidado con factura, ítems, cliente, asesor y todo lo necesario para gestionar.</div>'+
+    '<div class="grid3" style="margin-bottom:10px"><div class="field" style="margin-bottom:0"><label>Desde</label><input type="date" id="rep-b-desde" value="'+repDesde+'" onchange="repDesde=this.value;render()"></div><div class="field" style="margin-bottom:0"><label>Hasta</label><input type="date" id="rep-b-hasta" value="'+repHasta+'" onchange="repHasta=this.value;render()"></div><div style="display:flex;gap:8px;align-items:end"><button class="btn btn-ok" style="flex:1;justify-content:center" onclick="exportarBandeja(\''+role+'\')">⬇ Excel consolidado</button><button class="btn btn-g" onclick="repDesde=\'\';repHasta=\'\';render()">✕</button></div></div>'+
+    histTable(role)+'</div>';
   renderBandejaTabla(role);
 }
 function renderBandejaTabla(role){
@@ -784,18 +852,118 @@ function renderBandejaTabla(role){
   if(lista.length===0){ cont.innerHTML=q?'<div class="empty"><div class="big">Sin resultados</div></div>':'<div class="empty"><div class="big">Bandeja vacía</div>No hay tickets pendientes.</div>'; return; }
   cont.innerHTML='<table><thead><tr><th>N° Ticket</th><th>Fecha</th><th>Guía</th><th>Cliente</th><th>Factura</th><th>Motivo</th><th>Vendedor</th><th></th></tr></thead><tbody>'+lista.map(function(t){ return '<tr><td><b>'+esc(t.numero)+'</b>'+(t.estado==="MIXTO"?' <span class="tag tag-gar" style="font-size:9px">MIXTO</span>':'')+'</td><td>'+fdate(t.fechaTicket)+'</td><td>'+esc(t.guiaNumero||"—")+'</td><td>'+esc(t.razonSocial)+'</td><td>'+esc(t.factura)+'</td><td>'+esc(t.motivo)+'</td><td>'+esc(t.vendedor)+'</td><td><button class="btn btn-a btn-sm" onclick="revisar(\''+role+'\',\''+t.id+'\')">Revisar</button></td></tr>'; }).join("")+'</tbody></table>';
 }
-function histTable(role){
-  var l=state.tickets.filter(function(t){
+function fechaRepRef(role,t){
+  if(role==="MERCADERIA") return t.fechas&&t.fechas.mercaderia;
+  if(role==="DEVOLUCION") return t.fechas&&t.fechas.devolucion;
+  if(role==="GARANTIA") return t.fechas&&t.fechas.garantia;
+  return null;
+}
+function histFiltrado(role){
+  return state.tickets.filter(function(t){
     if(t.estado==="ELIMINADO") return false;
-    if(role==="MERCADERIA") return t.items.some(function(i){return i.merc;});
-    if(role==="DEVOLUCION") return t.items.some(function(i){return i.dev;});
-    if(role==="GARANTIA") return !!t.gar;
-    return false;
+    var ok=false;
+    if(role==="MERCADERIA") ok=t.items.some(function(i){return i.merc;});
+    else if(role==="DEVOLUCION") ok=t.items.some(function(i){return i.dev;});
+    else if(role==="GARANTIA") ok=!!t.gar;
+    if(!ok) return false;
+    if(repDesde||repHasta){
+      var fr=fechaRepRef(role,t);
+      var f=fr?hoyStr(fr):hoyStr(t.fechaTicket);
+      if(repDesde&&f<repDesde) return false;
+      if(repHasta&&f>repHasta) return false;
+    }
+    return true;
   }).slice().reverse();
-  if(l.length===0) return '<div class="muted">Sin tickets procesados aún.</div>';
-  return '<table><thead><tr><th>N° Ticket</th><th>Cliente</th><th>Estado</th><th></th></tr></thead><tbody>'+l.map(function(t){ return '<tr><td><b>'+esc(t.numero)+'</b></td><td>'+esc(t.razonSocial)+'</td><td>'+tagFor(t)+'</td><td style="white-space:nowrap"><button class="btn btn-g btn-sm" onclick="verTicket(\''+t.id+'\')">Ver</button>'+(role==="GARANTIA"&&t.gar&&!t.gar.acepta?' <button class="btn btn-a btn-sm" onclick="editarGar(\''+t.id+'\')">✎</button>':'')+'</td></tr>'; }).join("")+'</tbody></table>';
+}
+function histTable(role){
+  var l=histFiltrado(role);
+  if(l.length===0) return '<div class="muted">'+((repDesde||repHasta)?"Sin registros en este rango de fechas.":"Sin tickets procesados aún.")+'</div>';
+  return '<div class="muted" style="margin-bottom:6px">'+l.length+' ticket(s)'+((repDesde||repHasta)?" en el rango filtrado":"")+'</div><table><thead><tr><th>N° Ticket</th><th>Cliente</th><th>Estado</th><th></th></tr></thead><tbody>'+l.map(function(t){ return '<tr><td><b>'+esc(t.numero)+'</b></td><td>'+esc(t.razonSocial)+'</td><td>'+tagFor(t)+'</td><td style="white-space:nowrap"><button class="btn btn-g btn-sm" onclick="verTicket(\''+t.id+'\')">Ver</button>'+(role==="GARANTIA"&&t.gar&&!t.gar.acepta?' <button class="btn btn-a btn-sm" onclick="editarGar(\''+t.id+'\')">✎</button>':'')+'</td></tr>'; }).join("")+'</tbody></table>';
 }
 function revisar(role,id){ var t=findT(id); if(role==="MERCADERIA") revisarMerc(t); else if(role==="DEVOLUCION") revisarDev(t); else revisarGar(t); }
+
+/* ===== EXCEL CONSOLIDADO POR BANDEJA (mercadería / devolución / garantía) ===== */
+function exportarBandeja(role){
+  var lista=histFiltrado(role);
+  if(lista.length===0){ toast("No hay registros para exportar en este rango."); return; }
+  var wb=XLSX.utils.book_new();
+  var suf=(repDesde||repHasta)?("_"+(repDesde||"inicio")+"_a_"+(repHasta||"hoy")):"";
+
+  if(role==="MERCADERIA"){
+    var rows=[];
+    lista.forEach(function(t){
+      t.items.forEach(function(i){
+        if(!i.merc) return;
+        rows.push({
+          "N° TICKET":t.numero,"FECHA TICKET":fdate(t.fechaTicket),"FECHA REVISION":t.fechas&&t.fechas.mercaderia?fdate(t.fechas.mercaderia):"",
+          "GUIA":t.guiaNumero||"","SUCURSAL":sucursalDe(t.factura).nombre,"CLIENTE":t.razonSocial,"RUC":t.ruc||"","FACTURA":t.factura,"EMISION":fdate(t.emision),
+          "VENDEDOR":t.vendedor,"MOTIVO":t.motivo,"ESTADO TICKET":ESTADO_LABEL[t.estado]||t.estado,
+          "CODIGO":i.codigo,"DESCRIPCION":i.desc,"MARCA":i.sub,"CANT TICKET":i.cantidad,"CANT LLEGADA":llegoQ(i),
+          "COM VENDEDOR":i.comVendedor||"","COM MERCADERIA":i.merc.com||"","REVISADO POR":i.merc.por||""
+        });
+      });
+    });
+    var ws=XLSX.utils.json_to_sheet(rows.length?rows:[{}]);
+    ws["!cols"]=[{wch:12},{wch:12},{wch:12},{wch:14},{wch:20},{wch:30},{wch:14},{wch:14},{wch:12},{wch:18},{wch:30},{wch:20},{wch:14},{wch:30},{wch:14},{wch:11},{wch:13},{wch:24},{wch:24},{wch:18}];
+    XLSX.utils.book_append_sheet(wb,ws,"Revisión mercadería");
+    XLSX.writeFile(wb,"Reporte_Mercaderia"+suf+".xlsx");
+    return;
+  }
+
+  if(role==="DEVOLUCION"){
+    var rowsD=[], porCli={}, porVen={};
+    lista.forEach(function(t){
+      t.items.forEach(function(i){
+        if(!i.dev||tipoDeItem(t,i)==="GARANTIA") return;
+        var tot=+i.total.toFixed(2);
+        rowsD.push({
+          "N° TICKET":t.numero,"FECHA TICKET":fdate(t.fechaTicket),"FECHA REVISION":t.fechas&&t.fechas.devolucion?fdate(t.fechas.devolucion):"",
+          "CLIENTE":t.razonSocial,"RUC":t.ruc||"","FACTURA":t.factura,"SUCURSAL":sucursalDe(t.factura).nombre,"VENDEDOR":t.vendedor,"MOTIVO":t.motivo,
+          "CODIGO":i.codigo,"DESCRIPCION":i.desc,"MARCA":i.sub,"CANT LLEGADA":llegoQ(i),
+          "DECISION":i.dev.acepta?"ACEPTADA":"NO ACEPTADA","CANT ACEPTADA":i.dev.cantAcep||0,"TOTAL":tot,
+          "COMENTARIO":i.dev.com||"","REVISADO POR":i.dev.por||""
+        });
+        if(i.dev.acepta){ porCli[t.razonSocial]=(porCli[t.razonSocial]||0)+tot; porVen[t.vendedor]=(porVen[t.vendedor]||0)+tot; }
+      });
+    });
+    var wsD=XLSX.utils.json_to_sheet(rowsD.length?rowsD:[{}]);
+    wsD["!cols"]=[{wch:12},{wch:12},{wch:12},{wch:30},{wch:14},{wch:14},{wch:20},{wch:18},{wch:30},{wch:14},{wch:30},{wch:14},{wch:13},{wch:14},{wch:14},{wch:11},{wch:24},{wch:18}];
+    XLSX.utils.book_append_sheet(wb,wsD,"Detalle devoluciones");
+
+    var rowsCli=Object.keys(porCli).sort(function(a,b){return porCli[b]-porCli[a];}).map(function(k){return {"CLIENTE":k,"TOTAL DEVUELTO":+porCli[k].toFixed(2)};});
+    var wsCli=XLSX.utils.json_to_sheet(rowsCli.length?rowsCli:[{}]);
+    wsCli["!cols"]=[{wch:34},{wch:16}];
+    XLSX.utils.book_append_sheet(wb,wsCli,"Por cliente");
+
+    var rowsVen=Object.keys(porVen).sort(function(a,b){return porVen[b]-porVen[a];}).map(function(k){return {"VENDEDOR":k,"TOTAL DEVUELTO":+porVen[k].toFixed(2)};});
+    var wsVen=XLSX.utils.json_to_sheet(rowsVen.length?rowsVen:[{}]);
+    wsVen["!cols"]=[{wch:24},{wch:16}];
+    XLSX.utils.book_append_sheet(wb,wsVen,"Por vendedor");
+
+    XLSX.writeFile(wb,"Reporte_Devoluciones"+suf+".xlsx");
+    return;
+  }
+
+  if(role==="GARANTIA"){
+    var rowsG=[];
+    lista.forEach(function(t){
+      t.items.forEach(function(i){
+        if(tipoDeItem(t,i)!=="GARANTIA"||llegoQ(i)<=0) return;
+        rowsG.push({
+          "N° TICKET":t.numero,"FECHA TICKET":fdate(t.fechaTicket),"FECHA REVISION":t.fechas&&t.fechas.garantia?fdate(t.fechas.garantia):"",
+          "CLIENTE":t.razonSocial,"RUC":t.ruc||"","FACTURA":t.factura,"SUCURSAL":sucursalDe(t.factura).nombre,"VENDEDOR":t.vendedor,
+          "CODIGO":i.codigo,"DESCRIPCION":i.desc,"MARCA":i.sub,"CANT LLEGADA":llegoQ(i),
+          "DECISION":t.gar&&t.gar.acepta?"ACEPTADA":"NO ACEPTADA","COMENTARIO":t.gar&&t.gar.com||"","REVISADO POR":t.gar&&t.gar.por||""
+        });
+      });
+    });
+    var wsG=XLSX.utils.json_to_sheet(rowsG.length?rowsG:[{}]);
+    wsG["!cols"]=[{wch:12},{wch:12},{wch:12},{wch:30},{wch:14},{wch:14},{wch:20},{wch:18},{wch:14},{wch:30},{wch:14},{wch:13},{wch:14},{wch:24},{wch:18}];
+    XLSX.utils.book_append_sheet(wb,wsG,"Detalle garantías");
+    XLSX.writeFile(wb,"Reporte_Garantias"+suf+".xlsx");
+    return;
+  }
+}
 
 /* ===== REV MERCADERÍA ===== */
 function revisarMerc(t){
@@ -856,6 +1024,7 @@ async function guardarMerc(id){
     if(guiaOk==="0"){
       var mot=($("m-guia-com")?$("m-guia-com").value:"").trim()||"Guía incorrecta";
       t.guiaIncorrecta={motivo:mot,por:me.name,f:ahora}; t.guiaId=null; t.estado="GUIA_INCORRECTA";
+      t.guiaIncidencias=t.guiaIncidencias||[]; t.guiaIncidencias.push({motivo:mot,por:me.name,f:ahora});
       t.historial.push({f:ahora,e:"Guía nuevamente incorrecta ("+me.name+"). Mercadería revisada conservada. Motivo: "+mot});
       await saveState(); cerrarModal(); toast("Guía incorrecta. La mercadería revisada se conserva."); render(); return;
     }
@@ -876,6 +1045,7 @@ async function guardarMerc(id){
       if(t.sobre){ var sl0=$("m-sobre")?$("m-sobre").value:""; if(sl0!=="") t.sobreLlego=(sl0==="1"); }
     }
     t.guiaIncorrecta={motivo:motivo,por:me.name,f:ahora}; t.guiaId=null; t.estado="GUIA_INCORRECTA";
+    t.guiaIncidencias=t.guiaIncidencias||[]; t.guiaIncidencias.push({motivo:motivo,por:me.name,f:ahora});
     t.historial.push({f:ahora,e:"Devuelto por guía incorrecta ("+me.name+")."+(completa?" Mercadería revisada conservada.":"")+" Motivo: "+motivo});
     if(completa) registrarAvisoExtra(t);
     await saveState(); cerrarModal(); toast(completa?"Devuelto por guía. La mercadería revisada se conservó.":"Ticket devuelto. La guía volvió a estar activa."); render(); return;
@@ -1012,7 +1182,7 @@ function renderNCtickets(){
      '<div style="flex:1;min-width:160px"><label>N° de factura</label><input id="nc-f-fact" placeholder="Buscar por factura…" autocomplete="off" value="'+esc(ncFiltroFactura)+'" oninput="ncFiltroFactura=this.value;renderNCList()"></div>'+
      '<div style="min-width:140px"><label>Desde</label><input type="date" id="nc-f-desde" value="'+esc(ncFiltroDesde)+'" onchange="ncFiltroDesde=this.value;renderNCList()"></div>'+
      '<div style="min-width:140px"><label>Hasta</label><input type="date" id="nc-f-hasta" value="'+esc(ncFiltroHasta)+'" onchange="ncFiltroHasta=this.value;renderNCList()"></div>'+
-     '<button class="btn btn-g btn-sm" onclick="limpiarFiltrosNC()">Limpiar</button></div>';
+     '<button class="btn btn-g btn-sm" onclick="limpiarFiltrosNC()">Limpiar</button> <button class="btn btn-ok btn-sm" onclick="exportarNCConsolidado()">⬇ Excel consolidado</button></div>';
   h+='<div class="muted" style="margin-bottom:8px;font-size:11px">La fecha filtra por la fecha de la NC cuando ya está hecha; en pendientes, por la fecha del ticket.</div>';
   h+='<div id="nc-list"></div></div>';
   $("nc-body").innerHTML=h;
@@ -1126,6 +1296,43 @@ async function verPdfNC(id){
     $("modal-root").innerHTML='<div class="modal-bg"><div class="modal" style="max-width:880px"><div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap"><h3 style="color:var(--navy);flex:1">NC '+esc(t.nc.numero||"")+' · '+esc(o.name)+'</h3><a class="btn btn-a" href="'+o.data+'" download="'+esc(o.name)+'" target="_blank">⬇ Descargar</a><button class="btn btn-g" onclick="cerrarModal()">Cerrar</button></div><iframe src="'+o.data+'" style="width:100%;height:68vh;border:1px solid var(--line);border-radius:8px"></iframe></div></div>';
   }catch(e){ toast("No se pudo cargar el PDF: "+(e&&e.message||e)); }
 }
+function exportarNCConsolidado(){
+  var lista=ncFiltrar(state.tickets.filter(function(t){return t.estado==="NC";})).slice();
+  if(lista.length===0){ toast("No hay registros de NC para exportar con este filtro."); return; }
+  var wb=XLSX.utils.book_new();
+  var suf=(ncFiltroDesde||ncFiltroHasta)?("_"+(ncFiltroDesde||"inicio")+"_a_"+(ncFiltroHasta||"hoy")):"";
+
+  /* Resumen a nivel de ticket */
+  var rowsR=lista.map(function(t){
+    var tot=totalAceptado(t);
+    return {
+      "N° TICKET":t.numero,"ORIGEN":(t.estado==="MIXTO"||(t.devSolicitado&&t.garSolicitado))?"Mixto":(t.motivo==="GARANTIAS"?"Garantía":"Devolución"),
+      "CLIENTE":t.razonSocial,"RUC":t.ruc||"","FACTURA":t.factura,"SUCURSAL":sucursalDe(t.factura).nombre,"VENDEDOR":t.vendedor,"MOTIVO":t.motivo,
+      "FECHA TICKET":fdate(t.fechaTicket),"FECHA NC":t.fechas&&t.fechas.nc?fdate(t.fechas.nc):"",
+      "TOTAL ACEPTADO":+tot.toFixed(2),"N° NC":t.nc.numero||"","ESTADO NC":t.nc.hecha?"NC HECHA":"PENDIENTE","TIENE PDF":t.nc.pdfKey?"SÍ":"NO"
+    };
+  });
+  var wsR=XLSX.utils.json_to_sheet(rowsR);
+  wsR["!cols"]=[{wch:12},{wch:12},{wch:30},{wch:14},{wch:14},{wch:20},{wch:18},{wch:30},{wch:12},{wch:12},{wch:14},{wch:16},{wch:13},{wch:10}];
+  XLSX.utils.book_append_sheet(wb,wsR,"Resumen NC");
+
+  /* Detalle a nivel de ítem aceptado, para gestionar la NC producto por producto */
+  var rowsD=[];
+  lista.forEach(function(t){
+    itemsAceptados(t).forEach(function(i){
+      rowsD.push({
+        "N° TICKET":t.numero,"N° NC":t.nc.numero||"","ESTADO NC":t.nc.hecha?"HECHA":"PENDIENTE","CLIENTE":t.razonSocial,"RUC":t.ruc||"","FACTURA":t.factura,
+        "SUCURSAL":sucursalDe(t.factura).nombre,"VENDEDOR":t.vendedor,
+        "CODIGO":i.codigo,"DESCRIPCION":i.desc,"MARCA":i.sub,"CANTIDAD":i.cantNC,"NETO":+i.neto.toFixed(2),"IVA":+i.iva.toFixed(2),"TOTAL":+i.total.toFixed(2)
+      });
+    });
+  });
+  var wsD=XLSX.utils.json_to_sheet(rowsD.length?rowsD:[{}]);
+  wsD["!cols"]=[{wch:12},{wch:16},{wch:12},{wch:30},{wch:14},{wch:14},{wch:20},{wch:18},{wch:14},{wch:30},{wch:14},{wch:11},{wch:11},{wch:11},{wch:11}];
+  XLSX.utils.book_append_sheet(wb,wsD,"Detalle items");
+
+  XLSX.writeFile(wb,"Reporte_Consolidado_NC"+suf+".xlsx");
+}
 function excelNC(id){
   var t=findT(id), its=itemsAceptados(t);
   var rows=its.map(function(i){ return {"N° TICKET":t.numero,"MOTIVO":t.motivo,"TIPO ITEM":tipoDeItem(t,i),"CLIENTE":t.razonSocial,"RUC":t.ruc,"FACTURA":t.factura,"SUCURSAL":sucursalDe(t.factura).nombre,"VENDEDOR":t.vendedor,"CODIGO":i.codigo,"DESCRIPCION":i.desc,"SUBGRUPO":i.sub,"CANTIDAD":i.cantNC,"NETO":+i.neto.toFixed(2),"IVA":+i.iva.toFixed(2),"TOTAL":+i.total.toFixed(2),"N° NC":t.nc&&t.nc.numero?t.nc.numero:"","GUIA":t.guiaNumero||""}; });
@@ -1141,9 +1348,23 @@ function renderAdmin(){
   var avisosPend=(state.avisos||[]).filter(function(a){return !a.atendido;});
   var h='<h2 style="font-size:28px;color:var(--navy);margin-bottom:16px">Panel administrativo</h2>';
   h+='<div class="card" style="border-left:5px solid #C77F00"><h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">📦 Ítems extra reportados en guías</h3>';
+  h+='<div class="muted" style="margin-bottom:10px">Cuando mercadería reporta ítems que llegaron pero no están en el ticket, el asesor debe crear un ticket nuevo. Aquí ves cuánto lleva sin resolverse cada caso.</div>';
   if(avisosPend.length===0) h+='<div class="muted">Sin avisos pendientes.</div>';
-  else h+='<div style="overflow-x:auto"><table><thead><tr><th>Ticket</th><th>Asesor</th><th>Guía</th><th>Códigos</th><th>Fecha</th><th></th></tr></thead><tbody>'+avisosPend.map(function(a){ return '<tr><td><b>'+esc(a.ticketNumero)+'</b></td><td>'+esc(a.vendedor)+'</td><td>'+esc(a.guiaNumero||"—")+'</td><td>'+esc(a.codigos)+(a.comentario?'<div class="muted">'+esc(a.comentario)+'</div>':'')+'</td><td>'+fdatetime(a.f)+'</td><td><button class="btn btn-g btn-sm" onclick="marcarAvisoAtendido(\''+a.id+'\')">✓ Atendido</button></td></tr>'; }).join("")+'</tbody></table></div>';
+  else h+='<div style="overflow-x:auto"><table><thead><tr><th>Ticket</th><th>Asesor</th><th>Guía</th><th>Códigos</th><th>Fecha</th><th>Días esperando</th><th></th></tr></thead><tbody>'+avisosPend.map(function(a){ var d=diasDesde(a.f); return '<tr><td><b>'+esc(a.ticketNumero)+'</b></td><td>'+esc(a.vendedor)+'</td><td>'+esc(a.guiaNumero||"—")+'</td><td>'+esc(a.codigos)+(a.comentario?'<div class="muted">'+esc(a.comentario)+'</div>':'')+'</td><td>'+fdatetime(a.f)+'</td><td><b style="color:'+colorDias(d)+'">'+diasTexto(d)+'</b></td><td><button class="btn btn-g btn-sm" onclick="abrirMarcarAviso(\''+a.id+'\')">✓ Marcar gestionado</button></td></tr>'; }).join("")+'</tbody></table></div>';
+  var avisosSinTk=(state.avisos||[]).filter(function(a){return a.atendido&&!a.ticketNuevoNumero;});
+  if(avisosSinTk.length){ h+='<div class="muted" style="margin-top:10px;color:var(--bad)">⚠ '+avisosSinTk.length+' aviso(s) marcado(s) como "gestionado" SIN un ticket nuevo vinculado. Vale la pena confirmar con el asesor que sí se atendieron.</div>'; }
   h+='</div>';
+
+  var guiaAbiertas=state.tickets.filter(function(t){ return t.estado==="GUIA_INCORRECTA"; }).slice().reverse();
+  h+='<div class="card" style="border-left:5px solid var(--bad)"><h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">🚩 Tickets esperando corrección de guía</h3>';
+  h+='<div class="muted" style="margin-bottom:10px">Mercadería devolvió el ticket al asesor por guía incorrecta y todavía no lo ha corregido.</div>';
+  if(guiaAbiertas.length===0) h+='<div class="muted">Ninguno pendiente. 👍</div>';
+  else h+='<div style="overflow-x:auto"><table><thead><tr><th>N° Ticket</th><th>Vendedor</th><th>Cliente</th><th>Factura</th><th>Motivo</th><th>Devuelto</th><th>Días esperando</th></tr></thead><tbody>'+guiaAbiertas.map(function(t){ var d=diasDesde(t.guiaIncorrecta&&t.guiaIncorrecta.f); return '<tr><td><b>'+esc(t.numero)+'</b></td><td>'+esc(t.vendedor)+'</td><td>'+esc(t.razonSocial)+'</td><td>'+esc(t.factura)+'</td><td>'+esc(t.guiaIncorrecta&&t.guiaIncorrecta.motivo||"")+'</td><td>'+fdatetime(t.guiaIncorrecta&&t.guiaIncorrecta.f)+'</td><td><b style="color:'+colorDias(d)+'">'+diasTexto(d)+'</b></td></tr>'; }).join("")+'</tbody></table></div>';
+  h+='</div>';
+
+  h+='<div class="card" style="border-left:5px solid var(--navy)"><h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">⏱ Reporte de control de respuesta (asesores)</h3>';
+  h+='<div class="muted" style="margin-bottom:10px">Excel con TODOS los avisos de ítems extra y todas las incidencias de guía incorrecta (resueltas y pendientes), con la fecha en que se originaron y cuánto tardó (o lleva) el asesor en responder. Filtra por la fecha en que se originó cada caso.</div>';
+  h+='<div class="grid3"><div class="field" style="margin-bottom:0"><label>Desde</label><input type="date" id="ctrl-desde" value="'+ctrlDesde+'" onchange="ctrlDesde=this.value"></div><div class="field" style="margin-bottom:0"><label>Hasta</label><input type="date" id="ctrl-hasta" value="'+ctrlHasta+'" onchange="ctrlHasta=this.value"></div><div style="display:flex;align-items:end"><button class="btn btn-ok" style="width:100%;justify-content:center" onclick="exportarControlVendedores()">⬇ Reporte de control</button></div></div></div>';
   h+='<div class="card" style="border-left:5px solid var(--amber)"><h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">Base de facturas</h3><div class="muted" style="margin-bottom:10px">'+(baseLoaded?'✓ Base: <b>'+base.length.toLocaleString("es-EC")+'</b> líneas ('+esc(baseFechaStr)+')':"Base no cargada")+'</div><div class="muted" style="margin-bottom:12px;background:#E2F3EA;padding:10px 12px;border-radius:6px"><b>💡</b> Cuando actualices el Excel, presiona "Actualizar base a Firebase" para que todos entren rápido.</div><button class="btn btn-a" onclick="actualizarBaseFirebase()">📤 Actualizar base a Firebase</button> <button class="btn btn-g" onclick="recargarBase()">🔄 Recargar</button><div id="adm-prog" style="margin-top:10px"></div></div>';
   h+='<div class="card" style="border-left:5px solid var(--navy)"><h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">📊 Indicadores de devoluciones</h3><div class="muted" style="margin-bottom:12px">Dashboard con tasa de devolución, rankings, sucursales, motivos e impacto económico. Se abre en página aparte.</div><a class="btn btn-p" href="dashboard.html" target="_blank">📊 Abrir dashboard</a></div>';
   h+='<div class="card" style="border-left:5px solid var(--ok)"><h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">Reporte consolidado</h3><div class="muted" style="margin-bottom:12px">Excel con todos los tickets. Filtra por rango de fechas.</div><div class="grid3" style="margin-bottom:10px"><div class="field" style="margin-bottom:0"><label>Desde</label><input type="date" id="rep-desde"></div><div class="field" style="margin-bottom:0"><label>Hasta</label><input type="date" id="rep-hasta"></div><div class="field" style="margin-bottom:0"><label>&nbsp;</label><button class="btn btn-ok" style="width:100%;justify-content:center" onclick="reporteConsolidado()">⬇ Descargar</button></div></div></div>';
@@ -1155,6 +1376,61 @@ function renderAdmin(){
   h+='</div>';
   h+='<div class="card" style="border-left:5px solid var(--bad)"><h3 style="font-size:19px;color:var(--bad);margin-bottom:6px">⚠ Limpiar datos de prueba</h3><div class="muted" style="margin-bottom:12px">Borra todos los tickets y guías. La base de facturas NO se toca.</div><button class="btn btn-bad" onclick="abrirLimpiarTodo()">🗑 Borrar tickets y guías</button></div>';
   $("main").innerHTML=h;
+}
+function incidenciasGuiaTodas(){
+  var out=[];
+  state.tickets.forEach(function(t){ (t.guiaIncidencias||[]).forEach(function(inc){ out.push({t:t,inc:inc}); }); });
+  return out;
+}
+function exportarControlVendedores(){
+  var incG=incidenciasGuiaTodas().filter(function(o){
+    if(!ctrlDesde&&!ctrlHasta) return true;
+    var f=hoyStr(o.inc.f);
+    if(ctrlDesde&&f<ctrlDesde) return false;
+    if(ctrlHasta&&f>ctrlHasta) return false;
+    return true;
+  });
+  var avisos=(state.avisos||[]).filter(function(a){
+    if(!ctrlDesde&&!ctrlHasta) return true;
+    var f=hoyStr(a.f);
+    if(ctrlDesde&&f<ctrlDesde) return false;
+    if(ctrlHasta&&f>ctrlHasta) return false;
+    return true;
+  });
+  if(incG.length===0&&avisos.length===0){ toast("No hay registros de control en este rango."); return; }
+  var wb=XLSX.utils.book_new();
+  var suf=(ctrlDesde||ctrlHasta)?("_"+(ctrlDesde||"inicio")+"_a_"+(ctrlHasta||"hoy")):"";
+
+  var rowsG=incG.map(function(o){
+    var t=o.t, inc=o.inc;
+    var d=inc.resueltoF?diasEntreISO(inc.f,inc.resueltoF):diasDesde(inc.f);
+    return {
+      "N° TICKET":t.numero,"VENDEDOR":t.vendedor,"CLIENTE":t.razonSocial,"FACTURA":t.factura,
+      "MOTIVO DEVOLUCION":inc.motivo,"DEVUELTO POR":inc.por,"FECHA DEVUELTO":fdatetime(inc.f),
+      "FECHA CORREGIDO":inc.resueltoF?fdatetime(inc.resueltoF):"","ESTADO":inc.resueltoF?"RESUELTO":"PENDIENTE",
+      "DIAS QUE TARDÓ / LLEVA":d==null?"":+d.toFixed(1)
+    };
+  });
+  var wsG=XLSX.utils.json_to_sheet(rowsG.length?rowsG:[{}]);
+  wsG["!cols"]=[{wch:12},{wch:18},{wch:30},{wch:14},{wch:30},{wch:18},{wch:16},{wch:16},{wch:11},{wch:18}];
+  XLSX.utils.book_append_sheet(wb,wsG,"Guía incorrecta");
+
+  var rowsA=avisos.map(function(a){
+    var d=a.atendidoF?diasEntreISO(a.f,a.atendidoF):diasDesde(a.f);
+    return {
+      "N° TICKET ORIGEN":a.ticketNumero,"VENDEDOR":a.vendedor,"FACTURA":a.factura,"GUIA":a.guiaNumero||"",
+      "CODIGOS REPORTADOS":a.codigos,"COMENTARIO MERCADERIA":a.comentario||"","FECHA REPORTE":fdatetime(a.f),
+      "ESTADO":a.atendido?"GESTIONADO":"PENDIENTE","FECHA GESTION":a.atendidoF?fdatetime(a.atendidoF):"",
+      "TICKET NUEVO VINCULADO":a.ticketNuevoNumero||(a.atendido?"⚠ SIN TICKET":""),
+      "COMENTARIO GESTION":a.comentarioGestion||"",
+      "DIAS QUE TARDÓ / LLEVA":d==null?"":+d.toFixed(1)
+    };
+  });
+  var wsA=XLSX.utils.json_to_sheet(rowsA.length?rowsA:[{}]);
+  wsA["!cols"]=[{wch:14},{wch:18},{wch:14},{wch:14},{wch:24},{wch:26},{wch:16},{wch:13},{wch:16},{wch:20},{wch:24},{wch:18}];
+  XLSX.utils.book_append_sheet(wb,wsA,"Avisos items extra");
+
+  XLSX.writeFile(wb,"Control_Respuesta_Asesores"+suf+".xlsx");
 }
 async function actualizarBaseFirebase(){
   if(!fbReady){ toast("Sin Firebase."); return; }
