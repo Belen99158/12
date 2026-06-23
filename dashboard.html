@@ -7,6 +7,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root{--navy:#0E2A47;--navy2:#143A60;--rojo:#D61F26;--negro:#1A1A1A;--bg:#EDF0F3;--card:#FFFFFF;--ink:#1B2430;--mut:#5B6877;--line:#D7DDE4;--ok:#1E7F4F}
@@ -143,10 +144,14 @@ function totalAceptado(t){ return itemsAceptados(t).reduce(function(s,i){return 
 function colorTasa(ta){ return ta>UMBRAL_ALERTA?"var(--rojo)":(ta>UMBRAL_OK?"#C77F00":"var(--ok)"); }
 
 /* ===== FIREBASE ===== */
-function initFirebase(){
+async function initFirebase(){
   try{
     if(typeof firebase==="undefined") throw new Error("SDK no cargó");
     firebase.initializeApp(firebaseConfig);
+    /* Igual que index.html: inicia sesión anónima de Firebase para que las reglas
+       de seguridad (auth != null) permitan leer los datos. Sin esto, Firebase
+       responde "Permission denied" en cuanto las reglas exigen sesión. */
+    await firebase.auth().signInAnonymously();
     fbReady=true;
     var fb=$("chip-fb"); if(fb) fb.textContent="🟢 En línea";
     return true;
@@ -882,8 +887,10 @@ function arrancar(){
   function probar(){
     intentos++;
     if(typeof firebase!=="undefined"){
-      if(initFirebase()) cargarEstado();
-      else $("main").innerHTML='<div class="card"><div class="empty"><div class="big">Sin conexión a Firebase</div>No se pudo inicializar. Recarga la página.</div></div>';
+      initFirebase().then(function(ok){
+        if(ok) cargarEstado();
+        else $("main").innerHTML='<div class="card"><div class="empty"><div class="big">Sin conexión a Firebase</div>No se pudo inicializar. Recarga la página.</div></div>';
+      });
       return;
     }
     if(intentos>20){
