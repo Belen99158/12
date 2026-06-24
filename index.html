@@ -590,6 +590,7 @@ function abrirNuevo(){
   $("modal-root").innerHTML='<div class="modal-bg"><div class="modal"><h2 style="font-size:26px;color:var(--navy);margin-bottom:4px">Nuevo ticket</h2><div class="muted" style="margin-bottom:18px">Fecha: <b>'+fdate(new Date())+'</b> · Vendedor: <b>'+esc(me.name)+'</b></div>'+
     (pideGuia?'<div class="card" style="background:#FFF1F1;border-color:#E8B0AB"><div class="field" style="margin-bottom:0"><label>⭐ Guía (obligatoria · solo tus guías activas de hoy)</label><select id="n-guia"><option value="">— Selecciona tu guía —</option>'+gd.map(function(g){ return '<option value="'+g.id+'">'+esc(g.numero)+' — '+fdate(g.fechaCreacion)+'</option>'; }).join("")+'</select></div></div>':'')+
     '<div class="grid3"><div class="field ac-wrap"><label>Razón social</label><input id="n-razon" placeholder="Escribe mín. 2 letras…" autocomplete="off" oninput="buscarRazon()" onfocus="buscarRazon()"><div class="ac-list" id="n-razon-list"></div></div><div class="field"><label>Factura</label><select id="n-fact" onchange="nFact()" disabled><option value="">—</option></select></div><div class="field"><label>Emisión</label><input id="n-emi" disabled></div></div>'+
+    '<div id="n-fact-msg" class="muted" style="margin:-6px 0 10px"></div>'+
     '<div class="grid2"><div class="field"><label>Motivo</label><select id="n-motivo" onchange="nNum()"><option value="">— Seleccionar —</option>'+MOTIVOS.map(function(m){ return '<option>'+esc(m)+'</option>'; }).join("")+'</select></div><div class="field"><label>Número de ticket</label><input id="n-num" disabled placeholder="Se asigna según el motivo"></div></div>'+
     '<div id="n-aviso-dias"></div><div id="n-items"></div>'+
     '<div class="card" style="background:#F0F3F7;margin-top:14px"><label style="display:flex;align-items:center;gap:8px;text-transform:none;font-size:14px;color:var(--ink);letter-spacing:0;cursor:pointer"><input type="checkbox" id="n-sobre" style="width:auto"> 📨 En esta guía también se envió un <b>sobre</b></label></div>'+
@@ -608,21 +609,49 @@ function buscarRazon(){
 function elegirRazon(r){ $("n-razon").value=r; $("n-razon-list").style.display="none"; nRazon(); }
 /* ¿Esta factura todavía tiene algún código con saldo disponible (sin contar lo ya devuelto en este sistema NI lo ya acreditado por NC en contabilidad)? */
 function facturaTieneSaldo(factura){
-  var lineas=base.filter(function(x){ return x.factura===factura; });
-  if(lineas.length===0) return false;
-  var dev=devolucionesPorCodigo(factura);
-  return lineas.some(function(r){
-    var yaDev=dev.cant[r.codigo]||0;
-    var creditoExt=Math.abs((creditosNC[factura+"|"+r.codigo]||{cant:0}).cant);
-    return (r.cant-yaDev-creditoExt)>0;
-  });
+  try{
+    var lineas=base.filter(function(x){ return x.factura===factura; });
+    if(lineas.length===0) return false;
+    var dev=devolucionesPorCodigo(factura);
+    return lineas.some(function(r){
+      var yaDev=dev.cant[r.codigo]||0;
+      var creditoExt=Math.abs((creditosNC&&creditosNC[factura+"|"+r.codigo]||{cant:0}).cant);
+      return (r.cant-yaDev-creditoExt)>0;
+    });
+  }catch(e){ console.error("facturaTieneSaldo:",e); return true; /* si algo falla, NO ocultar la factura */ }
+}
+/* Variante sin contar créditos NC externos: sirve solo para diagnosticar la causa exacta cuando una factura no aparece */
+function facturaTieneSaldoSinNC(factura){
+  try{
+    var lineas=base.filter(function(x){ return x.factura===factura; });
+    if(lineas.length===0) return false;
+    var dev=devolucionesPorCodigo(factura);
+    return lineas.some(function(r){ return (r.cant-(dev.cant[r.codigo]||0))>0; });
+  }catch(e){ return true; }
 }
 function nRazon(){
   var r=$("n-razon").value; nuevo.razon=r;
   var fs={}; base.forEach(function(x){ if(x.razon.trim()===r) fs[x.factura]=1; });
-  var facts=Object.keys(fs).filter(facturaTieneSaldo);
+  var todasFacts=Object.keys(fs);
+  var facts;
+  try{ facts=todasFacts.filter(facturaTieneSaldo); }catch(e){ console.error("nRazon filtro NC:",e); facts=todasFacts; }
   $("n-fact").disabled=false;
   $("n-fact").innerHTML='<option value="">— Seleccionar —</option>'+facts.map(function(f){ return '<option>'+esc(f)+'</option>'; }).join("");
+  var msgEl=$("n-fact-msg");
+  if(msgEl){
+    if(todasFacts.length===0){
+      msgEl.innerHTML='⚠ No se encontró ninguna factura para "'+esc(r)+'" en la base cargada ('+base.length.toLocaleString("es-EC")+' líneas en total). Verifica que el nombre coincide exactamente con el del Sheet, o recarga la base desde Admin.';
+    }else if(facts.length===0){
+      var factsSinNC=[]; try{ factsSinNC=todasFacts.filter(facturaTieneSaldoSinNC); }catch(e){ factsSinNC=todasFacts; }
+      if(factsSinNC.length>0){
+        msgEl.innerHTML='ℹ Esta razón social tiene <b>'+todasFacts.length+'</b> factura(s) en la base, pero las '+factsSinNC.length+' que aún tenían saldo quedaron en 0 porque ya tienen <b>nota de crédito registrada en contabilidad</b> (columna FAC DE LA NC del Sheet).';
+      }else{
+        msgEl.innerHTML='ℹ Esta razón social tiene <b>'+todasFacts.length+'</b> factura(s) en la base, pero todas ya fueron devueltas por completo dentro de este sistema (tickets ya creados).';
+      }
+    }else{
+      msgEl.innerHTML="";
+    }
+  }
   $("n-emi").value=""; $("n-items").innerHTML=""; filtroItems="";
 }
 function nFact(){
@@ -673,7 +702,8 @@ function renderItemsBody(){
   tbody.innerHTML=""; var shown=0;
   lineas.forEach(function(r,i){
     var yaDev=dev.cant[r.codigo]||0;
-    var creditoExt=Math.abs((creditosNC[nuevo.factura+"|"+r.codigo]||{cant:0}).cant);
+    var creditoExt=0;
+    try{ creditoExt=Math.abs((creditosNC&&creditosNC[nuevo.factura+"|"+r.codigo]||{cant:0}).cant); }catch(e){ creditoExt=0; }
     var restante=Math.max(0,r.cant-yaDev-creditoExt);
     nuevo.restante[i]=restante;
     var agotado=restante<=0;
