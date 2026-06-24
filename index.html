@@ -633,7 +633,7 @@ function abrirNuevo(){
     $("modal-root").innerHTML='<div class="modal-bg"><div class="modal" style="max-width:520px"><h2 style="font-size:24px;color:var(--bad);margin-bottom:8px">No tienes guías activas hoy</h2><div class="muted" style="margin-bottom:16px">Para crear un ticket necesitas una <b>guía activa registrada hoy</b> a tu nombre. Solicita al área de Notas de Crédito que registre tu guía.</div><div style="text-align:right"><button class="btn btn-p" onclick="cerrarModal()">Entendido</button></div></div></div>';
     return;
   }
-  nuevo={razon:"",factura:"",motivo:"",items:[],lineas:[],cant:{},com:{},tipo:{}}; filtroItems="";
+  nuevo={razon:"",factura:"",motivo:"",items:[],lineas:[],cant:{},com:{}}; filtroItems="";
   $("modal-root").innerHTML='<div class="modal-bg"><div class="modal"><h2 style="font-size:26px;color:var(--navy);margin-bottom:4px">Nuevo ticket</h2><div class="muted" style="margin-bottom:18px">Fecha: <b>'+fdate(new Date())+'</b> · Vendedor: <b>'+esc(me.name)+'</b></div>'+
     (pideGuia?'<div class="card" style="background:#FFF1F1;border-color:#E8B0AB"><div class="field" style="margin-bottom:0"><label>⭐ Guía (obligatoria · solo tus guías activas de hoy)</label><select id="n-guia"><option value="">— Selecciona tu guía —</option>'+gd.map(function(g){ return '<option value="'+g.id+'">'+esc(g.numero)+' — '+fdate(g.fechaCreacion)+'</option>'; }).join("")+'</select></div></div>':'')+
     '<div class="grid3"><div class="field ac-wrap"><label>Razón social</label><input id="n-razon" placeholder="Escribe mín. 2 letras…" autocomplete="off" oninput="buscarRazon()" onfocus="buscarRazon()"><div class="ac-list" id="n-razon-list"></div></div><div class="field"><label>Factura</label><select id="n-fact" onchange="nFact()" disabled><option value="">—</option></select></div><div class="field"><label>Emisión</label><input id="n-emi" disabled></div></div>'+
@@ -692,7 +692,7 @@ function nRazon(){
 function nFact(){
   var f=$("n-fact").value; nuevo.factura=f;
   var rows=base.filter(function(x){ return x.razon.trim()===nuevo.razon&&x.factura===f; });
-  nuevo.lineas=rows; nuevo.cant={}; nuevo.com={}; nuevo.tipo={}; nuevo.emision=rows[0]?rows[0].emision:""; nuevo.ruc=rows[0]?rows[0].ruc:""; nuevo.facturador=rows[0]?rows[0].facturador:"";
+  nuevo.lineas=rows; nuevo.cant={}; nuevo.com={}; nuevo.emision=rows[0]?rows[0].emision:""; nuevo.ruc=rows[0]?rows[0].ruc:""; nuevo.facturador=rows[0]?rows[0].facturador:"";
   $("n-emi").value=fdate(nuevo.emision); filtroItems="";
   avisoDias30(nuevo.emision); renderItemsNuevo();
 }
@@ -705,8 +705,8 @@ function avisoDias30(emision){
 }
 function renderItemsNuevo(){
   if(!nuevo.lineas||!nuevo.lineas.length){ $("n-items").innerHTML=""; return; }
-  nuevo.cant=nuevo.cant||{}; nuevo.com=nuevo.com||{}; nuevo.tipo=nuevo.tipo||{};
-  $("n-items").innerHTML='<div class="srch-bar"><span>🔍</span><input type="text" id="n-srch" placeholder="Buscar código o descripción dentro de la factura…" autocomplete="off" oninput="filtrarItemsNuevo()"><button class="btn btn-sm btn-g" id="n-srch-clr" style="display:none" onclick="limpiarBusquedaItems()">✕</button></div><div style="overflow-x:auto"><table><thead><tr><th>Código</th><th>Descripción</th><th class="num">Cant. fact.</th><th style="width:84px">Cantidad</th><th style="width:110px">Tipo</th><th style="min-width:160px">Comentario</th><th class="num">Total</th></tr></thead><tbody id="n-tbody"></tbody></table></div><div class="muted" style="margin-top:4px" id="n-count"></div><div class="muted" style="margin-top:4px">💡 Marca "Garantía" solo en los productos que correspondan; el resto se procesará como devolución, todo dentro del mismo ticket.</div>';
+  nuevo.cant=nuevo.cant||{}; nuevo.com=nuevo.com||{};
+  $("n-items").innerHTML='<div class="srch-bar"><span>🔍</span><input type="text" id="n-srch" placeholder="Buscar código o descripción dentro de la factura…" autocomplete="off" oninput="filtrarItemsNuevo()"><button class="btn btn-sm btn-g" id="n-srch-clr" style="display:none" onclick="limpiarBusquedaItems()">✕</button></div><div style="overflow-x:auto"><table><thead><tr><th>Código</th><th>Descripción</th><th class="num">Cant. fact.</th><th style="width:84px">Cantidad</th><th style="min-width:160px">Comentario</th><th class="num">Total</th></tr></thead><tbody id="n-tbody"></tbody></table></div><div class="muted" style="margin-top:4px" id="n-count"></div>';
   var si=$("n-srch"); if(si) si.value=filtroItems;
   var clr=$("n-srch-clr"); if(clr) clr.style.display=filtroItems?"":"none";
   renderItemsBody();
@@ -714,14 +714,12 @@ function renderItemsNuevo(){
 /* Captura en el estado lo que el usuario tenga escrito ANTES de re-pintar (REQ 1: no se pierde nada) */
 function capturarItemsNuevo(){
   if(!nuevo||!nuevo.lineas) return;
-  nuevo.cant=nuevo.cant||{}; nuevo.com=nuevo.com||{}; nuevo.tipo=nuevo.tipo||{};
+  nuevo.cant=nuevo.cant||{}; nuevo.com=nuevo.com||{};
   nuevo.lineas.forEach(function(r,i){
     var qe=$("q-"+i); if(qe&&!qe.disabled) nuevo.cant[i]=qe.value;
     var ce=$("c-"+i); if(ce&&!ce.disabled) nuevo.com[i]=ce.value;
-    var te=$("tp-"+i); if(te&&!te.disabled) nuevo.tipo[i]=te.value;
   });
 }
-function nTipo(i){ var el=$("tp-"+i); if(!el) return; nuevo.tipo=nuevo.tipo||{}; nuevo.tipo[i]=el.value; }
 function filtrarItemsNuevo(){
   capturarItemsNuevo();
   filtroItems=$("n-srch")?$("n-srch").value:"";
@@ -747,7 +745,6 @@ function renderItemsBody(){
     var qvRaw=(nuevo.cant[i]!==undefined&&nuevo.cant[i]!=="")?+nuevo.cant[i]:0;
     var qv=agotado?0:Math.min(qvRaw,restante);
     var cv=agotado?"":(nuevo.com[i]!==undefined?nuevo.com[i]:"");
-    var tipoVal=(nuevo.tipo&&nuevo.tipo[i])||(nuevo.motivo==="GARANTIAS"?"GARANTIA":"DEVOLUCION");
     var info="";
     if(yaDev>0){
       info='<br><span class="tag '+(agotado?"tag-bad":"tag-merc")+'">'+(agotado?"Devuelto completo":"Quedan "+restante+" de "+r.cant)+'</span><div class="muted" style="font-size:11px">Ya en: '+esc((dev.nums[r.codigo]||[]).join(", "))+'</div>';
@@ -757,11 +754,11 @@ function renderItemsBody(){
     }
     var cantCol=r.cant+((yaDev>0||creditoExt>0)?'<div class="muted" style="font-size:11px">disp. '+restante+'</div>':'');
     var tr=document.createElement("tr");
-    tr.innerHTML='<td><b>'+esc(r.codigo)+'</b>'+info+'</td><td style="max-width:280px;font-size:12px">'+esc(r.desc)+'<div class="muted">'+esc(r.sub)+'</div></td><td class="num">'+cantCol+'</td><td><input type="number" min="0" max="'+restante+'" value="'+esc(qv)+'" id="q-'+i+'" oninput="nCalc('+i+')" style="text-align:right" '+(agotado?"disabled":"")+'></td><td><select id="tp-'+i+'" onchange="nTipo('+i+')" style="font-size:12px" '+(agotado?"disabled":"")+'><option value="DEVOLUCION"'+(tipoVal==="DEVOLUCION"?" selected":"")+'>Devolución</option><option value="GARANTIA"'+(tipoVal==="GARANTIA"?" selected":"")+'>Garantía</option></select></td><td><input id="c-'+i+'" value="'+esc(cv)+'" placeholder="Comentario" oninput="nCom('+i+')" '+(agotado?"disabled":"")+'></td><td class="num" id="tt-'+i+'">'+money(totalLinea(r,qv))+'</td>';
+    tr.innerHTML='<td><b>'+esc(r.codigo)+'</b>'+info+'</td><td style="max-width:280px;font-size:12px">'+esc(r.desc)+'<div class="muted">'+esc(r.sub)+'</div></td><td class="num">'+cantCol+'</td><td><input type="number" min="0" max="'+restante+'" value="'+esc(qv)+'" id="q-'+i+'" oninput="nCalc('+i+')" style="text-align:right" '+(agotado?"disabled":"")+'></td><td><input id="c-'+i+'" value="'+esc(cv)+'" placeholder="Comentario" oninput="nCom('+i+')" '+(agotado?"disabled":"")+'></td><td class="num" id="tt-'+i+'">'+money(totalLinea(r,qv))+'</td>';
     tbody.appendChild(tr);
   });
   if($("n-count")) $("n-count").textContent=q?("Mostrando "+shown+" de "+lineas.length+" productos"):(lineas.length+" productos en esta factura");
-  if(shown===0&&q) tbody.innerHTML='<tr><td colspan="7" class="muted" style="text-align:center;padding:20px">Sin resultados</td></tr>';
+  if(shown===0&&q) tbody.innerHTML='<tr><td colspan="6" class="muted" style="text-align:center;padding:20px">Sin resultados</td></tr>';
 }
 function nCalc(i){ var r=nuevo.lineas[i]; if(!r) return; var max=(nuevo.restante&&nuevo.restante[i]!==undefined)?nuevo.restante[i]:r.cant; var el=$("q-"+i); var q=Math.max(0,Math.min(max,+(el?el.value:0))); if(el) el.value=q; nuevo.cant=nuevo.cant||{}; nuevo.cant[i]=q; if($("tt-"+i)) $("tt-"+i).textContent=money(totalLinea(r,q)); }
 function nCom(i){ var el=$("c-"+i); if(!el) return; nuevo.com=nuevo.com||{}; nuevo.com[i]=el.value; }
@@ -785,8 +782,7 @@ async function guardarTicket(){
     if(q>restante){ excedido=r.codigo+" (disponible "+Math.max(0,restante)+" de "+r.cant+")"; return; }
     entradoPorCod[r.codigo]=(entradoPorCod[r.codigo]||0)+q;
     var f=q/r.cant, com=(nuevo.com[i]||"").trim();
-    var tipo=(nuevo.tipo&&nuevo.tipo[i])||(nuevo.motivo==="GARANTIAS"?"GARANTIA":"DEVOLUCION");
-    items.push({codigo:r.codigo,desc:r.desc,sub:r.sub,cantidad:q,comVendedor:com,tipo:tipo,neto:+(r.neto*f).toFixed(4),iva:+(r.iva*f).toFixed(4),total:+(r.total*f).toFixed(4)});
+    items.push({codigo:r.codigo,desc:r.desc,sub:r.sub,cantidad:q,comVendedor:com,neto:+(r.neto*f).toFixed(4),iva:+(r.iva*f).toFixed(4),total:+(r.total*f).toFixed(4)});
   });
   if(excedido){ toast("El código "+excedido+" supera la cantidad disponible para devolver."); return; }
   if(items.length===0){ toast("Ingresa cantidad en al menos un producto."); return; }
