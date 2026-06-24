@@ -166,6 +166,7 @@ var MESES=["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Se
 var SUCURSALES={"004":"AV. EL REY","002":"BODEGA","003":"AV. 6 DE DICIEMBRE","007":"AGENCIA LA PRENSA","006":"AGENCIA TUMBACO"};
 
 var me=null, base=[], RAZONES=[];
+var creditosNC={};   /* créditos (NC) detectados en el Sheet: clave "FACTURA_ORIGEN|CODIGO" -> {cant,neto,iva,total} (negativos) */
 var state={seq3200:0,seq5200:0,tickets:[],guias:[],avisos:[]};
 var baseLoaded=false, baseLineas=0, baseFechaStr="";
 var vistaActiva=null;
@@ -255,6 +256,7 @@ async function subirBaseAFirebase(rows,onProg){
     await fbDB.ref("baseFacturas/chunks/"+j).set(chunks[j]);
   }
   await fbDB.ref("baseFacturas/meta").set(meta);
+  await fbDB.ref("baseFacturas/creditos").set(limpiarUndefined(creditosNC||{}));
   return meta;
 }
 async function leerBaseDeFirebase(onProg){
@@ -269,6 +271,7 @@ async function leerBaseDeFirebase(onProg){
     var c=await fbDB.ref("baseFacturas/chunks/"+i).get();
     json+=c.val()||"";
   }
+  try{ var cs=await fbDB.ref("baseFacturas/creditos").get(); creditosNC=cs.val()||{}; }catch(e){ creditosNC=creditosNC||{}; }
   return {rows:descomprimirBase(JSON.parse(json)),meta:meta};
 }
 
@@ -319,6 +322,23 @@ async function cargarBaseDesdeSheets(forzar,onProg){
   base=parsearCSV(csvText); indexarBase(); baseLoaded=true; baseLineas=base.length; baseFechaStr="Google Sheets"; actualizarChipBase();
   if(onProg) onProg("Base lista: "+base.length.toLocaleString("es-EC")+" líneas",100);
 }
+/* Conversor numérico robusto: entiende "1,0000" (coma decimal, formato latino) y también "1.0000" */
+function numEC(s){
+  if(s==null) return 0;
+  s=String(s).trim().replace(/[^0-9.,\-]/g,"");
+  if(!s) return 0;
+  var hasC=s.indexOf(",")>=0, hasP=s.indexOf(".")>=0;
+  if(hasC&&hasP){
+    if(s.lastIndexOf(",")>s.lastIndexOf(".")){ s=s.replace(/\./g,"").replace(",","."); }
+    else { s=s.replace(/,/g,""); }
+  }else if(hasC){
+    var partes=s.split(",");
+    if(partes.length===2&&partes[1].length===3&&partes[0].length<=3){ s=s.replace(",",""); }
+    else { s=s.replace(",","."); }
+  }
+  var n=parseFloat(s);
+  return isNaN(n)?0:n;
+}
 function parsearCSV(text){
   var rows=[], lines=text.split(/\r?\n/);
   if(lines.length<2) return [];
@@ -326,14 +346,27 @@ function parsearCSV(text){
   function norm(k){ return String(k||"").trim().toUpperCase().replace(/\s+/g," "); }
   var headers=splitCSVLine(lines[0],sep).map(norm);
   function idx(h){ return headers.indexOf(h); }
-  var iEmi=idx("EMISION"),iFact=idx("FACTURA"),iRuc=idx("IDENTIFICACION"),iRazon=idx("RAZON SOCIAL"),iCod=idx("CODIGO PRODUCTO"),iDesc=idx("DESCRIPCION PRODUCTO"),iSub=idx("SUBGRUPO"),iCant=idx("CANTIDAD"),iNeto=idx("PRECIO TOTAL NETO"),iIva=idx("IVA TOTAL"),iTot=idx("TOTAL PRODUCTO"),iF2=idx("FACTURADOR");
+  var iEmi=idx("EMISION"),iFact=idx("FACTURA"),iRuc=idx("IDENTIFICACION"),iRazon=idx("RAZON SOCIAL"),iCod=idx("CODIGO PRODUCTO"),iDesc=idx("DESCRIPCION PRODUCTO"),iSub=idx("SUBGRUPO"),iCant=idx("CANTIDAD"),iNeto=idx("PRECIO TOTAL NETO"),iIva=idx("IVA TOTAL"),iTot=idx("TOTAL PRODUCTO"),iF2=idx("FACTURADOR"),iFacNC=idx("FAC DE LA NC");
+  var creditos={};
   for(var i=1;i<lines.length;i++){
     if(!lines[i].trim()) continue;
     var c=splitCSVLine(lines[i],sep);
     var fact=String(c[iFact]||"").trim(), razon=String(c[iRazon]||"").trim();
     if(!fact||!razon) continue;
-    rows.push({emision:String(c[iEmi]||"").trim(),factura:fact,ruc:String(c[iRuc]||"").trim(),razon:razon,codigo:String(c[iCod]||"").trim(),desc:String(c[iDesc]||"").trim(),sub:String(c[iSub]||"").trim(),facturador:String(c[iF2]||"").trim(),cant:+(c[iCant]||0)||0,neto:+(c[iNeto]||0)||0,iva:+(c[iIva]||0)||0,total:+(c[iTot]||0)||0});
+    var codigo=String(c[iCod]||"").trim();
+    var cant=numEC(c[iCant]), neto=numEC(c[iNeto]), iva=numEC(c[iIva]), tot=numEC(c[iTot]);
+    var facNCraw=iFacNC>=0?String(c[iFacNC]||"").trim():"";
+    var esNC=!!(facNCraw&&facNCraw.toUpperCase()!=="FALSO"&&facNCraw.toUpperCase()!=="FALSE");
+    if(esNC){
+      /* Esta fila es una NOTA DE CRÉDITO (no un producto vendible): se descuenta de la factura ORIGINAL que indica FAC DE LA NC, en vez de aparecer como su propia línea vendible. */
+      var k=facNCraw+"|"+codigo;
+      if(!creditos[k]) creditos[k]={cant:0,neto:0,iva:0,total:0};
+      creditos[k].cant+=cant; creditos[k].neto+=neto; creditos[k].iva+=iva; creditos[k].total+=tot;
+      continue;
+    }
+    rows.push({emision:String(c[iEmi]||"").trim(),factura:fact,ruc:String(c[iRuc]||"").trim(),razon:razon,codigo:codigo,desc:String(c[iDesc]||"").trim(),sub:String(c[iSub]||"").trim(),facturador:String(c[iF2]||"").trim(),cant:cant,neto:neto,iva:iva,total:tot});
   }
+  creditosNC=creditos;
   return rows;
 }
 function splitCSVLine(line,sep){
@@ -573,10 +606,21 @@ function buscarRazon(){
   list.style.display="block";
 }
 function elegirRazon(r){ $("n-razon").value=r; $("n-razon-list").style.display="none"; nRazon(); }
+/* ¿Esta factura todavía tiene algún código con saldo disponible (sin contar lo ya devuelto en este sistema NI lo ya acreditado por NC en contabilidad)? */
+function facturaTieneSaldo(factura){
+  var lineas=base.filter(function(x){ return x.factura===factura; });
+  if(lineas.length===0) return false;
+  var dev=devolucionesPorCodigo(factura);
+  return lineas.some(function(r){
+    var yaDev=dev.cant[r.codigo]||0;
+    var creditoExt=Math.abs((creditosNC[factura+"|"+r.codigo]||{cant:0}).cant);
+    return (r.cant-yaDev-creditoExt)>0;
+  });
+}
 function nRazon(){
   var r=$("n-razon").value; nuevo.razon=r;
   var fs={}; base.forEach(function(x){ if(x.razon.trim()===r) fs[x.factura]=1; });
-  var facts=Object.keys(fs);
+  var facts=Object.keys(fs).filter(facturaTieneSaldo);
   $("n-fact").disabled=false;
   $("n-fact").innerHTML='<option value="">— Seleccionar —</option>'+facts.map(function(f){ return '<option>'+esc(f)+'</option>'; }).join("");
   $("n-emi").value=""; $("n-items").innerHTML=""; filtroItems="";
@@ -629,7 +673,8 @@ function renderItemsBody(){
   tbody.innerHTML=""; var shown=0;
   lineas.forEach(function(r,i){
     var yaDev=dev.cant[r.codigo]||0;
-    var restante=Math.max(0,r.cant-yaDev);
+    var creditoExt=Math.abs((creditosNC[nuevo.factura+"|"+r.codigo]||{cant:0}).cant);
+    var restante=Math.max(0,r.cant-yaDev-creditoExt);
     nuevo.restante[i]=restante;
     var agotado=restante<=0;
     var txt=(r.codigo+" "+r.desc+" "+r.sub).toUpperCase();
@@ -643,7 +688,10 @@ function renderItemsBody(){
     if(yaDev>0){
       info='<br><span class="tag '+(agotado?"tag-bad":"tag-merc")+'">'+(agotado?"Devuelto completo":"Quedan "+restante+" de "+r.cant)+'</span><div class="muted" style="font-size:11px">Ya en: '+esc((dev.nums[r.codigo]||[]).join(", "))+'</div>';
     }
-    var cantCol=r.cant+(yaDev>0?'<div class="muted" style="font-size:11px">disp. '+restante+'</div>':'');
+    if(creditoExt>0){
+      info+='<br><span class="tag tag-bad">NC en contabilidad: '+creditoExt+'</span>';
+    }
+    var cantCol=r.cant+((yaDev>0||creditoExt>0)?'<div class="muted" style="font-size:11px">disp. '+restante+'</div>':'');
     var tr=document.createElement("tr");
     tr.innerHTML='<td><b>'+esc(r.codigo)+'</b>'+info+'</td><td style="max-width:280px;font-size:12px">'+esc(r.desc)+'<div class="muted">'+esc(r.sub)+'</div></td><td class="num">'+cantCol+'</td><td><input type="number" min="0" max="'+restante+'" value="'+esc(qv)+'" id="q-'+i+'" oninput="nCalc('+i+')" style="text-align:right" '+(agotado?"disabled":"")+'></td><td><select id="tp-'+i+'" onchange="nTipo('+i+')" style="font-size:12px" '+(agotado?"disabled":"")+'><option value="DEVOLUCION"'+(tipoVal==="DEVOLUCION"?" selected":"")+'>Devolución</option><option value="GARANTIA"'+(tipoVal==="GARANTIA"?" selected":"")+'>Garantía</option></select></td><td><input id="c-'+i+'" value="'+esc(cv)+'" placeholder="Comentario" oninput="nCom('+i+')" '+(agotado?"disabled":"")+'></td><td class="num" id="tt-'+i+'">'+money(totalLinea(r,qv))+'</td>';
     tbody.appendChild(tr);
@@ -1365,7 +1413,7 @@ function renderAdmin(){
   h+='<div class="card" style="border-left:5px solid var(--navy)"><h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">⏱ Reporte de control de respuesta (asesores)</h3>';
   h+='<div class="muted" style="margin-bottom:10px">Excel con TODOS los avisos de ítems extra y todas las incidencias de guía incorrecta (resueltas y pendientes), con la fecha en que se originaron y cuánto tardó (o lleva) el asesor en responder. Filtra por la fecha en que se originó cada caso.</div>';
   h+='<div class="grid3"><div class="field" style="margin-bottom:0"><label>Desde</label><input type="date" id="ctrl-desde" value="'+ctrlDesde+'" onchange="ctrlDesde=this.value"></div><div class="field" style="margin-bottom:0"><label>Hasta</label><input type="date" id="ctrl-hasta" value="'+ctrlHasta+'" onchange="ctrlHasta=this.value"></div><div style="display:flex;align-items:end"><button class="btn btn-ok" style="width:100%;justify-content:center" onclick="exportarControlVendedores()">⬇ Reporte de control</button></div></div></div>';
-  h+='<div class="card" style="border-left:5px solid var(--amber)"><h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">Base de facturas</h3><div class="muted" style="margin-bottom:10px">'+(baseLoaded?'✓ Base: <b>'+base.length.toLocaleString("es-EC")+'</b> líneas ('+esc(baseFechaStr)+')':"Base no cargada")+'</div><div class="muted" style="margin-bottom:12px;background:#E2F3EA;padding:10px 12px;border-radius:6px"><b>💡</b> Cuando actualices el Excel, presiona "Actualizar base a Firebase" para que todos entren rápido.</div><button class="btn btn-a" onclick="actualizarBaseFirebase()">📤 Actualizar base a Firebase</button> <button class="btn btn-g" onclick="recargarBase()">🔄 Recargar</button><div id="adm-prog" style="margin-top:10px"></div></div>';
+  h+='<div class="card" style="border-left:5px solid var(--amber)"><h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">Base de facturas</h3><div class="muted" style="margin-bottom:10px">'+(baseLoaded?'✓ Base: <b>'+base.length.toLocaleString("es-EC")+'</b> líneas ('+esc(baseFechaStr)+')'+(creditosNC&&Object.keys(creditosNC).length?' · <b>'+Object.keys(creditosNC).length.toLocaleString("es-EC")+'</b> créditos NC detectados en el Sheet':''):"Base no cargada")+'</div><div class="muted" style="margin-bottom:12px;background:#E2F3EA;padding:10px 12px;border-radius:6px"><b>💡</b> Cuando actualices el Excel, presiona "Actualizar base a Firebase" para que todos entren rápido.</div><button class="btn btn-a" onclick="actualizarBaseFirebase()">📤 Actualizar base a Firebase</button> <button class="btn btn-g" onclick="recargarBase()">🔄 Recargar</button><div id="adm-prog" style="margin-top:10px"></div></div>';
   h+='<div class="card" style="border-left:5px solid var(--navy)"><h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">📊 Indicadores de devoluciones</h3><div class="muted" style="margin-bottom:12px">Dashboard con tasa de devolución, rankings, sucursales, motivos e impacto económico. Se abre en página aparte.</div><a class="btn btn-p" href="dashboard.html" target="_blank">📊 Abrir dashboard</a></div>';
   h+='<div class="card" style="border-left:5px solid var(--ok)"><h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">Reporte consolidado</h3><div class="muted" style="margin-bottom:12px">Excel con todos los tickets. Filtra por rango de fechas.</div><div class="grid3" style="margin-bottom:10px"><div class="field" style="margin-bottom:0"><label>Desde</label><input type="date" id="rep-desde"></div><div class="field" style="margin-bottom:0"><label>Hasta</label><input type="date" id="rep-hasta"></div><div class="field" style="margin-bottom:0"><label>&nbsp;</label><button class="btn btn-ok" style="width:100%;justify-content:center" onclick="reporteConsolidado()">⬇ Descargar</button></div></div></div>';
   h+='<div class="card" style="border-left:5px solid #6A2E91"><h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">Guías</h3><div class="muted" style="margin-bottom:12px">Anula guías y descarga el reporte.</div><button class="btn btn-p" onclick="adminVerGuias()">📦 Administrar guías</button> <button class="btn btn-ok" onclick="excelGuias()">⬇ Reporte de guías</button></div>';
