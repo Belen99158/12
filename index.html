@@ -166,7 +166,8 @@ var MESES=["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Se
 var SUCURSALES={"004":"AV. EL REY","002":"BODEGA","003":"AV. 6 DE DICIEMBRE","007":"AGENCIA LA PRENSA","006":"AGENCIA TUMBACO"};
 
 var me=null, base=[], RAZONES=[];
-var creditosNC={};   /* créditos (NC) detectados en el Sheet: clave "FACTURA_ORIGEN|CODIGO" -> {cant,neto,iva,total} (negativos) */
+var ncAplicados=0, ncSinMatch=0, ncFilasNegativas=0;
+var ncSinMatchList=[], ncNegativasList=[];   /* para exportar a Excel desde Admin */
 var state={seq3200:0,seq5200:0,tickets:[],guias:[],avisos:[]};
 var baseLoaded=false, baseLineas=0, baseFechaStr="";
 var vistaActiva=null;
@@ -234,13 +235,13 @@ async function leerPdfNCfb(id){ if(!fbReady) throw new Error("Sin Firebase"); va
 function comprimirBase(rows){
   var pool=[], map={};
   function idx(s){ s=String(s==null?"":s); if(map[s]!==undefined) return map[s]; var i=pool.length; pool.push(s); map[s]=i; return i; }
-  var r=rows.map(function(x){ return [idx(x.emision),idx(x.factura),idx(x.ruc),idx(x.razon),idx(x.codigo),idx(x.desc),idx(x.sub),idx(x.facturador),x.cant,x.neto,x.iva,x.total]; });
-  return {v:1,p:pool,r:r};
+  var r=rows.map(function(x){ return [idx(x.emision),idx(x.factura),idx(x.ruc),idx(x.razon),idx(x.codigo),idx(x.desc),idx(x.sub),idx(x.facturador),x.cant,x.neto,x.iva,x.total,x.creditoAplicado||0]; });
+  return {v:2,p:pool,r:r};
 }
 function descomprimirBase(o){
   if(!o||!o.r) return [];
   var p=o.p;
-  return o.r.map(function(a){ return {emision:p[a[0]],factura:p[a[1]],ruc:p[a[2]],razon:p[a[3]],codigo:p[a[4]],desc:p[a[5]],sub:p[a[6]],facturador:p[a[7]],cant:a[8],neto:a[9],iva:a[10],total:a[11]}; });
+  return o.r.map(function(a){ return {emision:p[a[0]],factura:p[a[1]],ruc:p[a[2]],razon:p[a[3]],codigo:p[a[4]],desc:p[a[5]],sub:p[a[6]],facturador:p[a[7]],cant:a[8],neto:a[9],iva:a[10],total:a[11],creditoAplicado:a[12]||0}; });
 }
 var FB_CHUNK=200000;
 async function subirBaseAFirebase(rows,onProg){
@@ -256,7 +257,7 @@ async function subirBaseAFirebase(rows,onProg){
     await fbDB.ref("baseFacturas/chunks/"+j).set(chunks[j]);
   }
   await fbDB.ref("baseFacturas/meta").set(meta);
-  await fbDB.ref("baseFacturas/creditos").set(limpiarUndefined(creditosNC||{}));
+  await fbDB.ref("baseFacturas/ncDiag").set({aplicados:ncAplicados,sinMatch:ncSinMatch,negativas:ncFilasNegativas});
   return meta;
 }
 async function leerBaseDeFirebase(onProg){
@@ -271,7 +272,7 @@ async function leerBaseDeFirebase(onProg){
     var c=await fbDB.ref("baseFacturas/chunks/"+i).get();
     json+=c.val()||"";
   }
-  try{ var cs=await fbDB.ref("baseFacturas/creditos").get(); creditosNC=cs.val()||{}; }catch(e){ creditosNC=creditosNC||{}; }
+  try{ var dg=await fbDB.ref("baseFacturas/ncDiag").get(); var v=dg.val()||{}; ncAplicados=v.aplicados||0; ncSinMatch=v.sinMatch||0; ncFilasNegativas=v.negativas||0; }catch(e){}
   return {rows:descomprimirBase(JSON.parse(json)),meta:meta};
 }
 
@@ -340,14 +341,13 @@ function numEC(s){
   return isNaN(n)?0:n;
 }
 function parsearCSV(text){
-  var rows=[], lines=text.split(/\r?\n/);
+  var rows=[], ncList=[], lines=text.split(/\r?\n/);
   if(lines.length<2) return [];
   var sep=lines[0].indexOf(";")>=0?";":",";
   function norm(k){ return String(k||"").trim().toUpperCase().replace(/\s+/g," "); }
   var headers=splitCSVLine(lines[0],sep).map(norm);
   function idx(h){ return headers.indexOf(h); }
   var iEmi=idx("EMISION"),iFact=idx("FACTURA"),iRuc=idx("IDENTIFICACION"),iRazon=idx("RAZON SOCIAL"),iCod=idx("CODIGO PRODUCTO"),iDesc=idx("DESCRIPCION PRODUCTO"),iSub=idx("SUBGRUPO"),iCant=idx("CANTIDAD"),iNeto=idx("PRECIO TOTAL NETO"),iIva=idx("IVA TOTAL"),iTot=idx("TOTAL PRODUCTO"),iF2=idx("FACTURADOR"),iFacNC=idx("FAC DE LA NC");
-  var creditos={};
   for(var i=1;i<lines.length;i++){
     if(!lines[i].trim()) continue;
     var c=splitCSVLine(lines[i],sep);
@@ -358,16 +358,63 @@ function parsearCSV(text){
     var facNCraw=iFacNC>=0?String(c[iFacNC]||"").trim():"";
     var esNC=!!(facNCraw&&facNCraw.toUpperCase()!=="FALSO"&&facNCraw.toUpperCase()!=="FALSE");
     if(esNC){
-      /* Esta fila es una NOTA DE CRÉDITO (no un producto vendible): se descuenta de la factura ORIGINAL que indica FAC DE LA NC, en vez de aparecer como su propia línea vendible. */
-      var k=facNCraw+"|"+codigo;
-      if(!creditos[k]) creditos[k]={cant:0,neto:0,iva:0,total:0};
-      creditos[k].cant+=cant; creditos[k].neto+=neto; creditos[k].iva+=iva; creditos[k].total+=tot;
+      /* Esta fila es una NOTA DE CRÉDITO (no un producto vendible): se concilia contra
+         su factura ORIGINAL (FAC DE LA NC) más abajo, y esta línea no entra a la base. */
+      ncList.push({facOrigen:facNCraw,codigo:codigo,cant:cant,neto:neto,iva:iva,total:tot});
       continue;
     }
-    rows.push({emision:String(c[iEmi]||"").trim(),factura:fact,ruc:String(c[iRuc]||"").trim(),razon:razon,codigo:codigo,desc:String(c[iDesc]||"").trim(),sub:String(c[iSub]||"").trim(),facturador:String(c[iF2]||"").trim(),cant:cant,neto:neto,iva:iva,total:tot});
+    rows.push({emision:String(c[iEmi]||"").trim(),factura:fact,ruc:String(c[iRuc]||"").trim(),razon:razon,codigo:codigo,desc:String(c[iDesc]||"").trim(),sub:String(c[iSub]||"").trim(),facturador:String(c[iF2]||"").trim(),cant:cant,neto:neto,iva:iva,total:tot,creditoAplicado:0});
   }
-  creditosNC=creditos;
+  conciliarCreditosNC(rows,ncList);
   return rows;
+}
+/* ===== CONCILIACIÓN DE NOTAS DE CRÉDITO (mismo razonamiento que el script de reconciliación) =====
+   1. Cada NC se agrupa por (factura ORIGINAL, código).
+   2. Se busca esa combinación en las filas normales (vendibles) y se le RESTA el crédito
+      (cantidad, neto, iva, total) directamente — quedan ya conciliadas, no hay que recalcular
+      esto en cada pantalla.
+   3. Si el mismo factura+código aparece en varias líneas duplicadas, el crédito se reparte
+      proporcional a la cantidad de cada línea (para no dejar una sola en negativo por error).
+   4. Si una NC no encuentra su factura original en esta misma base (factura de un periodo
+      anterior que no vino en este extracto), se cuenta aparte y no afecta nada.
+   5. Si después de conciliar alguna línea queda con cantidad negativa, es un caso real de
+      sobre-crédito en contabilidad (no un bug) y se deja registrado para revisión manual. */
+function conciliarCreditosNC(rows,ncList){
+  ncAplicados=0; ncSinMatch=0; ncFilasNegativas=0; ncSinMatchList=[]; ncNegativasList=[];
+  var creditos={};
+  ncList.forEach(function(n){
+    var k=n.facOrigen+"|"+n.codigo;
+    if(!creditos[k]) creditos[k]={cant:0,neto:0,iva:0,total:0};
+    creditos[k].cant+=n.cant; creditos[k].neto+=n.neto; creditos[k].iva+=n.iva; creditos[k].total+=n.total;
+  });
+  var indice={};
+  rows.forEach(function(r,i){ var k=r.factura+"|"+r.codigo; (indice[k]=indice[k]||[]).push(i); });
+  Object.keys(creditos).forEach(function(k){
+    var valores=creditos[k], idxs=indice[k];
+    if(!idxs||!idxs.length){
+      ncSinMatch++;
+      var p=k.split("|"); ncSinMatchList.push({facOrigen:p[0],codigo:p[1],cant:valores.cant,total:valores.total});
+      return;
+    }
+    if(idxs.length===1){
+      var r=rows[idxs[0]];
+      r.cant+=valores.cant; r.neto+=valores.neto; r.iva+=valores.iva; r.total+=valores.total;
+      r.creditoAplicado+=Math.abs(valores.cant);
+    }else{
+      /* líneas duplicadas con el mismo factura+código: repartir proporcional a la cantidad */
+      var totalCant=0; idxs.forEach(function(i){ totalCant+=rows[i].cant; });
+      idxs.forEach(function(i){
+        var r=rows[i];
+        var peso=totalCant?(r.cant/totalCant):(1/idxs.length);
+        r.cant+=valores.cant*peso; r.neto+=valores.neto*peso; r.iva+=valores.iva*peso; r.total+=valores.total*peso;
+        r.creditoAplicado+=Math.abs(valores.cant*peso);
+      });
+    }
+    ncAplicados++;
+  });
+  rows.forEach(function(r){
+    if(r.cant<-0.0001){ ncFilasNegativas++; ncNegativasList.push({factura:r.factura,codigo:r.codigo,desc:r.desc,cant:r.cant,total:r.total}); }
+  });
 }
 function splitCSVLine(line,sep){
   sep=sep||",";
@@ -613,21 +660,8 @@ function facturaTieneSaldo(factura){
     var lineas=base.filter(function(x){ return x.factura===factura; });
     if(lineas.length===0) return false;
     var dev=devolucionesPorCodigo(factura);
-    return lineas.some(function(r){
-      var yaDev=dev.cant[r.codigo]||0;
-      var creditoExt=Math.abs((creditosNC&&creditosNC[factura+"|"+r.codigo]||{cant:0}).cant);
-      return (r.cant-yaDev-creditoExt)>0;
-    });
-  }catch(e){ console.error("facturaTieneSaldo:",e); return true; /* si algo falla, NO ocultar la factura */ }
-}
-/* Variante sin contar créditos NC externos: sirve solo para diagnosticar la causa exacta cuando una factura no aparece */
-function facturaTieneSaldoSinNC(factura){
-  try{
-    var lineas=base.filter(function(x){ return x.factura===factura; });
-    if(lineas.length===0) return false;
-    var dev=devolucionesPorCodigo(factura);
     return lineas.some(function(r){ return (r.cant-(dev.cant[r.codigo]||0))>0; });
-  }catch(e){ return true; }
+  }catch(e){ console.error("facturaTieneSaldo:",e); return true; /* si algo falla, NO ocultar la factura */ }
 }
 function nRazon(){
   var r=$("n-razon").value; nuevo.razon=r;
@@ -642,9 +676,10 @@ function nRazon(){
     if(todasFacts.length===0){
       msgEl.innerHTML='⚠ No se encontró ninguna factura para "'+esc(r)+'" en la base cargada ('+base.length.toLocaleString("es-EC")+' líneas en total). Verifica que el nombre coincide exactamente con el del Sheet, o recarga la base desde Admin.';
     }else if(facts.length===0){
-      var factsSinNC=[]; try{ factsSinNC=todasFacts.filter(facturaTieneSaldoSinNC); }catch(e){ factsSinNC=todasFacts; }
-      if(factsSinNC.length>0){
-        msgEl.innerHTML='ℹ Esta razón social tiene <b>'+todasFacts.length+'</b> factura(s) en la base, pero las '+factsSinNC.length+' que aún tenían saldo quedaron en 0 porque ya tienen <b>nota de crédito registrada en contabilidad</b> (columna FAC DE LA NC del Sheet).';
+      var lineasCliente=base.filter(function(x){ return x.razon.trim()===r; });
+      var tieneNC=lineasCliente.some(function(x){ return x.creditoAplicado>0; });
+      if(tieneNC){
+        msgEl.innerHTML='ℹ Esta razón social tiene <b>'+todasFacts.length+'</b> factura(s) en la base, pero ya quedaron en 0 porque tienen <b>nota de crédito registrada en contabilidad</b> (columna FAC DE LA NC del Sheet).';
       }else{
         msgEl.innerHTML='ℹ Esta razón social tiene <b>'+todasFacts.length+'</b> factura(s) en la base, pero todas ya fueron devueltas por completo dentro de este sistema (tickets ya creados).';
       }
@@ -702,9 +737,8 @@ function renderItemsBody(){
   tbody.innerHTML=""; var shown=0;
   lineas.forEach(function(r,i){
     var yaDev=dev.cant[r.codigo]||0;
-    var creditoExt=0;
-    try{ creditoExt=Math.abs((creditosNC&&creditosNC[nuevo.factura+"|"+r.codigo]||{cant:0}).cant); }catch(e){ creditoExt=0; }
-    var restante=Math.max(0,r.cant-yaDev-creditoExt);
+    var creditoExt=r.creditoAplicado||0;
+    var restante=Math.max(0,r.cant-yaDev);
     nuevo.restante[i]=restante;
     var agotado=restante<=0;
     var txt=(r.codigo+" "+r.desc+" "+r.sub).toUpperCase();
@@ -719,7 +753,7 @@ function renderItemsBody(){
       info='<br><span class="tag '+(agotado?"tag-bad":"tag-merc")+'">'+(agotado?"Devuelto completo":"Quedan "+restante+" de "+r.cant)+'</span><div class="muted" style="font-size:11px">Ya en: '+esc((dev.nums[r.codigo]||[]).join(", "))+'</div>';
     }
     if(creditoExt>0){
-      info+='<br><span class="tag tag-bad">NC en contabilidad: '+creditoExt+'</span>';
+      info+='<br><span class="tag tag-bad">Ya con NC en contabilidad: '+creditoExt.toFixed(2)+'</span>';
     }
     var cantCol=r.cant+((yaDev>0||creditoExt>0)?'<div class="muted" style="font-size:11px">disp. '+restante+'</div>':'');
     var tr=document.createElement("tr");
@@ -1443,7 +1477,26 @@ function renderAdmin(){
   h+='<div class="card" style="border-left:5px solid var(--navy)"><h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">⏱ Reporte de control de respuesta (asesores)</h3>';
   h+='<div class="muted" style="margin-bottom:10px">Excel con TODOS los avisos de ítems extra y todas las incidencias de guía incorrecta (resueltas y pendientes), con la fecha en que se originaron y cuánto tardó (o lleva) el asesor en responder. Filtra por la fecha en que se originó cada caso.</div>';
   h+='<div class="grid3"><div class="field" style="margin-bottom:0"><label>Desde</label><input type="date" id="ctrl-desde" value="'+ctrlDesde+'" onchange="ctrlDesde=this.value"></div><div class="field" style="margin-bottom:0"><label>Hasta</label><input type="date" id="ctrl-hasta" value="'+ctrlHasta+'" onchange="ctrlHasta=this.value"></div><div style="display:flex;align-items:end"><button class="btn btn-ok" style="width:100%;justify-content:center" onclick="exportarControlVendedores()">⬇ Reporte de control</button></div></div></div>';
-  h+='<div class="card" style="border-left:5px solid var(--amber)"><h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">Base de facturas</h3><div class="muted" style="margin-bottom:10px">'+(baseLoaded?'✓ Base: <b>'+base.length.toLocaleString("es-EC")+'</b> líneas ('+esc(baseFechaStr)+')'+(creditosNC&&Object.keys(creditosNC).length?' · <b>'+Object.keys(creditosNC).length.toLocaleString("es-EC")+'</b> créditos NC detectados en el Sheet':''):"Base no cargada")+'</div><div class="muted" style="margin-bottom:12px;background:#E2F3EA;padding:10px 12px;border-radius:6px"><b>💡</b> Cuando actualices el Excel, presiona "Actualizar base a Firebase" para que todos entren rápido.</div><button class="btn btn-a" onclick="actualizarBaseFirebase()">📤 Actualizar base a Firebase</button> <button class="btn btn-g" onclick="recargarBase()">🔄 Recargar</button><div id="adm-prog" style="margin-top:10px"></div></div>';
+  h+='<div class="card" style="border-left:5px solid var(--amber)"><h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">Base de facturas</h3><div class="muted" style="margin-bottom:10px">'+(baseLoaded?'✓ Base: <b>'+base.length.toLocaleString("es-EC")+'</b> líneas ('+esc(baseFechaStr)+')':"Base no cargada")+'</div><div class="muted" style="margin-bottom:12px;background:#E2F3EA;padding:10px 12px;border-radius:6px"><b>💡</b> Cuando actualices el Excel, presiona "Actualizar base a Firebase" para que todos entren rápido.</div><button class="btn btn-a" onclick="actualizarBaseFirebase()">📤 Actualizar base a Firebase</button> <button class="btn btn-g" onclick="recargarBase()">🔄 Recargar</button><div id="adm-prog" style="margin-top:10px"></div></div>';
+
+  if(baseLoaded){
+    h+='<div class="card" style="border-left:5px solid #6A2E91"><h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">🧾 Conciliación de Notas de Crédito (desde el Sheet)</h3>';
+    h+='<div class="muted" style="margin-bottom:10px">Cada vez que se carga la base, las filas de NC (columna FAC DE LA NC) se restan automáticamente de su factura original y se eliminan de la base — así un producto ya acreditado en contabilidad no aparece disponible para crear un ticket nuevo.</div>';
+    h+='<div class="grid3">';
+    h+='<div class="kpi"><div class="disp" style="color:var(--ok)">'+ncAplicados.toLocaleString("es-EC")+'</div><div class="lbl">Créditos aplicados</div></div>';
+    h+='<div class="kpi"><div class="disp" style="color:#C77F00">'+ncSinMatch.toLocaleString("es-EC")+'</div><div class="lbl">NC sin factura original en la base</div></div>';
+    h+='<div class="kpi"><div class="disp" style="color:var(--bad)">'+ncFilasNegativas.toLocaleString("es-EC")+'</div><div class="lbl">Líneas con cantidad negativa (revisar)</div></div>';
+    h+='</div>';
+    if(ncSinMatchList.length||ncNegativasList.length){
+      h+='<div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap">';
+      if(ncSinMatchList.length) h+='<button class="btn btn-g btn-sm" onclick="exportarNCSinMatch()">⬇ Excel: NC sin factura original</button>';
+      if(ncNegativasList.length) h+='<button class="btn btn-g btn-sm" onclick="exportarNCNegativas()">⬇ Excel: líneas a revisar</button>';
+      h+='</div>';
+    }else if(ncSinMatch||ncFilasNegativas){
+      h+='<div class="muted" style="margin-top:8px">El detalle de estos casos solo se genera al traer la base directo del Sheet (botón "📤 Actualizar base a Firebase" arriba); "🔄 Recargar" puede venir del caché, que solo guarda los totales.</div>';
+    }
+    h+='</div>';
+  }
   h+='<div class="card" style="border-left:5px solid var(--navy)"><h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">📊 Indicadores de devoluciones</h3><div class="muted" style="margin-bottom:12px">Dashboard con tasa de devolución, rankings, sucursales, motivos e impacto económico. Se abre en página aparte.</div><a class="btn btn-p" href="dashboard.html" target="_blank">📊 Abrir dashboard</a></div>';
   h+='<div class="card" style="border-left:5px solid var(--ok)"><h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">Reporte consolidado</h3><div class="muted" style="margin-bottom:12px">Excel con todos los tickets. Filtra por rango de fechas.</div><div class="grid3" style="margin-bottom:10px"><div class="field" style="margin-bottom:0"><label>Desde</label><input type="date" id="rep-desde"></div><div class="field" style="margin-bottom:0"><label>Hasta</label><input type="date" id="rep-hasta"></div><div class="field" style="margin-bottom:0"><label>&nbsp;</label><button class="btn btn-ok" style="width:100%;justify-content:center" onclick="reporteConsolidado()">⬇ Descargar</button></div></div></div>';
   h+='<div class="card" style="border-left:5px solid #6A2E91"><h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">Guías</h3><div class="muted" style="margin-bottom:12px">Anula guías y descarga el reporte.</div><button class="btn btn-p" onclick="adminVerGuias()">📦 Administrar guías</button> <button class="btn btn-ok" onclick="excelGuias()">⬇ Reporte de guías</button></div>';
@@ -1509,6 +1562,20 @@ function exportarControlVendedores(){
   XLSX.utils.book_append_sheet(wb,wsA,"Avisos items extra");
 
   XLSX.writeFile(wb,"Control_Respuesta_Asesores"+suf+".xlsx");
+}
+function exportarNCSinMatch(){
+  if(!ncSinMatchList.length){ toast("No hay NC sin coincidencia para exportar."); return; }
+  var rows=ncSinMatchList.map(function(x){ return {"FACTURA ORIGINAL (FAC DE LA NC)":x.facOrigen,"CODIGO PRODUCTO":x.codigo,"CANTIDAD NC":x.cant,"TOTAL NC":+x.total.toFixed(2)}; });
+  var ws=XLSX.utils.json_to_sheet(rows); ws["!cols"]=[{wch:26},{wch:20},{wch:12},{wch:12}];
+  var wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,"NC sin factura original");
+  XLSX.writeFile(wb,"NC_sin_factura_original_"+hoyStr()+".xlsx");
+}
+function exportarNCNegativas(){
+  if(!ncNegativasList.length){ toast("No hay líneas negativas para exportar."); return; }
+  var rows=ncNegativasList.map(function(x){ return {"FACTURA":x.factura,"CODIGO PRODUCTO":x.codigo,"DESCRIPCION":x.desc,"CANTIDAD (tras conciliar)":x.cant,"TOTAL (tras conciliar)":+x.total.toFixed(2)}; });
+  var ws=XLSX.utils.json_to_sheet(rows); ws["!cols"]=[{wch:18},{wch:20},{wch:40},{wch:14},{wch:14}];
+  var wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,"Revisar - cantidad negativa");
+  XLSX.writeFile(wb,"NC_revisar_negativas_"+hoyStr()+".xlsx");
 }
 async function actualizarBaseFirebase(){
   if(!fbReady){ toast("Sin Firebase."); return; }
