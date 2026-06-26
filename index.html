@@ -923,7 +923,7 @@ function verTicket(id){
   h+='<div class="kv" style="margin-bottom:12px"><b>Guía</b><span>'+esc(t.guiaNumero||"—")+sobreTag+'</span><b>Cliente</b><span>'+esc(t.razonSocial)+'</span><b>RUC</b><span>'+esc(t.ruc||"")+'</span><b>Factura</b><span>'+esc(t.factura)+'</span><b>Sucursal</b><span>'+esc(sucursalDe(t.factura).nombre)+'</span><b>Emisión</b><span>'+fdate(t.emision)+'</span><b>Fecha ticket</b><span>'+fdate(t.fechaTicket)+'</span><b>Vendedor</b><span>'+esc(t.vendedor)+'</span><b>Motivo</b><span>'+esc(t.motivo)+'</span></div>';
   h+='<div style="overflow-x:auto"><table><thead><tr><th>Código</th><th>Cant.</th><th>Tipo</th><th>Descripción</th><th>Comentario</th><th class="num">Total</th></tr></thead><tbody>'+t.items.map(function(i){ var tp=tipoDeItem(t,i); return '<tr><td>'+esc(i.codigo)+'</td><td>'+i.cantidad+'</td><td>'+(tp==="GARANTIA"?'<span class="tag tag-gar">Garantía</span>':'<span class="tag tag-dev">Devolución</span>')+'</td><td style="max-width:260px">'+esc(i.desc)+'<div class="muted">'+esc(i.sub)+'</div></td><td style="max-width:170px">'+esc(i.comVendedor||"")+'</td><td class="num">'+money(i.total)+'</td></tr>'; }).join("")+'</tbody></table></div>';
   if(t.items.some(function(i){return i.merc;})) h+='<div class="card" style="margin-top:12px"><h3 style="color:var(--navy)">Revisión de mercadería</h3>'+t.items.map(function(i){ return i.merc?'<div style="margin:6px 0">• <b>'+esc(i.codigo)+'</b>: llegaron <b>'+llegoQ(i)+'</b> de '+i.cantidad+' — '+esc(i.merc.com||"sin comentario")+'</div>':''; }).join("")+'</div>';
-  if(t.gar){ h+='<div class="card"><h3 style="color:var(--navy)">Revisión de garantía</h3><div>'+(t.gar.acepta?"GARANTÍA ACEPTADA":"GARANTÍA NO ACEPTADA · Marca: "+esc(t.gar.marca||""))+'</div>'; if(!t.gar.acepta) h+='<div style="margin-top:8px"><button class="btn btn-g btn-sm" onclick="pdfCartaGar(\''+t.id+'\')">Ver carta + informe</button>'+(me&&(rolActivo()==="GARANTIA"||rolActivo()==="ADMIN")?' <button class="btn btn-a btn-sm" onclick="editarGar(\''+t.id+'\')">✎ Editar</button>':'')+'</div>'; h+='</div>'; }
+  if(t.gar){ h+='<div class="card"><h3 style="color:var(--navy)">Revisión de garantía</h3><div>'+(t.gar.acepta?"GARANTÍA ACEPTADA":"GARANTÍA NO ACEPTADA · Marca: "+esc(t.gar.marca||""))+'</div>'; if(t.gar.acepta){ h+=t.items.map(function(i,x){ if(llegoQ(i)>0&&tipoDeItem(t,i)==="GARANTIA"){ var cant=(t.gar.itemsAcep&&t.gar.itemsAcep[x]!==undefined)?t.gar.itemsAcep[x]:llegoQ(i); return '<div style="margin:6px 0">• <b>'+esc(i.codigo)+'</b>: se acepta(n) <b>'+cant+'</b> de '+llegoQ(i)+' que llegaron</div>'; } return ""; }).join("")+'<div style="margin-top:6px;font-weight:600">Total aceptado: '+money(totalAceptado(t))+'</div>'+(me&&(rolActivo()==="GARANTIA"||rolActivo()==="ADMIN")?'<div style="margin-top:8px"><button class="btn btn-a btn-sm" onclick="editarGar(\''+t.id+'\')">✎ Editar cantidades</button></div>':''); } if(!t.gar.acepta) h+='<div style="margin-top:8px"><button class="btn btn-g btn-sm" onclick="pdfCartaGar(\''+t.id+'\')">Ver carta + informe</button>'+(me&&(rolActivo()==="GARANTIA"||rolActivo()==="ADMIN")?' <button class="btn btn-a btn-sm" onclick="editarGar(\''+t.id+'\')">✎ Editar</button>':'')+'</div>'; h+='</div>'; }
   if(t.nc){ h+='<div class="card"><h3 style="color:var(--navy)">Nota de crédito</h3><div>'+(t.nc.hecha?"NC HECHA":"PENDIENTE")+(t.nc.numero?" · N° <b>"+esc(t.nc.numero)+"</b>":"")+'</div>'+(t.nc.pdfKey?'<button class="btn btn-g btn-sm" style="margin-top:8px" onclick="verPdfNC(\''+t.id+'\')">Ver PDF</button>':'')+'</div>'; }
   h+='<div style="text-align:right;margin-top:12px;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap"><button class="btn btn-a" onclick="imprimirTicket(\''+t.id+'\')">🖨 Imprimir</button><button class="btn btn-p" onclick="cerrarModal()">Cerrar</button></div></div></div>';
   $("modal-root").innerHTML=h;
@@ -1045,18 +1045,22 @@ function exportarBandeja(role){
   if(role==="GARANTIA"){
     var rowsG=[];
     lista.forEach(function(t){
-      t.items.forEach(function(i){
+      t.items.forEach(function(i,x){
         if(tipoDeItem(t,i)!=="GARANTIA"||llegoQ(i)<=0) return;
+        var acepta=t.gar&&t.gar.acepta;
+        var cantAcep=acepta?((t.gar.itemsAcep&&t.gar.itemsAcep[x]!==undefined)?t.gar.itemsAcep[x]:llegoQ(i)):0;
+        var fAcep=i.cantidad?cantAcep/i.cantidad:0, totAcep=acepta?i.total*fAcep:0;
         rowsG.push({
           "N° TICKET":t.numero,"FECHA TICKET":fdate(t.fechaTicket),"FECHA REVISION":t.fechas&&t.fechas.garantia?fdate(t.fechas.garantia):"",
           "CLIENTE":t.razonSocial,"RUC":t.ruc||"","FACTURA":t.factura,"SUCURSAL":sucursalDe(t.factura).nombre,"VENDEDOR":t.vendedor,
           "CODIGO":i.codigo,"DESCRIPCION":i.desc,"MARCA":i.sub,"CANT LLEGADA":llegoQ(i),
-          "DECISION":t.gar&&t.gar.acepta?"ACEPTADA":"NO ACEPTADA","COMENTARIO":t.gar&&t.gar.com||"","REVISADO POR":t.gar&&t.gar.por||""
+          "DECISION":acepta?"ACEPTADA":"NO ACEPTADA","CANT ACEPTADA":cantAcep,"TOTAL ACEPTADO":+totAcep.toFixed(2),
+          "COMENTARIO":t.gar&&t.gar.com||"","REVISADO POR":t.gar&&t.gar.por||""
         });
       });
     });
     var wsG=XLSX.utils.json_to_sheet(rowsG.length?rowsG:[{}]);
-    wsG["!cols"]=[{wch:12},{wch:12},{wch:12},{wch:30},{wch:14},{wch:14},{wch:20},{wch:18},{wch:14},{wch:30},{wch:14},{wch:13},{wch:14},{wch:24},{wch:18}];
+    wsG["!cols"]=[{wch:12},{wch:12},{wch:12},{wch:30},{wch:14},{wch:14},{wch:20},{wch:18},{wch:14},{wch:30},{wch:14},{wch:13},{wch:14},{wch:14},{wch:14},{wch:24},{wch:18}];
     XLSX.utils.book_append_sheet(wb,wsG,"Detalle garantías");
     XLSX.writeFile(wb,"Reporte_Garantias"+suf+".xlsx");
     return;
@@ -1202,8 +1206,8 @@ function formGar(t,g){
   var items=t.items.filter(function(i){return llegoQ(i)>0&&tipoDeItem(t,i)==="GARANTIA";}), editando=!!t.gar;
   var h='<div class="modal-bg"><div class="modal"><h2 style="font-size:24px;color:var(--navy)">'+(editando?"Editar":"Revisión de")+' garantía · '+esc(t.numero)+'</h2><div class="muted" style="margin-bottom:14px">'+esc(t.razonSocial)+' · Factura '+esc(t.factura)+'</div>';
   if(t.estado==="MIXTO") h+='<div class="card" style="background:#E3ECF7;border-color:#B9CBE3"><span class="tag tag-dev">MIXTO</span> Este ticket también tiene ítems de <b>devolución</b> que se revisan por separado en la bandeja de devolución.</div>';
-  h+=items.map(function(i){ return '<div class="itm"><b>'+esc(i.codigo)+'</b> · '+esc(i.desc)+'</div>'; }).join("");
-  h+='<div class="grid2"><div class="field"><label>¿Se acepta la garantía?</label><select id="g-ac" onchange="var e=document.getElementById(\'g-rech\');if(e)e.style.display=this.value===\'0\'?\'block\':\'none\'"><option value="">—</option><option value="1"'+(g.acepta===true?" selected":"")+'>SÍ SE ACEPTA</option><option value="0"'+(g.acepta===false?" selected":"")+'>NO SE ACEPTA</option></select></div><div class="field"><label>Comentario</label><input id="g-com" value="'+esc(g.com||"")+'"></div></div>';
+  h+=items.map(function(i){ var x=t.items.indexOf(i), q=llegoQ(i); var ga=(g.itemsAcep&&g.itemsAcep[x]!==undefined)?g.itemsAcep[x]:q; return '<div class="itm"><div style="margin-bottom:8px"><b>'+esc(i.codigo)+'</b> <span class="muted">Llegaron: '+q+' de '+i.cantidad+'</span><div style="font-size:12px">'+esc(i.desc)+'</div>'+(i.comVendedor?'<div class="muted">'+esc(i.comVendedor)+'</div>':'')+'</div><div class="g-cant-wrap" style="display:'+(g.acepta===true?"block":"none")+'"><label>Cantidad aceptada</label><input type="number" min="0" max="'+q+'" value="'+ga+'" id="g-ca-'+x+'" data-max="'+q+'" style="text-align:right;max-width:160px"></div></div>'; }).join("");
+  h+='<div class="grid2"><div class="field"><label>¿Se acepta la garantía?</label><select id="g-ac" onchange="toggleGarAcepta(this.value)"><option value="">—</option><option value="1"'+(g.acepta===true?" selected":"")+'>SÍ SE ACEPTA</option><option value="0"'+(g.acepta===false?" selected":"")+'>NO SE ACEPTA</option></select></div><div class="field"><label>Comentario</label><input id="g-com" value="'+esc(g.com||"")+'"></div></div>';
   h+='<div id="g-rech" style="display:'+(g.acepta===false?"block":"none")+';border-top:2px solid var(--line);padding-top:6px"><div class="sec-title">Carta de respuesta</div><div class="grid3"><div class="field"><label>Marca</label><select id="g-marca">'+MARCAS.map(function(m){ return '<option'+(g.marca===m?" selected":"")+'>'+esc(m)+'</option>'; }).join("")+'</select></div><div class="field"><label>Ciudad</label><input id="g-ciudad" value="'+esc(g.ciudad||"Quito")+'"></div><div class="field"><label>Teléfono</label><input id="g-tel" value="'+esc(g.telefono||"")+'"></div></div>';
   h+='<div class="field"><label>Correo</label><input id="g-email" value="'+esc(g.email||"")+'"></div><div class="field"><label>Detalle técnico</label><textarea id="g-carta" rows="2">'+esc(g.cartaCom||"")+'</textarea></div><div class="field"><label>Párrafo adicional</label><textarea id="g-p2" rows="2">'+esc(g.parrafo2||"")+'</textarea></div>';
   h+='<div class="sec-title">Informe técnico</div><div class="grid3"><div class="field"><label>Contacto</label><input id="i-contacto" value="'+esc(it.contacto||"")+'"></div><div class="field"><label>Dirección</label><input id="i-dir" value="'+esc(it.direccion||"")+'"></div><div class="field"><label>Condición</label><input id="i-cond" value="'+esc(it.condicion||"")+'"></div></div>';
@@ -1212,6 +1216,11 @@ function formGar(t,g){
   h+='<div class="field"><label>Fotos (anexos)</label><input type="file" accept="image/*" multiple onchange="cargarFotos(this)"><div id="g-fotos" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">'+garFotos.map(function(f,ix){ return fotoThumb(f,ix); }).join("")+'</div></div><div class="field"><label>Análisis técnico</label><textarea id="g-analisis" rows="4">'+esc(g.analisisTec||"")+'</textarea></div><div class="field"><label>Más anexos</label><input type="file" accept="image/*" multiple onchange="cargarFotos2(this)"><div id="g-fotos2" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">'+garFotos2.map(function(f,ix){ return fotoThumb2(f,ix); }).join("")+'</div></div><div class="field"><label>Conclusiones</label><textarea id="g-conclu" rows="3">'+esc(g.conclusiones||"")+'</textarea></div><div class="field"><label>Recomendaciones</label><textarea id="g-recom" rows="3">'+esc(g.recomendaciones||"")+'</textarea></div></div>';
   h+='<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:10px"><button class="btn btn-g" onclick="cerrarModal()">Cancelar</button><button class="btn btn-p" onclick="guardarGar(\''+t.id+'\')">'+(editando?"Guardar cambios":"Guardar revisión")+'</button></div></div></div>';
   $("modal-root").innerHTML=h;
+}
+function toggleGarAcepta(v){
+  var rech=document.getElementById("g-rech"); if(rech) rech.style.display=(v==="0")?"block":"none";
+  var wraps=document.querySelectorAll(".g-cant-wrap");
+  for(var i=0;i<wraps.length;i++){ wraps[i].style.display=(v==="1")?"block":"none"; }
 }
 function fotoThumb(f,ix){ return '<div style="position:relative"><img class="thumb" src="'+f.data+'"><button onclick="quitarFoto('+ix+')" style="position:absolute;top:-6px;right:-6px;background:var(--bad);color:#fff;border:none;border-radius:99px;width:20px;height:20px;font-size:11px">✕</button></div>'; }
 function quitarFoto(ix){ garFotos.splice(ix,1); $("g-fotos").innerHTML=garFotos.map(function(f,i){ return fotoThumb(f,i); }).join(""); }
@@ -1239,7 +1248,16 @@ async function guardarGar(id){
   var ahora=new Date().toISOString(), ya=!!t.gar, esMixtoPendiente=(t.estado==="MIXTO");
   t.fechas=t.fechas||{}; if(!ya) t.fechas.garantia=ahora;
   if(ac==="1"){
-    t.gar={acepta:true,com:$("g-com").value,por:me.name,f:t.gar?t.gar.f:ahora};
+    var itemsAcep={}, algunaCant=false;
+    t.items.forEach(function(i,x){
+      if(llegoQ(i)>0&&tipoDeItem(t,i)==="GARANTIA"){
+        var inp=$("g-ca-"+x), max=llegoQ(i);
+        var cant=inp?Math.max(0,Math.min(max,+(inp.value||0))):max;
+        itemsAcep[x]=cant; if(cant>0) algunaCant=true;
+      }
+    });
+    if(!algunaCant){ toast("Indica al menos 1 unidad aceptada, o marca NO SE ACEPTA."); return; }
+    t.gar={acepta:true,itemsAcep:itemsAcep,com:$("g-com").value,por:me.name,f:t.gar?t.gar.f:ahora};
     if(!esMixtoPendiente){ t.estado="NC"; t.nc=t.nc||{hecha:false}; }
     t.historial.push({f:ahora,e:"Garantía aceptada"+(esMixtoPendiente?" (parte de ticket mixto)":" → NC")+" ("+me.name+")"});
   }else{
@@ -1353,11 +1371,14 @@ function itemsAceptados(t){
     }
   });
   if(t.gar&&t.gar.acepta){
-    t.items.forEach(function(i){
+    t.items.forEach(function(i,x){
       var q=llegoQ(i);
       if(q>0&&tipoDeItem(t,i)==="GARANTIA"){
-        var f2=i.cantidad?q/i.cantidad:0;
-        out.push(Object.assign({},i,{cantNC:q,neto:i.neto*f2,iva:i.iva*f2,total:i.total*f2}));
+        var cant=(t.gar.itemsAcep&&t.gar.itemsAcep[x]!==undefined)?t.gar.itemsAcep[x]:q;
+        if(cant>0){
+          var f2=i.cantidad?cant/i.cantidad:0;
+          out.push(Object.assign({},i,{cantNC:cant,neto:i.neto*f2,iva:i.iva*f2,total:i.total*f2}));
+        }
       }
     });
   }
