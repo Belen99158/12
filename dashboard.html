@@ -120,6 +120,12 @@ function sucursalDe(factura){ var m=String(factura||"").match(/(\d{3})/); var co
 function llegoQ(i){ if(!i.merc) return 0; return i.merc.cantLlegada!==undefined?i.merc.cantLlegada:(i.merc.llego?i.cantidad:0); }
 function clienteTipo(t){ var ruc=String(t.ruc||""); if(ruc.length===13) return "Mayorista"; return "Minorista"; }
 function tipoDeItem(t,i){ return i.tipo||(t.motivo==="GARANTIAS"?"GARANTIA":"DEVOLUCION"); }
+function garCantAcep(t,i,x){
+  if(t.gar&&t.gar.itemsAcep&&t.gar.itemsAcep[x]!==undefined) return t.gar.itemsAcep[x];
+  if(t.gar&&t.gar.acepta===true) return llegoQ(i);   /* compat: tickets viejos aceptados completos */
+  return 0;
+}
+function garCantRech(t,i,x){ return Math.max(0,llegoQ(i)-garCantAcep(t,i,x)); }
 function itemsAceptados(t){
   var out=[];
   t.items.forEach(function(i){
@@ -128,12 +134,15 @@ function itemsAceptados(t){
       out.push(Object.assign({},i,{cantNC:i.dev.cantAcep,neto:i.neto*f,iva:i.iva*f,total:i.total*f}));
     }
   });
-  if(t.gar&&t.gar.acepta){
-    t.items.forEach(function(i){
+  if(t.gar){
+    t.items.forEach(function(i,x){
       var q=llegoQ(i);
       if(q>0&&tipoDeItem(t,i)==="GARANTIA"){
-        var f2=i.cantidad?q/i.cantidad:0;
-        out.push(Object.assign({},i,{cantNC:q,neto:i.neto*f2,iva:i.iva*f2,total:i.total*f2}));
+        var cant=garCantAcep(t,i,x);
+        if(cant>0){
+          var f2=i.cantidad?cant/i.cantidad:0;
+          out.push(Object.assign({},i,{cantNC:cant,neto:i.neto*f2,iva:i.iva*f2,total:i.total*f2}));
+        }
       }
     });
   }
