@@ -124,9 +124,9 @@ var LOGOS_MARCA={"PERMATEX":{"d":"data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQA
 function logoMarca(nombre){ try{ var k=normNombre(nombre); var o=LOGOS_MARCA[k]; return o?{data:o.d,w:o.w,h:o.h}:null; }catch(e){ return null; } }
 /* ===== CONFIG ===== */
 var CSV_URLS=[
-  "https://docs.google.com/spreadsheets/d/19WwKz-OjCCylK-crbwRu61d3A2q4ophHbRNAguyUtl8/export?format=csv&gid=1814361639",
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vTpOv2PFreipcoBc7ry-bD3QSRbqD49nQicajrI86pDAuUuQkbPoiszwxmt2HQbodo4zAlHI2rvknPk/pub?gid=1814361639&single=true&output=csv",
   "https://docs.google.com/spreadsheets/d/19WwKz-OjCCylK-crbwRu61d3A2q4ophHbRNAguyUtl8/gviz/tq?tqx=out:csv&gid=1814361639",
-  "https://docs.google.com/spreadsheets/d/e/2PACX-1vTpOv2PFreipcoBc7ry-bD3QSRbqD49nQicajrI86pDAuUuQkbPoiszwxmt2HQbodo4zAlHI2rvknPk/pub?gid=1814361639&single=true&output=csv"
+  "https://docs.google.com/spreadsheets/d/19WwKz-OjCCylK-crbwRu61d3A2q4ophHbRNAguyUtl8/export?format=csv&gid=1814361639"
 ];
 var firebaseConfig={apiKey:"AIzaSyDI_Xszfjw9f_O1CsL0VC8F_dNtWGEvmo8",authDomain:"devoluciones-y-garantias.firebaseapp.com",databaseURL:"https://devoluciones-y-garantias-default-rtdb.firebaseio.com",projectId:"devoluciones-y-garantias",storageBucket:"devoluciones-y-garantias.firebasestorage.app",messagingSenderId:"1009454788938",appId:"1:1009454788938:web:aa7dc86d838f0c6d2051b3"};
 
