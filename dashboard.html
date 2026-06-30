@@ -114,7 +114,7 @@ function parseFecha(d){
 /* Días entre dos fechas (devuelve null si falta alguna o el orden es inválido) */
 function diasEntre(a,b){ var x=parseFecha(a), y=parseFecha(b); if(!x||!y) return null; var d=(y-x)/86400000; return (isFinite(d)&&d>=0)?d:null; }
 /* Fecha de la respuesta de revisión: devolución o garantía, la que exista */
-function fechaRevision(t){ return (t.fechas&&(t.fechas.devolucion||t.fechas.garantia))||null; }
+function fechaRevision(t){ return (t.fechas&&(t.fechas.devolucion||t.fechas.garantia||t.fechas.dacionAutorizacion))||null; }
 function arr(v){ if(Array.isArray(v)) return v; if(v&&typeof v==="object") return Object.keys(v).map(function(k){return v[k];}); return []; }
 function sucursalDe(factura){ var m=String(factura||"").match(/(\d{3})/); var cod=m?m[1]:""; return {codigo:cod,nombre:SUCURSALES[cod]||(cod?"Sucursal "+cod:"Sin sucursal")}; }
 function llegoQ(i){ if(!i.merc) return 0; return i.merc.cantLlegada!==undefined?i.merc.cantLlegada:(i.merc.llego?i.cantidad:0); }
@@ -360,12 +360,13 @@ function facturasEnRango(){
 /* Devuelve {emiTicket, ticketMerc, mercRev, revNC, ciclo} por ticket, null donde falte fecha */
 function diasTicket(t){
   var rev=fechaRevision(t);
+  var fin=(t.fechas&&t.fechas.nc)||null;
   return {
     emiTicket: diasEntre(t.emision, t.fechaTicket),
     ticketMerc: diasEntre(t.fechaTicket, t.fechas&&t.fechas.mercaderia),
     mercRev: diasEntre(t.fechas&&t.fechas.mercaderia, rev),
-    revNC: diasEntre(rev, t.fechas&&t.fechas.nc),
-    ciclo: diasEntre(t.fechaTicket, t.fechas&&t.fechas.nc)
+    revNC: diasEntre(rev, fin),
+    ciclo: diasEntre(t.fechaTicket, fin)
   };
 }
 function acumProm(acc,key,val){ if(val==null) return; if(!acc[key]) acc[key]={s:0,n:0}; acc[key].s+=val; acc[key].n++; }
@@ -405,12 +406,12 @@ function render(){
   var tks=ticketsFiltrados();
   var datos=datosConMonto(tks);
   var totalDevuelto=0, totalProductos=0, devAprobadoG=0, devProcesoG=0;
-  var acepGarantia=0, acepDevolucion=0, nAcept=0;
+  var acepGarantia=0, acepDevolucion=0, acepDacion=0, nAcept=0;
   datos.forEach(function(d){
     var t=d.t;
     if(d.esAceptado){
       totalDevuelto+=d.aceptado; devAprobadoG+=d.aceptado; nAcept++;
-      if(t.motivo==="GARANTIAS") acepGarantia+=d.aceptado; else acepDevolucion+=d.aceptado;
+      if(t.motivo==="GARANTIAS") acepGarantia+=d.aceptado; else if(t.motivo==="DACION EN PAGOS") acepDacion+=d.aceptado; else acepDevolucion+=d.aceptado;
       totalProductos+=itemsAceptados(t).reduce(function(a,i){return a+(i.cantNC||0);},0);
     } else { devProcesoG+=d.totalTicket; }
   });
@@ -495,12 +496,12 @@ function render(){
   h+='<div class="kpi"><div class="disp" style="color:var(--rojo)">'+money(devAprobadoG)+'</div><div class="lbl">Monto aprobado (NC)</div></div>';
   h+='<div class="kpi"><div class="disp" style="color:var(--navy)">'+money(acepDevolucion)+'</div><div class="lbl">Devoluciones aceptadas</div></div>';
   h+='<div class="kpi"><div class="disp" style="color:#6A2E91">'+money(acepGarantia)+'</div><div class="lbl">Garantías aceptadas</div></div>';
-  h+='<div class="kpi"><div class="disp" style="color:var(--ink)">'+nAcept+'</div><div class="lbl">Tickets aprobados (NC)</div></div>';
+  h+='<div class="kpi"><div class="disp" style="color:#1E7F4F">'+money(acepDacion)+'</div><div class="lbl">Dación en pagos (parte de NC)</div></div>';
   h+='</div>';
-  /* Cuadre: Devoluciones aceptadas + Garantías aceptadas = Total aprobado (NC) */
-  var sumaDesglose=acepDevolucion+acepGarantia;
+  /* Cuadre: Devoluciones aceptadas + Garantías aceptadas + Dación en pagos = Total aprobado (NC) */
+  var sumaDesglose=acepDevolucion+acepGarantia+acepDacion;
   var cuadra=Math.abs(sumaDesglose-devAprobadoG)<0.01;
-  h+='<div class="card" style="border-left:5px solid '+(cuadra?"var(--ok)":"var(--rojo)")+'"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:14px"><b>'+(cuadra?"✓ Cuadre correcto:":"⚠ Descuadre:")+'</b><span>Devoluciones aceptadas '+money(acepDevolucion)+'</span><span>+</span><span>Garantías aceptadas '+money(acepGarantia)+'</span><span>=</span><b>'+money(sumaDesglose)+'</b><span class="muted">vs Total aprobado por NC '+money(devAprobadoG)+'</span></div><div class="muted" style="margin-top:6px">Estos importes corresponden únicamente a los registros aceptados (los mismos que figuran en la pestaña de Notas de crédito del sistema). Tickets en proceso o no aceptados no se suman.</div></div>';
+  h+='<div class="card" style="border-left:5px solid '+(cuadra?"var(--ok)":"var(--rojo)")+'"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:14px"><b>'+(cuadra?"✓ Cuadre correcto:":"⚠ Descuadre:")+'</b><span>Devoluciones '+money(acepDevolucion)+'</span><span>+</span><span>Garantías '+money(acepGarantia)+'</span><span>+</span><span>Dación en pagos '+money(acepDacion)+'</span><span>=</span><b>'+money(sumaDesglose)+'</b><span class="muted">vs Total aprobado (NC) '+money(devAprobadoG)+'</span></div><div class="muted" style="margin-top:6px">Estos importes corresponden únicamente a los registros aceptados (los mismos que figuran en la pestaña de Notas de crédito del sistema, incluyendo la dación en pagos ya autorizada). Tickets en proceso o no aceptados no se suman.</div></div>';
   h+='<div class="grid4" style="margin-top:2px">';
   h+='<div class="kpi"><div class="disp" style="color:var(--navy)">'+totalProductos.toLocaleString("es-EC")+'</div><div class="lbl">Artículos aprobados</div></div>';
   h+='<div class="kpi"><div class="disp" style="color:var(--ink)">'+nTickets+'</div><div class="lbl">Tickets generados (devol./garantía)</div></div>';
@@ -592,7 +593,7 @@ function render(){
 
   h+='<div class="card"><div class="sec-title">Devoluciones por vendedor <span class="muted" style="font-weight:400">(clic para filtrar)</span></div><div style="max-height:300px;overflow:auto"><table><thead><tr><th>Vendedor</th><th class="num">Monto devuelto</th><th class="num">% del total</th></tr></thead><tbody>'+ven.map(function(v){ var sel=filtroVendedor===v.k; return '<tr style="cursor:pointer;'+(sel?"background:#FFF1F1":"")+'" onclick="setFiltro(\'vendedor\',\''+esc(v.k)+'\')"><td>'+(sel?"▶ ":"")+esc(v.k)+'</td><td class="num">'+money(v.v)+'</td><td class="num">'+(totalDevuelto>0?(v.v/totalDevuelto*100).toFixed(1):0)+'%</td></tr>'; }).join("")+'</tbody></table></div></div>';
   h+='<div class="card"><div class="sec-title">Devoluciones por sucursal</div><div style="overflow-x:auto"><table><thead><tr><th>Sucursal</th><th class="num">Monto devuelto</th><th class="num">% del total</th></tr></thead><tbody>'+suc.map(function(s){ return '<tr><td>'+esc(s.k)+'</td><td class="num">'+money(s.v)+'</td><td class="num">'+(totalDevuelto>0?(s.v/totalDevuelto*100).toFixed(1):0)+'%</td></tr>'; }).join("")+'</tbody></table></div></div>';
-  h+='<div class="card"><div class="sec-title">Impacto económico (aprobado)</div><div style="padding:8px 0"><div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line)"><span class="muted">Total aprobado (NC) en el periodo</span><b style="color:var(--rojo)">'+money(devAprobadoG)+'</b></div><div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line)"><span class="muted">› Devoluciones aceptadas</span><b>'+money(acepDevolucion)+'</b></div><div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line)"><span class="muted">› Garantías aceptadas</span><b>'+money(acepGarantia)+'</b></div><div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line)"><span class="muted">Tickets aprobados (NC)</span><b>'+nAcept+'</b></div><div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line)"><span class="muted">Promedio por ticket aprobado</span><b>'+money(nAcept?devAprobadoG/nAcept:0)+'</b></div><div style="display:flex;justify-content:space-between;padding:8px 0"><span class="muted">Artículos aprobados</span><b>'+totalProductos.toLocaleString("es-EC")+'</b></div></div></div>';
+  h+='<div class="card"><div class="sec-title">Impacto económico (aprobado)</div><div style="padding:8px 0"><div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line)"><span class="muted">Total aprobado (NC) en el periodo</span><b style="color:var(--rojo)">'+money(devAprobadoG)+'</b></div><div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line)"><span class="muted">› Devoluciones aceptadas</span><b>'+money(acepDevolucion)+'</b></div><div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line)"><span class="muted">› Garantías aceptadas</span><b>'+money(acepGarantia)+'</b></div><div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line)"><span class="muted">› Dación en pagos (parte de NC)</span><b>'+money(acepDacion)+'</b></div><div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line)"><span class="muted">Tickets aprobados</span><b>'+nAcept+'</b></div><div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line)"><span class="muted">Promedio por ticket aprobado</span><b>'+money(nAcept?devAprobadoG/nAcept:0)+'</b></div><div style="display:flex;justify-content:space-between;padding:8px 0"><span class="muted">Artículos aprobados</span><b>'+totalProductos.toLocaleString("es-EC")+'</b></div></div></div>';
 
   if(nTickets===0){ h='<div class="card"><div class="empty"><div class="big">Sin datos en este periodo</div>Ajusta el rango de fechas o crea tickets en el sistema.</div></div>'+'<div class="card"><div class="grid4" style="align-items:end"><div><label>Desde</label><input type="date" id="f-desde" value="'+desde+'"></div><div><label>Hasta</label><input type="date" id="f-hasta" value="'+hasta+'"></div><div><button class="btn btn-p" style="width:100%;justify-content:center" onclick="aplicarFiltro()">Aplicar filtro</button></div><div><button class="btn btn-g" style="width:100%;justify-content:center" onclick="desde=\'\';hasta=\'\';render()">Limpiar</button></div></div></div>'; }
 
@@ -655,7 +656,7 @@ function exportarExcel(){
   /* ===================== HOJA: DATOS TICKETS (para tiempos) ===================== */
   var tRows=datos.map(function(d){
     var t=d.t, dd=diasTicket(t), rev=fechaRevision(t);
-    var estadoTxt=(t.estado==="NC"&&t.nc&&t.nc.hecha)?"APROBADO (NC hecha)":(t.estado==="NC"?"APROBADO (NC pendiente)":"EN PROCESO");
+    var estadoTxt=(t.estado==="NC"&&t.nc&&t.nc.hecha)?"APROBADO (NC hecha)":(t.estado==="NC"?"APROBADO (NC pendiente)":(t.estado==="DACION_ADMIN")?"EN PROCESO (Dación: por autorizar)":"EN PROCESO");
     return {
       "N° TICKET":t.numero,"VENDEDOR":t.vendedor,"SUCURSAL":d.suc.nombre,"MOTIVO":t.motivo,"ESTADO":estadoTxt,
       "EMISION":emiDe(t),"FECHA TICKET":fechaDMY(t.fechaTicket),
