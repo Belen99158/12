@@ -150,7 +150,7 @@ var SUPER_ADMINS=["BELEN MANZANO","TANNIA BASSANTES"];
 var VISTAS=[{role:"ASESOR",label:"Asesor"},{role:"MERCADERIA",label:"Rev. Mercadería"},{role:"DEVOLUCION",label:"Rev. Devolución"},{role:"GARANTIA",label:"Rev. Garantía"},{role:"NC",label:"Notas de crédito"},{role:"ADMIN",label:"Administrativo"}];
 var MOTIVOS=["DACION EN PAGOS","GESTION COMERCIAL CLIENTE VENDEDOR","LOGISTICA BODEGA","DEVOLUCION","GARANTIAS","INCIDENCIA GESTIONES ERRONEAS IMPORTACIONES"];
 var MARCAS=["PERMATEX","ORIGINAL","VALEO","MAHLE","ABRO","LUBA AUTOPARTS","SEIWA","NPR","SABO","APLIC","JCC","MAGNETI MARELLI","AUTOTOP","GMP","AISIN","AMC","FTE","YSK","GEN","SCHADEK","OTRO"];
-var ESTADO_LABEL={MERCADERIA:"En revisión mercadería",DEVOLUCION:"En revisión devolución",GARANTIA:"En revisión garantía",MIXTO:"Mixto: devolución + garantía",NC:"En notas de crédito",NO_LLEGO:"No llegó",DEV_RECHAZADA:"Devolución no aceptada",GAR_RECHAZADA:"Garantía no aceptada",RECHAZADA:"Devolución y garantía no aceptadas",GUIA_INCORRECTA:"Devuelto por guía incorrecta",ELIMINADO:"Eliminado"};
+var ESTADO_LABEL={MERCADERIA:"En revisión mercadería",DEVOLUCION:"En revisión devolución",GARANTIA:"En revisión garantía",MIXTO:"Mixto: devolución + garantía",NC:"En notas de crédito",NO_LLEGO:"No llegó",DEV_RECHAZADA:"Devolución no aceptada",GAR_RECHAZADA:"Garantía no aceptada",RECHAZADA:"Devolución y garantía no aceptadas",GUIA_INCORRECTA:"Devuelto por guía incorrecta",ELIMINADO:"Eliminado",DACION_ADMIN:"En autorización administrativa (dación en pagos)",DACION:"Dación en pagos",DACION_RECHAZADA:"Dación en pagos no aceptada"};
 var MESES=["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 var SUCURSALES={"004":"AV. EL REY","002":"BODEGA","003":"AV. 6 DE DICIEMBRE","007":"AGENCIA LA PRENSA","006":"AGENCIA TUMBACO"};
 
@@ -445,12 +445,17 @@ function findGuia(id){ var g=state.guias||[]; for(var i=0;i<g.length;i++){ if(g[
 function sucursalDe(factura){ var m=String(factura||"").match(/(\d{3})/); var cod=m?m[1]:""; return {codigo:cod,nombre:SUCURSALES[cod]||(cod?"Sucursal "+cod:"Sin sucursal")}; }
 function codigosUsados(factura){ var s={}; state.tickets.forEach(function(t){ if(t.factura===factura&&t.estado!=="ELIMINADO") t.items.forEach(function(i){ s[i.codigo]=t.numero; }); }); return s; }
 function tipoDeItem(t,i){ return i.tipo||(t.motivo==="GARANTIAS"?"GARANTIA":"DEVOLUCION"); }
-/* Suma, por código, la cantidad YA devuelta en tickets activos (no ELIMINADO) de esa factura, y guarda en qué tickets se devolvió. Permite reutilizar el mismo código en varios tickets controlando el saldo. */
+/* Suma, por código, la cantidad YA devuelta en tickets activos (no ELIMINADO) de esa factura, y guarda en qué tickets se devolvió. Permite reutilizar el mismo código en varios tickets controlando el saldo.
+   Soporta tickets de Dación en pagos que cubren VARIAS facturas (t.facturas / i.factura); para tickets antiguos de una sola factura, cae de vuelta a t.factura tal como siempre. */
 function devolucionesPorCodigo(factura){
   var cant={}, nums={};
   state.tickets.forEach(function(t){
-    if(t.factura!==factura||t.estado==="ELIMINADO") return;
+    if(t.estado==="ELIMINADO") return;
+    var facturasTicket=(t.facturas&&t.facturas.length)?t.facturas:[t.factura];
+    if(facturasTicket.indexOf(factura)<0) return;
     t.items.forEach(function(i){
+      var itFact=i.factura||t.factura;
+      if(itFact!==factura) return;
       cant[i.codigo]=(cant[i.codigo]||0)+(+i.cantidad||0);
       (nums[i.codigo]=nums[i.codigo]||[]).push(t.numero);
     });
@@ -463,6 +468,9 @@ function tagFor(t){
   if(t.estado==="MERCADERIA") return '<span class="tag tag-merc">En mercadería</span>';
   if(t.estado==="DEVOLUCION") return '<span class="tag tag-dev">En devolución</span>';
   if(t.estado==="GARANTIA") return '<span class="tag tag-gar">En garantía</span>';
+  if(t.estado==="DACION_ADMIN") return '<span class="tag tag-merc">Dación: por autorizar</span>';
+  if(t.estado==="DACION") return '<span class="tag tag-nc">Dación en pagos'+(t.dacion&&t.dacion.hecha?" · liquidada":" · por liquidar")+'</span>';
+  if(t.estado==="DACION_RECHAZADA") return '<span class="tag tag-bad">Dación no aceptada</span>';
   if(t.estado==="MIXTO") return '<span class="tag tag-gar">Mixto</span> '+(t.devPendiente?'<span class="tag tag-dev">Falta devolución</span>':'<span class="tag tag-nc">Devolución OK</span>')+' '+(t.garPendiente?'<span class="tag tag-gar">Falta garantía</span>':'<span class="tag tag-nc">Garantía OK</span>');
   if(t.estado==="NC") return '<span class="tag tag-nc">Notas de crédito'+(t.nc&&t.nc.hecha?" · NC hecha":" · pendiente")+'</span>';
   if(t.estado==="NO_LLEGO") return '<span class="tag tag-bad">No llegó</span>';
@@ -622,13 +630,14 @@ function abrirNuevo(){
     $("modal-root").innerHTML='<div class="modal-bg"><div class="modal" style="max-width:520px"><h2 style="font-size:24px;color:var(--bad);margin-bottom:8px">No tienes guías activas hoy</h2><div class="muted" style="margin-bottom:16px">Para crear un ticket necesitas una <b>guía activa registrada hoy</b> a tu nombre. Solicita al área de Notas de Crédito que registre tu guía.</div><div style="text-align:right"><button class="btn btn-p" onclick="cerrarModal()">Entendido</button></div></div></div>';
     return;
   }
-  nuevo={razon:"",factura:"",motivo:"",items:[],lineas:[],cant:{},com:{}}; filtroItems="";
+  nuevo={razon:"",factura:"",motivo:"",items:[],lineas:[],cant:{},com:{},facturas:[],facturasDisponibles:[],externos:[]}; filtroItems="";
   $("modal-root").innerHTML='<div class="modal-bg"><div class="modal"><h2 style="font-size:26px;color:var(--navy);margin-bottom:4px">Nuevo ticket</h2><div class="muted" style="margin-bottom:18px">Fecha: <b>'+fdate(new Date())+'</b> · Vendedor: <b>'+esc(me.name)+'</b></div>'+
     (pideGuia?'<div class="card" style="background:#FFF1F1;border-color:#E8B0AB"><div class="field" style="margin-bottom:0"><label>⭐ Guía (obligatoria · solo tus guías activas de hoy)</label><select id="n-guia"><option value="">— Selecciona tu guía —</option>'+gd.map(function(g){ return '<option value="'+g.id+'">'+esc(g.numero)+' — '+fdate(g.fechaCreacion)+'</option>'; }).join("")+'</select></div></div>':'')+
-    '<div class="grid3"><div class="field ac-wrap"><label>Razón social</label><input id="n-razon" placeholder="Escribe mín. 2 letras…" autocomplete="off" oninput="buscarRazon()" onfocus="buscarRazon()"><div class="ac-list" id="n-razon-list"></div></div><div class="field"><label>Factura</label><select id="n-fact" onchange="nFact()" disabled><option value="">—</option></select></div><div class="field"><label>Emisión</label><input id="n-emi" disabled></div></div>'+
+    '<div class="grid3"><div class="field ac-wrap"><label>Razón social</label><input id="n-razon" placeholder="Escribe mín. 2 letras…" autocomplete="off" oninput="buscarRazon()" onfocus="buscarRazon()"><div class="ac-list" id="n-razon-list"></div></div><div class="field" id="n-fact-wrap"><label>Factura</label><select id="n-fact" onchange="nFact()" disabled><option value="">—</option></select></div><div class="field"><label>Emisión</label><input id="n-emi" disabled></div></div>'+
     '<div id="n-fact-msg" class="muted" style="margin:-6px 0 10px"></div>'+
-    '<div class="grid2"><div class="field"><label>Motivo</label><select id="n-motivo" onchange="nNum()"><option value="">— Seleccionar —</option>'+MOTIVOS.map(function(m){ return '<option>'+esc(m)+'</option>'; }).join("")+'</select></div><div class="field"><label>Número de ticket</label><input id="n-num" disabled placeholder="Se asigna según el motivo"></div></div>'+
-    '<div id="n-aviso-dias"></div><div id="n-items"></div>'+
+    '<div class="card" id="n-fact-multi-wrap" style="display:none;background:#FFF1F1;border-color:#E8B0AB"><label style="margin-bottom:6px">⭐ Facturas a saldar (Dación en pagos · puedes elegir varias)</label><div class="muted" style="margin-bottom:8px">Selecciona todas las facturas del cliente que se van a saldar con esta entrega de mercadería.</div><div id="n-fact-multi-list" style="max-height:220px;overflow:auto"></div></div>'+
+    '<div class="grid2"><div class="field"><label>Motivo</label><select id="n-motivo" onchange="nMotivoChange()"><option value="">— Seleccionar —</option>'+MOTIVOS.map(function(m){ return '<option>'+esc(m)+'</option>'; }).join("")+'</select></div><div class="field"><label>Número de ticket</label><input id="n-num" disabled placeholder="Se asigna según el motivo"></div></div>'+
+    '<div id="n-aviso-dias"></div><div id="n-items"></div><div id="n-externos-wrap"></div>'+
     '<div class="card" style="background:#F0F3F7;margin-top:14px"><label style="display:flex;align-items:center;gap:8px;text-transform:none;font-size:14px;color:var(--ink);letter-spacing:0;cursor:pointer"><input type="checkbox" id="n-sobre" style="width:auto"> 📨 En esta guía también se envió un <b>sobre</b></label></div>'+
     '<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px"><button class="btn btn-g" onclick="cerrarModal()">Cancelar</button><button class="btn btn-p" onclick="guardarTicket()">Guardar ticket</button></div></div></div>';
 }
@@ -677,6 +686,8 @@ function nRazon(){
     }
   }
   $("n-emi").value=""; $("n-items").innerHTML=""; filtroItems="";
+  nuevo.facturasDisponibles=facts; nuevo.facturas=[]; nuevo.factura=""; nuevo.lineas=[];
+  aplicarModoMotivo();
 }
 function nFact(){
   var f=$("n-fact").value; nuevo.factura=f;
@@ -695,7 +706,8 @@ function avisoDias30(emision){
 function renderItemsNuevo(){
   if(!nuevo.lineas||!nuevo.lineas.length){ $("n-items").innerHTML=""; return; }
   nuevo.cant=nuevo.cant||{}; nuevo.com=nuevo.com||{};
-  $("n-items").innerHTML='<div class="srch-bar"><span>🔍</span><input type="text" id="n-srch" placeholder="Buscar código o descripción dentro de la factura…" autocomplete="off" oninput="filtrarItemsNuevo()"><button class="btn btn-sm btn-g" id="n-srch-clr" style="display:none" onclick="limpiarBusquedaItems()">✕</button></div><div style="overflow-x:auto"><table><thead><tr><th>Código</th><th>Descripción</th><th class="num">Cant. fact.</th><th style="width:84px">Cantidad</th><th style="min-width:160px">Comentario</th><th class="num">Total</th></tr></thead><tbody id="n-tbody"></tbody></table></div><div class="muted" style="margin-top:4px" id="n-count"></div>';
+  var factCol=esDacion();
+  $("n-items").innerHTML='<div class="srch-bar"><span>🔍</span><input type="text" id="n-srch" placeholder="Buscar código o descripción dentro de la factura…" autocomplete="off" oninput="filtrarItemsNuevo()"><button class="btn btn-sm btn-g" id="n-srch-clr" style="display:none" onclick="limpiarBusquedaItems()">✕</button></div><div style="overflow-x:auto"><table><thead><tr>'+(factCol?'<th>Factura</th>':'')+'<th>Código</th><th>Descripción</th><th class="num">Cant. fact.</th><th style="width:84px">Cantidad</th><th style="min-width:160px">Comentario</th><th class="num">Total</th></tr></thead><tbody id="n-tbody"></tbody></table></div><div class="muted" style="margin-top:4px" id="n-count"></div>';
   var si=$("n-srch"); if(si) si.value=filtroItems;
   var clr=$("n-srch-clr"); if(clr) clr.style.display=filtroItems?"":"none";
   renderItemsBody();
@@ -719,16 +731,19 @@ function limpiarBusquedaItems(){ capturarItemsNuevo(); filtroItems=""; var si=$(
 function totalLinea(r,q){ q=Math.max(0,Math.min(r.cant,+q||0)); var f=r.cant?q/r.cant:0; return r.total*f; }
 function renderItemsBody(){
   var tbody=$("n-tbody"); if(!tbody) return;
-  var dev=devolucionesPorCodigo(nuevo.factura), q=filtroItems.trim().toUpperCase(), lineas=nuevo.lineas;
+  var factCol=esDacion();
+  var devCache={}; function devFor(f){ if(!devCache[f]) devCache[f]=devolucionesPorCodigo(f); return devCache[f]; }
+  var q=filtroItems.trim().toUpperCase(), lineas=nuevo.lineas;
   nuevo.restante=nuevo.restante||{};
   tbody.innerHTML=""; var shown=0;
   lineas.forEach(function(r,i){
+    var dev=devFor(r.factura);
     var yaDev=dev.cant[r.codigo]||0;
     var creditoExt=r.creditoAplicado||0;
     var restante=Math.max(0,r.cant-yaDev);
     nuevo.restante[i]=restante;
     var agotado=restante<=0;
-    var txt=(r.codigo+" "+r.desc+" "+r.sub).toUpperCase();
+    var txt=(r.codigo+" "+r.desc+" "+r.sub+" "+r.factura).toUpperCase();
     if(q&&txt.indexOf(q)<0) return;
     shown++;
     var qvRaw=(nuevo.cant[i]!==undefined&&nuevo.cant[i]!=="")?+nuevo.cant[i]:0;
@@ -743,15 +758,95 @@ function renderItemsBody(){
     }
     var cantCol=r.cant+((yaDev>0||creditoExt>0)?'<div class="muted" style="font-size:11px">disp. '+restante+'</div>':'');
     var tr=document.createElement("tr");
-    tr.innerHTML='<td><b>'+esc(r.codigo)+'</b>'+info+'</td><td style="max-width:280px;font-size:12px">'+esc(r.desc)+'<div class="muted">'+esc(r.sub)+'</div></td><td class="num">'+cantCol+'</td><td><input type="number" min="0" max="'+restante+'" value="'+esc(qv)+'" id="q-'+i+'" oninput="nCalc('+i+')" style="text-align:right" '+(agotado?"disabled":"")+'></td><td><input id="c-'+i+'" value="'+esc(cv)+'" placeholder="Comentario" oninput="nCom('+i+')" '+(agotado?"disabled":"")+'></td><td class="num" id="tt-'+i+'">'+money(totalLinea(r,qv))+'</td>';
+    tr.innerHTML=(factCol?'<td style="font-size:12px">'+esc(r.factura)+'</td>':'')+'<td><b>'+esc(r.codigo)+'</b>'+info+'</td><td style="max-width:280px;font-size:12px">'+esc(r.desc)+'<div class="muted">'+esc(r.sub)+'</div></td><td class="num">'+cantCol+'</td><td><input type="number" min="0" max="'+restante+'" value="'+esc(qv)+'" id="q-'+i+'" oninput="nCalc('+i+')" style="text-align:right" '+(agotado?"disabled":"")+'></td><td><input id="c-'+i+'" value="'+esc(cv)+'" placeholder="Comentario" oninput="nCom('+i+')" '+(agotado?"disabled":"")+'></td><td class="num" id="tt-'+i+'">'+money(totalLinea(r,qv))+'</td>';
     tbody.appendChild(tr);
   });
   if($("n-count")) $("n-count").textContent=q?("Mostrando "+shown+" de "+lineas.length+" productos"):(lineas.length+" productos en esta factura");
-  if(shown===0&&q) tbody.innerHTML='<tr><td colspan="6" class="muted" style="text-align:center;padding:20px">Sin resultados</td></tr>';
+  if(shown===0&&q) tbody.innerHTML='<tr><td colspan="'+(factCol?7:6)+'" class="muted" style="text-align:center;padding:20px">Sin resultados</td></tr>';
 }
 function nCalc(i){ var r=nuevo.lineas[i]; if(!r) return; var max=(nuevo.restante&&nuevo.restante[i]!==undefined)?nuevo.restante[i]:r.cant; var el=$("q-"+i); var q=Math.max(0,Math.min(max,+(el?el.value:0))); if(el) el.value=q; nuevo.cant=nuevo.cant||{}; nuevo.cant[i]=q; if($("tt-"+i)) $("tt-"+i).textContent=money(totalLinea(r,q)); }
 function nCom(i){ var el=$("c-"+i); if(!el) return; nuevo.com=nuevo.com||{}; nuevo.com[i]=el.value; }
 function nNum(){ var m=$("n-motivo").value; nuevo.motivo=m; if(!m){ $("n-num").value=""; return; } var gar=m==="GARANTIAS"; var nx=gar?state.seq5200+1:state.seq3200+1; $("n-num").value=(gar?"5200":"3200")+"-"+String(nx).padStart(4,"0"); }
+/* ===== DACIÓN EN PAGOS: facturas múltiples + mercadería externa ===== */
+function esDacion(){ return !!(nuevo&&nuevo.motivo==="DACION EN PAGOS"); }
+function nMotivoChange(){ capturarItemsNuevo(); nNum(); aplicarModoMotivo(); }
+function aplicarModoMotivo(){
+  var singleWrap=$("n-fact-wrap"), multiWrap=$("n-fact-multi-wrap");
+  if(!singleWrap||!multiWrap) return;
+  if(esDacion()){
+    singleWrap.style.display="none"; multiWrap.style.display="block";
+    nuevo.facturas=nuevo.facturas||[];
+    if(nuevo.facturas.length===0&&nuevo.factura) nuevo.facturas=[nuevo.factura];
+    renderFacturasMulti();
+    recalcularLineasMulti();
+  }else{
+    singleWrap.style.display="block"; multiWrap.style.display="none";
+    if(nuevo.facturas&&nuevo.facturas.length){
+      nuevo.facturas=[]; nuevo.factura=""; nuevo.lineas=[]; nuevo.cant={}; nuevo.com={};
+      var fe=$("n-fact"); if(fe) fe.value=""; var emiEl=$("n-emi"); if(emiEl) emiEl.value="";
+      renderItemsNuevo();
+    }
+  }
+  renderExternos();
+}
+function renderFacturasMulti(){
+  var cont=$("n-fact-multi-list"); if(!cont) return;
+  var facts=nuevo.facturasDisponibles||[];
+  if(!nuevo.razon){ cont.innerHTML='<div class="muted">Primero escribe y elige la razón social.</div>'; return; }
+  if(facts.length===0){ cont.innerHTML='<div class="muted">Esta razón social no tiene facturas con saldo disponible.</div>'; return; }
+  cont.innerHTML=facts.map(function(f){ var checked=(nuevo.facturas||[]).indexOf(f)>=0; return '<label style="display:flex;align-items:center;gap:8px;padding:6px 2px;border-bottom:1px solid var(--line);font-size:13px;font-weight:400;text-transform:none;letter-spacing:0;cursor:pointer"><input type="checkbox" style="width:auto" value="'+esc(f)+'" '+(checked?"checked":"")+' onchange="toggleFacturaMulti(this)"> '+esc(f)+'</label>'; }).join("");
+}
+function toggleFacturaMulti(el){
+  capturarItemsNuevo();
+  nuevo.facturas=nuevo.facturas||[];
+  var v=el.value;
+  if(el.checked){ if(nuevo.facturas.indexOf(v)<0) nuevo.facturas.push(v); }
+  else { nuevo.facturas=nuevo.facturas.filter(function(x){return x!==v;}); }
+  recalcularLineasMulti();
+}
+function recalcularLineasMulti(){
+  var razon=nuevo.razon, rows=[];
+  (nuevo.facturas||[]).forEach(function(f){ base.forEach(function(x){ if(x.razon.trim()===razon&&x.factura===f) rows.push(x); }); });
+  nuevo.lineas=rows; nuevo.cant=nuevo.cant||{}; nuevo.com=nuevo.com||{};
+  nuevo.factura=(nuevo.facturas||[]).join(", ");
+  var minEmi=null; rows.forEach(function(r){ if(!minEmi||new Date(r.emision)<new Date(minEmi)) minEmi=r.emision; });
+  nuevo.emision=minEmi||""; nuevo.ruc=rows[0]?rows[0].ruc:""; nuevo.facturador=rows[0]?rows[0].facturador:"";
+  var emiEl=$("n-emi"); if(emiEl) emiEl.value=(nuevo.facturas&&nuevo.facturas.length)?(nuevo.facturas.length+" factura(s) seleccionada(s)"):"";
+  avisoDias30(nuevo.emision);
+  filtroItems=""; renderItemsNuevo();
+}
+function renderExternos(){
+  var wrap=$("n-externos-wrap"); if(!wrap) return;
+  if(!esDacion()){ wrap.innerHTML=""; return; }
+  nuevo.externos=nuevo.externos||[];
+  var rowsHtml=nuevo.externos.map(function(e,ix){
+    var tot=(Number(e.cantidad)||0)*(Number(e.valorUnitario)||0);
+    return '<tr>'+
+      '<td><input value="'+esc(e.codigo||"")+'" placeholder="Código" oninput="extSet('+ix+',\'codigo\',this.value)"></td>'+
+      '<td><input value="'+esc(e.desc||"")+'" placeholder="Descripción" oninput="extSet('+ix+',\'desc\',this.value)"></td>'+
+      '<td><input type="number" min="0" step="1" value="'+esc(e.cantidad||"")+'" style="text-align:right" oninput="extSet('+ix+',\'cantidad\',this.value)"></td>'+
+      '<td><input type="number" min="0" step="0.01" value="'+esc(e.valorUnitario||"")+'" style="text-align:right" oninput="extSet('+ix+',\'valorUnitario\',this.value)"></td>'+
+      '<td class="num" id="ext-tot-'+ix+'">'+money(tot)+'</td>'+
+      '<td><input value="'+esc(e.facturaCliente||"")+'" placeholder="N° factura del cliente"  oninput="extSet('+ix+',\'facturaCliente\',this.value)"></td>'+
+      '<td><input type="date" value="'+esc(e.fechaCliente||"")+'" oninput="extSet('+ix+',\'fechaCliente\',this.value)"></td>'+
+      '<td><button class="btn btn-bad btn-sm" onclick="extQuitar('+ix+')">✕</button></td>'+
+    '</tr>';
+  }).join("");
+  wrap.innerHTML='<div class="card" style="background:#F0F3F7;border-color:#C9D3DD;margin-top:14px"><h3 style="font-size:16px;color:var(--navy);margin-bottom:6px">📦 Mercadería que NO es de nuestro inventario (opcional)</h3>'+
+    '<div class="muted" style="margin-bottom:10px">Úsalo cuando el cliente entrega, además, mercadería que no salió de nuestra facturación. Indica con qué factura el cliente la vendió (sustento) y la fecha de esa factura.</div>'+
+    (nuevo.externos.length?('<div style="overflow-x:auto"><table><thead><tr><th>Código</th><th>Descripción</th><th class="num">Cantidad</th><th class="num">Valor unit.</th><th class="num">Valor total</th><th>Factura del cliente</th><th>Fecha factura cliente</th><th></th></tr></thead><tbody>'+rowsHtml+'</tbody></table></div>'):'')+
+    '<button class="btn btn-g btn-sm" style="margin-top:10px" onclick="extAgregar()">+ Agregar línea</button></div>';
+}
+function extAgregar(){ nuevo.externos=nuevo.externos||[]; nuevo.externos.push({codigo:"",desc:"",cantidad:"",valorUnitario:"",facturaCliente:"",fechaCliente:""}); renderExternos(); }
+function extQuitar(ix){ nuevo.externos.splice(ix,1); renderExternos(); }
+function extSet(ix,campo,val){
+  if(!nuevo.externos||!nuevo.externos[ix]) return;
+  nuevo.externos[ix][campo]=val;
+  if(campo==="cantidad"||campo==="valorUnitario"){
+    var e=nuevo.externos[ix], tot=(Number(e.cantidad)||0)*(Number(e.valorUnitario)||0);
+    var td=$("ext-tot-"+ix); if(td) td.textContent=money(tot);
+  }
+}
 async function guardarTicket(){
   capturarItemsNuevo();
   var pideGuia=requiereGuia(me.name), guia=null;
@@ -761,25 +856,43 @@ async function guardarTicket(){
     guia=findGuia(guiaId);
     if(!guia||guia.estado==="ANULADA"||hoyStr(guia.fechaCreacion)!==hoyStr()){ toast("Esa guía ya no es válida hoy."); return; }
   }
-  if(!nuevo.razon||!nuevo.factura){ toast("Selecciona razón social y factura."); return; }
+  var dacion=esDacion();
+  if(!nuevo.razon){ toast("Selecciona la razón social."); return; }
+  if(dacion){
+    if(!nuevo.facturas||nuevo.facturas.length===0){ toast("Selecciona al menos una factura a saldar."); return; }
+  }else if(!nuevo.factura){ toast("Selecciona la factura."); return; }
   if(!nuevo.motivo){ toast("Selecciona el motivo."); return; }
-  var dev=devolucionesPorCodigo(nuevo.factura), items=[], excedido=null, entradoPorCod={};
+  var devCache={}; function devFor(f){ if(!devCache[f]) devCache[f]=devolucionesPorCodigo(f); return devCache[f]; }
+  var items=[], excedido=null, entradoPorCod={};
   nuevo.cant=nuevo.cant||{}; nuevo.com=nuevo.com||{};
-  nuevo.lineas.forEach(function(r,i){
+  (nuevo.lineas||[]).forEach(function(r,i){
     var q=Math.max(0,Math.min(r.cant,+(nuevo.cant[i]||0))); if(q<=0) return;
-    var restante=r.cant-(dev.cant[r.codigo]||0)-(entradoPorCod[r.codigo]||0);
-    if(q>restante){ excedido=r.codigo+" (disponible "+Math.max(0,restante)+" de "+r.cant+")"; return; }
-    entradoPorCod[r.codigo]=(entradoPorCod[r.codigo]||0)+q;
+    var dv=devFor(r.factura), key=r.codigo+"|"+r.factura;
+    var restante=r.cant-(dv.cant[r.codigo]||0)-(entradoPorCod[key]||0);
+    if(q>restante){ excedido=r.codigo+" de la factura "+r.factura+" (disponible "+Math.max(0,restante)+" de "+r.cant+")"; return; }
+    entradoPorCod[key]=(entradoPorCod[key]||0)+q;
     var f=q/r.cant, com=(nuevo.com[i]||"").trim();
-    items.push({codigo:r.codigo,desc:r.desc,sub:r.sub,cantidad:q,comVendedor:com,neto:+(r.neto*f).toFixed(4),iva:+(r.iva*f).toFixed(4),total:+(r.total*f).toFixed(4)});
+    var it={codigo:r.codigo,desc:r.desc,sub:r.sub,cantidad:q,comVendedor:com,neto:+(r.neto*f).toFixed(4),iva:+(r.iva*f).toFixed(4),total:+(r.total*f).toFixed(4),factura:r.factura};
+    if(dacion) it.tipo="DACION";
+    items.push(it);
   });
   if(excedido){ toast("El código "+excedido+" supera la cantidad disponible para devolver."); return; }
-  if(items.length===0){ toast("Ingresa cantidad en al menos un producto."); return; }
+  if(dacion){
+    (nuevo.externos||[]).forEach(function(e){
+      var cod=(e.codigo||"").trim(), cant=+e.cantidad||0, vu=+e.valorUnitario||0;
+      if(!cod||cant<=0) return;
+      var tot=+(cant*vu).toFixed(4);
+      items.push({codigo:cod,desc:(e.desc||"").trim()||"(sin descripción)",sub:"MERCADERÍA EXTERNA",cantidad:cant,comVendedor:"",neto:tot,iva:0,total:tot,factura:nuevo.facturas.join(", "),tipo:"DACION",esExterna:true,valorUnitario:vu,facturaCliente:(e.facturaCliente||"").trim(),fechaCliente:e.fechaCliente||""});
+    });
+  }
+  if(items.length===0){ toast(dacion?"Ingresa cantidad en al menos un producto o agrega mercadería externa.":"Ingresa cantidad en al menos un producto."); return; }
   var gar=nuevo.motivo==="GARANTIAS";
   if(gar) state.seq5200++; else state.seq3200++;
   var num=(gar?"5200":"3200")+"-"+String(gar?state.seq5200:state.seq3200).padStart(4,"0");
   var sobre=$("n-sobre")?$("n-sobre").checked:false;
-  var t={id:"T"+Date.now(),numero:num,motivo:nuevo.motivo,razonSocial:nuevo.razon,ruc:nuevo.ruc,factura:nuevo.factura,emision:nuevo.emision,facturador:nuevo.facturador||"",fechaTicket:new Date().toISOString(),vendedor:me.name,estado:"MERCADERIA",items:items,fechas:{},guiaId:guia?guia.id:null,guiaNumero:guia?guia.numero:"",sobre:sobre,historial:[{f:new Date().toISOString(),e:"Creado por "+me.name+(guia?" · Guía "+guia.numero:" · sin guía")+(sobre?" · con sobre":"")}]};
+  var facturasTicket=dacion?nuevo.facturas.slice():[nuevo.factura];
+  var facturaTxt=dacion?nuevo.facturas.join(", "):nuevo.factura;
+  var t={id:"T"+Date.now(),numero:num,motivo:nuevo.motivo,razonSocial:nuevo.razon,ruc:nuevo.ruc,factura:facturaTxt,facturas:facturasTicket,emision:nuevo.emision,facturador:nuevo.facturador||"",fechaTicket:new Date().toISOString(),vendedor:me.name,estado:"MERCADERIA",items:items,fechas:{},guiaId:guia?guia.id:null,guiaNumero:guia?guia.numero:"",sobre:sobre,historial:[{f:new Date().toISOString(),e:"Creado por "+me.name+(guia?" · Guía "+guia.numero:" · sin guía")+(sobre?" · con sobre":"")}]};
   state.tickets.push(t); await saveState();
   cerrarModal(); toast("✓ Ticket "+num+" creado"+(guia?" con guía "+guia.numero:"")+".");
   setTimeout(function(){ imprimirTicket(t.id); },400);
@@ -928,11 +1041,28 @@ function verTicket(id){
   var sobreTag=t.sobre?(' · 📨 con sobre'+(t.sobreLlego===true?' <span class="tag tag-nc">sobre llegó</span>':t.sobreLlego===false?' <span class="tag tag-bad">sobre NO llegó</span>':'')):'';
   var h='<div class="modal-bg" onclick="if(event.target===this)this.remove()"><div class="modal"><h2 style="font-size:24px;color:var(--navy);margin-bottom:8px">Ticket '+esc(t.numero)+' '+tagFor(t)+'</h2>';
   if(t.estado==="GUIA_INCORRECTA") h+='<div class="alert-del">⚠ Devuelto por guía incorrecta. Motivo: <b>'+esc(t.guiaIncorrecta&&t.guiaIncorrecta.motivo||"")+'</b></div>';
-  h+='<div class="kv" style="margin-bottom:12px"><b>Guía</b><span>'+esc(t.guiaNumero||"—")+sobreTag+'</span><b>Cliente</b><span>'+esc(t.razonSocial)+'</span><b>RUC</b><span>'+esc(t.ruc||"")+'</span><b>Factura</b><span>'+esc(t.factura)+'</span><b>Sucursal</b><span>'+esc(sucursalDe(t.factura).nombre)+'</span><b>Emisión</b><span>'+fdate(t.emision)+'</span><b>Fecha ticket</b><span>'+fdate(t.fechaTicket)+'</span><b>Vendedor</b><span>'+esc(t.vendedor)+'</span><b>Motivo</b><span>'+esc(t.motivo)+'</span></div>';
-  h+='<div style="overflow-x:auto"><table><thead><tr><th>Código</th><th>Cant.</th><th>Tipo</th><th>Descripción</th><th>Comentario</th><th class="num">Total</th></tr></thead><tbody>'+t.items.map(function(i){ var tp=tipoDeItem(t,i); return '<tr><td>'+esc(i.codigo)+'</td><td>'+i.cantidad+'</td><td>'+(tp==="GARANTIA"?'<span class="tag tag-gar">Garantía</span>':'<span class="tag tag-dev">Devolución</span>')+'</td><td style="max-width:260px">'+esc(i.desc)+'<div class="muted">'+esc(i.sub)+'</div></td><td style="max-width:170px">'+esc(i.comVendedor||"")+'</td><td class="num">'+money(i.total)+'</td></tr>'; }).join("")+'</tbody></table></div>';
+  h+='<div class="kv" style="margin-bottom:12px"><b>Guía</b><span>'+esc(t.guiaNumero||"—")+sobreTag+'</span><b>Cliente</b><span>'+esc(t.razonSocial)+'</span><b>RUC</b><span>'+esc(t.ruc||"")+'</span><b>Factura(s)</b><span>'+esc(t.factura)+'</span><b>Sucursal</b><span>'+esc(sucursalDe(t.factura).nombre)+'</span><b>Emisión</b><span>'+fdate(t.emision)+'</span><b>Fecha ticket</b><span>'+fdate(t.fechaTicket)+'</span><b>Vendedor</b><span>'+esc(t.vendedor)+'</span><b>Motivo</b><span>'+esc(t.motivo)+'</span></div>';
+  h+='<div style="overflow-x:auto"><table><thead><tr><th>Código</th><th>Cant.</th><th>Tipo</th><th>Descripción</th><th>Comentario</th><th class="num">Total</th></tr></thead><tbody>'+t.items.map(function(i){ var tp=tipoDeItem(t,i); var tagTipo=tp==="GARANTIA"?'<span class="tag tag-gar">Garantía</span>':(tp==="DACION"?'<span class="tag tag-merc">Dación'+(i.esExterna?" externa":"")+'</span>':'<span class="tag tag-dev">Devolución</span>'); var origen=i.esExterna?('<div class="muted">Mercadería externa'+(i.facturaCliente?(' · Fact. cliente: '+esc(i.facturaCliente)):'')+(i.fechaCliente?(' · '+fdate(i.fechaCliente)):'')+'</div>'):''; return '<tr><td>'+esc(i.codigo)+'</td><td>'+i.cantidad+'</td><td>'+tagTipo+'</td><td style="max-width:260px">'+esc(i.desc)+'<div class="muted">'+esc(i.sub)+'</div>'+origen+'</td><td style="max-width:170px">'+esc(i.comVendedor||"")+'</td><td class="num">'+money(i.total)+'</td></tr>'; }).join("")+'</tbody></table></div>';
   if(t.items.some(function(i){return i.merc;})) h+='<div class="card" style="margin-top:12px"><h3 style="color:var(--navy)">Revisión de mercadería</h3>'+t.items.map(function(i){ return i.merc?'<div style="margin:6px 0">• <b>'+esc(i.codigo)+'</b>: llegaron <b>'+llegoQ(i)+'</b> de '+i.cantidad+' — '+esc(i.merc.com||"sin comentario")+'</div>':''; }).join("")+'</div>';
   if(t.gar){ var rechV=garItemsRechazados(t), hayR=rechV.length>0, totAcepV=totalAceptado(t); h+='<div class="card"><h3 style="color:var(--navy)">Revisión de garantía</h3>'; h+=t.items.map(function(i,x){ if(llegoQ(i)>0&&tipoDeItem(t,i)==="GARANTIA"){ var ca=garCantAcep(t,i,x), cr=garCantRech(t,i,x); return '<div style="margin:6px 0">• <b>'+esc(i.codigo)+'</b>: '+(ca>0?'<span style="color:var(--ok)">'+ca+' aceptada(s) → NC</span>':'')+(ca>0&&cr>0?' · ':'')+(cr>0?'<span style="color:var(--bad)">'+cr+' rechazada(s) → informe</span>':'')+' <span class="muted">(de '+llegoQ(i)+' que llegaron)</span></div>'; } return ""; }).join(""); if(totAcepV>0) h+='<div style="margin-top:6px;font-weight:600">Total aceptado (NC): '+money(totAcepV)+'</div>'; h+='<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">'; if(hayR) h+='<button class="btn btn-g btn-sm" onclick="pdfCartaGar(\''+t.id+'\')">Ver carta + informe</button>'; if(me&&(rolActivo()==="GARANTIA"||rolActivo()==="ADMIN")) h+='<button class="btn btn-a btn-sm" onclick="editarGar(\''+t.id+'\')">✎ Editar</button>'; h+='</div></div>'; }
   if(t.nc){ h+='<div class="card"><h3 style="color:var(--navy)">Nota de crédito</h3><div>'+(t.nc.hecha?"NC HECHA":"PENDIENTE")+(t.nc.numero?" · N° <b>"+esc(t.nc.numero)+"</b>":"")+'</div>'+(t.nc.pdfKey?'<button class="btn btn-g btn-sm" style="margin-top:8px" onclick="verPdfNC(\''+t.id+'\')">Ver PDF</button>':'')+'</div>'; }
+  if(t.estado==="DACION_ADMIN"||t.estado==="DACION"||t.estado==="DACION_RECHAZADA"||t.dacion){
+    h+='<div class="card"><h3 style="color:var(--navy)">Dación en pagos</h3>';
+    if(t.estado==="DACION_ADMIN") h+='<div class="muted">Pendiente de autorización administrativa (William Achachi).</div>';
+    else if(t.estado==="DACION_RECHAZADA") h+='<div class="muted">No se aceptó mercadería de esta dación en pagos.</div>';
+    else if(t.dacion!==undefined){
+      h+='<div>Total aceptado: <b>'+money(totalAceptado(t))+'</b></div>';
+      if(t.dacion&&t.dacion.hecha){
+        h+='<div style="margin-top:6px">Liquidado el '+fdate(t.dacion.fecha)+':</div><ul style="margin:6px 0 0 18px">'+(t.dacion.detalle||[]).map(function(d){ return '<li>Factura '+esc(d.factura)+': '+money(d.monto)+'</li>'; }).join("")+'</ul>';
+        if(t.dacion.saldoSinAplicar>0.005) h+='<div class="muted" style="margin-top:6px">Saldo de mercadería sin aplicar a factura: '+money(t.dacion.saldoSinAplicar)+'</div>';
+      }else h+='<div class="muted" style="margin-top:6px">Autorizado · pendiente de registrar a qué factura(s) se aplica.</div>';
+    }
+    if(me&&rolActivo()==="ADMIN"){
+      if(t.estado==="DACION_ADMIN") h+='<div style="margin-top:8px"><button class="btn btn-a btn-sm" onclick="cerrarModal();revisarDacion(findT(\''+t.id+'\'))">Autorizar</button></div>';
+      else if(t.estado==="DACION") h+='<div style="margin-top:8px"><button class="btn btn-ok btn-sm" onclick="cerrarModal();abrirLiquidarDacion(\''+t.id+'\')">'+((t.dacion&&t.dacion.hecha)?"Editar liquidación":"Liquidar facturas")+'</button></div>';
+    }
+    h+='</div>';
+  }
   h+='<div style="text-align:right;margin-top:12px;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap"><button class="btn btn-a" onclick="imprimirTicket(\''+t.id+'\')">🖨 Imprimir</button><button class="btn btn-p" onclick="cerrarModal()">Cerrar</button></div></div></div>';
   $("modal-root").innerHTML=h;
 }
@@ -969,7 +1099,7 @@ function histFiltrado(role){
     if(t.estado==="ELIMINADO") return false;
     var ok=false;
     if(role==="MERCADERIA") ok=t.items.some(function(i){return i.merc;});
-    else if(role==="DEVOLUCION") ok=t.items.some(function(i){return i.dev;});
+    else if(role==="DEVOLUCION") ok=t.items.some(function(i){return i.dev&&tipoDeItem(t,i)==="DEVOLUCION";});
     else if(role==="GARANTIA") ok=!!t.gar;
     if(!ok) return false;
     if(repDesde||repHasta){
@@ -1020,7 +1150,7 @@ function exportarBandeja(role){
     var rowsD=[], porCli={}, porVen={};
     lista.forEach(function(t){
       t.items.forEach(function(i){
-        if(!i.dev||tipoDeItem(t,i)==="GARANTIA") return;
+        if(!i.dev||tipoDeItem(t,i)!=="DEVOLUCION") return;
         var tot=+i.total.toFixed(2);
         rowsD.push({
           "N° TICKET":t.numero,"FECHA TICKET":fdate(t.fechaTicket),"FECHA REVISION":t.fechas&&t.fechas.devolucion?fdate(t.fechas.devolucion):"",
@@ -1105,12 +1235,15 @@ function revisarMerc(t){
 }
 function mercTodo(id,todo){ var t=findT(id); t.items.forEach(function(i,x){ var el=$("m-q-"+x); if(el) el.value=todo?i.cantidad:0; }); }
 function routeTrasMerc(t,ahora,prefix){
-  var hayDev=false, hayGar=false;
+  var hayDev=false, hayGar=false, hayDacion=false;
   t.items.forEach(function(i){
     if(llegoQ(i)<=0) return;
-    if(tipoDeItem(t,i)==="GARANTIA") hayGar=true; else hayDev=true;
+    var tp=tipoDeItem(t,i);
+    if(tp==="GARANTIA") hayGar=true;
+    else if(tp==="DACION") hayDacion=true;
+    else hayDev=true;
   });
-  if(!hayDev&&!hayGar){
+  if(!hayDev&&!hayGar&&!hayDacion){
     t.estado="NO_LLEGO"; t.historial.push({f:ahora,e:prefix+"no llegó mercadería ("+me.name+")"});
     return;
   }
@@ -1119,6 +1252,8 @@ function routeTrasMerc(t,ahora,prefix){
     t.estado="MIXTO"; t.historial.push({f:ahora,e:prefix+"mixto (devolución + garantía) ("+me.name+")"});
   }else if(hayGar){
     t.estado="GARANTIA"; t.historial.push({f:ahora,e:prefix+"garantía ("+me.name+")"});
+  }else if(hayDacion){
+    t.estado="DACION_ADMIN"; t.historial.push({f:ahora,e:prefix+"autorización administrativa · dación en pagos ("+me.name+")"});
   }else{
     t.estado="DEVOLUCION"; t.historial.push({f:ahora,e:prefix+"devolución ("+me.name+")"});
   }
@@ -1175,7 +1310,7 @@ async function guardarMerc(id){
 
 /* ===== REV DEVOLUCIÓN ===== */
 function revisarDev(t){
-  var items=t.items.filter(function(i){return llegoQ(i)>0&&tipoDeItem(t,i)!=="GARANTIA";});
+  var items=t.items.filter(function(i){return llegoQ(i)>0&&tipoDeItem(t,i)==="DEVOLUCION";});
   var h='<div class="modal-bg"><div class="modal"><h2 style="font-size:24px;color:var(--navy)">Revisión de devolución · '+esc(t.numero)+'</h2><div class="muted" style="margin-bottom:14px">'+esc(t.razonSocial)+' · Factura '+esc(t.factura)+'</div>';
   if(t.estado==="MIXTO") h+='<div class="card" style="background:#F0E4F7;border-color:#D9B8EC"><span class="tag tag-gar">MIXTO</span> Este ticket también tiene ítems de <b>garantía</b> que se revisan por separado en la bandeja de garantía.</div>';
   h+=items.map(function(i){ var x=t.items.indexOf(i), q=llegoQ(i); return '<div class="itm"><div style="margin-bottom:8px"><b>'+esc(i.codigo)+'</b> <span class="muted">Llegaron: '+q+' de '+i.cantidad+'</span><div style="font-size:12px">'+esc(i.desc)+'</div>'+(i.comVendedor?'<div class="muted">'+esc(i.comVendedor)+'</div>':'')+'</div><div class="grid3"><div><label>Decisión</label><select id="d-ac-'+x+'"><option value="">—</option><option value="1">SÍ SE ACEPTA</option><option value="0">NO SE ACEPTA</option></select></div><div><label>Cantidad aceptada</label><input type="number" min="0" max="'+q+'" value="'+q+'" id="d-ca-'+x+'" style="text-align:right"></div><div><label>Comentario</label><input id="d-co-'+x+'"></div></div></div>'; }).join("");
@@ -1184,7 +1319,7 @@ function revisarDev(t){
 }
 async function guardarDev(id){
   var t=findT(id), idxs=[];
-  t.items.forEach(function(i,x){ if(llegoQ(i)>0&&tipoDeItem(t,i)!=="GARANTIA") idxs.push(x); });
+  t.items.forEach(function(i,x){ if(llegoQ(i)>0&&tipoDeItem(t,i)==="DEVOLUCION") idxs.push(x); });
   for(var k=0;k<idxs.length;k++){ if($("d-ac-"+idxs[k]).value===""){ toast("Selecciona la decisión en todos los productos."); return; } }
   var ahora=new Date().toISOString();
   idxs.forEach(function(x){ var i=t.items[x], max=llegoQ(i); i.dev={acepta:$("d-ac-"+x).value==="1",cantAcep:Math.max(0,Math.min(max,+($("d-ca-"+x).value||0))),com:$("d-co-"+x).value,por:me.name,f:ahora}; });
@@ -1202,6 +1337,96 @@ async function guardarDev(id){
     else { t.estado="DEV_RECHAZADA"; t.historial.push({f:ahora,e:"Devolución no aceptada ("+me.name+")"}); }
   }
   await saveState(); cerrarModal(); toast("✓ Revisión de devolución guardada."); render();
+}
+
+/* ===== DACIÓN EN PAGOS: autorización administrativa (William Achachi) y liquidación de facturas ===== */
+/* Reutiliza i.dev (acepta/cantAcep/com/por/f) para guardar la decisión ítem por ítem, igual que revisor devolución;
+   así itemsAceptados()/totalAceptado() calculan el total aceptado sin tocar esas funciones genéricas.
+   A diferencia de la devolución normal, esto NUNCA pasa a NC: en su lugar pasa a liquidar la(s) factura(s) seleccionadas. */
+function revisarDacion(t){
+  var items=t.items.filter(function(i){return llegoQ(i)>0&&tipoDeItem(t,i)==="DACION";});
+  var h='<div class="modal-bg"><div class="modal"><h2 style="font-size:24px;color:var(--navy)">Autorización · Dación en pagos · '+esc(t.numero)+'</h2><div class="muted" style="margin-bottom:14px">'+esc(t.razonSocial)+' · Factura(s) a saldar: '+esc((t.facturas&&t.facturas.length?t.facturas:[t.factura]).join(", "))+'</div>';
+  h+='<div class="card" style="background:#F0F3F7;border-color:#C9D3DD;margin-bottom:14px">Autoriza la mercadería recibida ítem por ítem, código por código. La cantidad y el valor aceptados se usarán para saldar la(s) factura(s) — esto <b>NO genera nota de crédito</b>.</div>';
+  h+=items.map(function(i){
+    var x=t.items.indexOf(i), q=llegoQ(i);
+    var origen=i.esExterna?('<span class="tag tag-merc">Mercadería externa</span>'+(i.facturaCliente?(' <span class="muted">· Factura cliente: <b>'+esc(i.facturaCliente)+'</b>'+(i.fechaCliente?(' · '+fdate(i.fechaCliente)):'')+'</span>'):'')):'<span class="tag tag-dev">De nuestro inventario</span>';
+    return '<div class="itm"><div style="margin-bottom:8px">'+origen+'<br><b>'+esc(i.codigo)+'</b> <span class="muted">Llegaron: '+q+' de '+i.cantidad+'</span><div style="font-size:12px">'+esc(i.desc)+'</div>'+(i.comVendedor?'<div class="muted">'+esc(i.comVendedor)+'</div>':'')+'</div><div class="grid3"><div><label>Decisión</label><select id="x-ac-'+x+'"><option value="">—</option><option value="1">SÍ SE ACEPTA</option><option value="0">NO SE ACEPTA</option></select></div><div><label>Cantidad aceptada</label><input type="number" min="0" max="'+q+'" value="'+q+'" id="x-ca-'+x+'" style="text-align:right"></div><div><label>Comentario</label><input id="x-co-'+x+'"></div></div></div>';
+  }).join("");
+  h+='<div style="display:flex;gap:10px;justify-content:flex-end"><button class="btn btn-g" onclick="cerrarModal()">Cancelar</button><button class="btn btn-p" onclick="guardarDacion(\''+t.id+'\')">Guardar autorización</button></div></div></div>';
+  $("modal-root").innerHTML=h;
+}
+async function guardarDacion(id){
+  var t=findT(id), idxs=[];
+  t.items.forEach(function(i,x){ if(llegoQ(i)>0&&tipoDeItem(t,i)==="DACION") idxs.push(x); });
+  for(var k=0;k<idxs.length;k++){ if($("x-ac-"+idxs[k]).value===""){ toast("Selecciona la decisión en todos los productos."); return; } }
+  var ahora=new Date().toISOString();
+  idxs.forEach(function(x){ var i=t.items[x], max=llegoQ(i); i.dev={acepta:$("x-ac-"+x).value==="1",cantAcep:Math.max(0,Math.min(max,+($("x-ca-"+x).value||0))),com:$("x-co-"+x).value,por:me.name,f:ahora}; });
+  t.fechas=t.fechas||{}; t.fechas.dacionAutorizacion=ahora;
+  var alguna=idxs.some(function(x){ return t.items[x].dev.acepta&&t.items[x].dev.cantAcep>0; });
+  if(alguna){ t.estado="DACION"; t.dacion=t.dacion||{hecha:false}; t.historial.push({f:ahora,e:"Mercadería de dación en pagos autorizada ("+me.name+")"}); }
+  else { t.estado="DACION_RECHAZADA"; t.historial.push({f:ahora,e:"Mercadería de dación en pagos no aceptada ("+me.name+")"}); }
+  await saveState(); cerrarModal(); toast("✓ Autorización guardada."); render();
+}
+var dacTotalActual=0;
+function abrirLiquidarDacion(id){
+  var t=findT(id); dacTotalActual=totalAceptado(t);
+  var facturas=(t.facturas&&t.facturas.length)?t.facturas:[t.factura];
+  var prevDet=(t.dacion&&t.dacion.detalle)||[];
+  function montoPrevio(f){ var d=prevDet.filter(function(x){return x.factura===f;})[0]; return d?d.monto:""; }
+  var h='<div class="modal-bg"><div class="modal" style="max-width:600px"><h2 style="font-size:22px;color:var(--navy);margin-bottom:8px">Liquidar facturas · '+esc(t.numero)+'</h2><div class="muted" style="margin-bottom:14px">'+esc(t.razonSocial)+' · Total mercadería aceptada: <b>'+money(dacTotalActual)+'</b></div>';
+  h+='<div class="muted" style="margin-bottom:10px">Distribuye el valor aceptado entre la(s) factura(s) seleccionadas. Puede quedar saldo de mercadería sin aplicar si el valor no alcanza para cubrir todo.</div>';
+  h+='<div id="dac-facturas">'+facturas.map(function(f,ix){ return '<div class="field"><label>Monto aplicado a factura '+esc(f)+'</label><input type="number" min="0" step="0.01" value="'+esc(montoPrevio(f))+'" id="dac-m-'+ix+'" data-fact="'+esc(f)+'" oninput="dacCalcSuma()" style="text-align:right"></div>'; }).join("")+'</div>';
+  h+='<div class="muted" style="margin-bottom:10px">Suma aplicada: <b id="dac-suma">$0.00</b> de <b>'+money(dacTotalActual)+'</b> · <span id="dac-saldo"></span></div>';
+  h+='<div class="field"><label>Fecha de liquidación</label><input type="date" id="dac-fecha" value="'+hoyStr((t.dacion&&t.dacion.fecha)||new Date())+'"></div>';
+  h+='<div class="field"><label>Observación (opcional)</label><textarea id="dac-obs" rows="2">'+esc((t.dacion&&t.dacion.obs)||"")+'</textarea></div>';
+  h+='<div style="display:flex;gap:10px;justify-content:flex-end"><button class="btn btn-g" onclick="cerrarModal()">Cancelar</button><button class="btn btn-ok" onclick="guardarLiquidacionDacion(\''+t.id+'\')">Guardar liquidación</button></div></div></div>';
+  $("modal-root").innerHTML=h;
+  dacCalcSuma();
+}
+function dacCalcSuma(){
+  var inputs=document.querySelectorAll("#dac-facturas input"), s=0;
+  for(var k=0;k<inputs.length;k++){ s+=+inputs[k].value||0; }
+  var elS=$("dac-suma"); if(elS) elS.textContent=money(s);
+  var elSaldo=$("dac-saldo");
+  if(elSaldo){
+    var diff=dacTotalActual-s;
+    if(Math.abs(diff)<0.005) elSaldo.innerHTML='<span style="color:var(--ok)">Cuadra exacto</span>';
+    else if(diff>0) elSaldo.innerHTML='<span style="color:#C77F00">Queda mercadería sin aplicar: '+money(diff)+'</span>';
+    else elSaldo.innerHTML='<span style="color:var(--bad)">Te excediste por '+money(-diff)+'</span>';
+  }
+}
+async function guardarLiquidacionDacion(id){
+  var t=findT(id);
+  var inputs=document.querySelectorAll("#dac-facturas input"), detalle=[], suma=0;
+  for(var k=0;k<inputs.length;k++){ var m=+inputs[k].value||0; suma+=m; detalle.push({factura:inputs[k].getAttribute("data-fact"),monto:+m.toFixed(2)}); }
+  if(suma>dacTotalActual+0.01){ toast("La suma aplicada no puede superar el total aceptado ("+money(dacTotalActual)+")."); return; }
+  var fecha=$("dac-fecha")?$("dac-fecha").value:""; if(!fecha){ toast("Selecciona la fecha de liquidación."); return; }
+  var ahora=new Date().toISOString();
+  t.dacion=t.dacion||{}; t.dacion.hecha=true; t.dacion.detalle=detalle; t.dacion.totalAceptado=+dacTotalActual.toFixed(2);
+  t.dacion.totalAplicado=+suma.toFixed(2); t.dacion.saldoSinAplicar=+(dacTotalActual-suma).toFixed(2);
+  t.dacion.fecha=new Date(fecha+"T"+new Date().toTimeString().slice(0,8)).toISOString();
+  t.dacion.obs=($("dac-obs")?$("dac-obs").value:"").trim(); t.dacion.por=me.name;
+  t.fechas=t.fechas||{}; t.fechas.dacion=ahora;
+  t.historial.push({f:ahora,e:"Dación en pagos liquidada: "+money(suma)+" aplicado(s) a "+detalle.length+" factura(s) ("+me.name+")"});
+  await saveState(); cerrarModal(); toast("✓ Liquidación registrada."); render();
+}
+function dacionPendientesAutorizar(){ return state.tickets.filter(function(t){return t.estado==="DACION_ADMIN";}).slice().reverse(); }
+function dacionPendientesLiquidar(){ return state.tickets.filter(function(t){return t.estado==="DACION"&&!(t.dacion&&t.dacion.hecha);}).slice().reverse(); }
+function dacionHechas(){ return state.tickets.filter(function(t){return t.estado==="DACION"&&t.dacion&&t.dacion.hecha;}).slice().reverse(); }
+function exportarDacion(){
+  var lista=dacionHechas();
+  if(lista.length===0){ toast("Todavía no hay dación en pagos liquidadas."); return; }
+  var rows=[];
+  lista.forEach(function(t){
+    var its=itemsAceptados(t);
+    (t.dacion.detalle||[]).forEach(function(d){
+      rows.push({"N° TICKET":t.numero,"CLIENTE":t.razonSocial,"RUC":t.ruc||"","VENDEDOR":t.vendedor,"FECHA TICKET":fdate(t.fechaTicket),"FECHA LIQUIDACION":fdate(t.dacion.fecha),"FACTURA SALDADA":d.factura,"MONTO APLICADO":d.monto,"TOTAL ACEPTADO TICKET":t.dacion.totalAceptado,"SALDO SIN APLICAR":t.dacion.saldoSinAplicar,"OBSERVACION":t.dacion.obs||"","LIQUIDADO POR":t.dacion.por||""});
+    });
+    if(!(t.dacion.detalle||[]).length){ rows.push({"N° TICKET":t.numero,"CLIENTE":t.razonSocial,"RUC":t.ruc||"","VENDEDOR":t.vendedor,"FECHA TICKET":fdate(t.fechaTicket),"FECHA LIQUIDACION":fdate(t.dacion.fecha),"FACTURA SALDADA":"","MONTO APLICADO":0,"TOTAL ACEPTADO TICKET":t.dacion.totalAceptado,"SALDO SIN APLICAR":t.dacion.saldoSinAplicar,"OBSERVACION":t.dacion.obs||"","LIQUIDADO POR":t.dacion.por||""}); }
+  });
+  var ws=XLSX.utils.json_to_sheet(rows), wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,"Dación en pagos");
+  XLSX.writeFile(wb,"Dacion_En_Pagos_"+hoyStr()+".xlsx");
 }
 
 /* ===== REV GARANTÍA ===== */
@@ -1348,7 +1573,7 @@ function renderGuiasNC(){
   h+='<div class="grid3" style="margin-bottom:16px"><div class="card"><div class="disp" style="font-size:30px;color:var(--ok)">'+cont.activas+'</div><div class="muted">Activas (sin usar)</div></div><div class="card"><div class="disp" style="font-size:30px;color:var(--navy)">'+cont.usadas+'</div><div class="muted">Usadas</div></div><div class="card"><div class="disp" style="font-size:30px;color:var(--bad)">'+cont.anuladas+'</div><div class="muted">Anuladas</div></div></div>';
   h+='<div class="card"><div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap"><h3 style="font-size:18px;color:var(--navy);flex:1">Guías registradas ('+guias.length+')</h3><select style="max-width:240px" onchange="guiaFiltroAsesor=this.value;render()"><option value="">Todos los asesores</option>'+asesores.map(function(a){return '<option'+(guiaFiltroAsesor===a?" selected":"")+'>'+esc(a)+'</option>';}).join("")+'</select><button class="btn btn-ok btn-sm" onclick="excelGuias()">⬇ Reporte de guías</button></div>';
   if(guias.length===0) h+='<div class="empty"><div class="big">Sin guías</div></div>';
-  else h+='<div style="overflow-x:auto"><table><thead><tr><th>N° Guía</th><th>Asesor</th><th>Fecha guía</th><th>Estado</th><th>Uso</th><th></th></tr></thead><tbody>'+guias.map(function(g){ var usada=guiaUsadaEnTickets(g.id); var tks=state.tickets.filter(function(t){return t.estado!=="ELIMINADO"&&t.guiaId===g.id;}); var et=g.estado==="ANULADA"?'<span class="tag tag-bad">Anulada</span>':(usada?'<span class="tag tag-nc">Usada</span>':'<span class="tag tag-merc">Activa</span>'); return '<tr><td><b>'+esc(g.numero)+'</b></td><td>'+esc(g.asesor)+'</td><td>'+fdate(g.fechaCreacion)+'<div class="muted">'+fdatetime(g.fechaCreacion)+'</div></td><td>'+et+(g.estado==="ANULADA"&&g.anulacion?'<div class="muted">'+esc(g.anulacion.motivo||"")+'</div>':'')+'</td><td>'+(tks.length?tks.map(function(t){return esc(t.numero);}).join(", "):'<span class="muted">—</span>')+'</td><td style="white-space:nowrap">'+(g.estado!=="ANULADA"&&!usada?'<button class="btn btn-g btn-sm" onclick="editarGuia(\''+g.id+'\')">✎ Editar</button>':'')+'</td></tr>'; }).join("")+'</tbody></table></div>';
+  else h+='<div style="overflow-x:auto"><table><thead><tr><th>N° Guía</th><th>Asesor</th><th>Fecha guía</th><th>Estado</th><th>Uso</th><th></th></tr></thead><tbody>'+guias.map(function(g){ var usada=guiaUsadaEnTickets(g.id); var tks=state.tickets.filter(function(t){return t.estado!=="ELIMINADO"&&t.guiaId===g.id;}); var et=g.estado==="ANULADA"?'<span class="tag tag-bad">Anulada</span>':(usada?'<span class="tag tag-nc">Usada</span>':'<span class="tag tag-merc">Activa</span>'); return '<tr><td><b>'+esc(g.numero)+'</b></td><td>'+esc(g.asesor)+'</td><td>'+fdate(g.fechaCreacion)+'<div class="muted">'+fdatetime(g.fechaCreacion)+'</div></td><td>'+et+(g.estado==="ANULADA"&&g.anulacion?'<div class="muted">'+esc(g.anulacion.motivo||"")+'</div>':'')+'</td><td>'+(tks.length?tks.map(function(t){return esc(t.numero);}).join(", "):'<span class="muted">—</span>')+'</td><td style="white-space:nowrap">'+(g.estado!=="ANULADA"?'<button class="btn btn-g btn-sm" onclick="editarGuia(\''+g.id+'\')">✎ Editar</button>':'')+'</td></tr>'; }).join("")+'</tbody></table></div>';
   h+='</div>';
   $("nc-body").innerHTML=h;
 }
@@ -1503,6 +1728,22 @@ function renderAdmin(){
   function pe(e){ return state.tickets.filter(function(t){return t.estado===e;}).length; }
   var avisosPend=(state.avisos||[]).filter(function(a){return !a.atendido;});
   var h='<h2 style="font-size:28px;color:var(--navy);margin-bottom:16px">Panel administrativo</h2>';
+  (function(){
+    var pa=dacionPendientesAutorizar(), pl=dacionPendientesLiquidar(), he=dacionHechas();
+    h+='<div class="card" style="border-left:5px solid var(--ok)"><h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">💱 Dación en pagos</h3>';
+    h+='<div class="muted" style="margin-bottom:10px">Autoriza ítem por ítem, código por código, la mercadería recibida como dación de pago (no genera nota de crédito) y luego registra a qué factura(s) se aplicó el valor aceptado.</div>';
+    h+='<div class="grid3" style="margin-bottom:10px"><div class="kpi"><div class="disp" style="color:#C77F00">'+pa.length+'</div><div class="lbl">Por autorizar</div></div><div class="kpi"><div class="disp" style="color:var(--navy)">'+pl.length+'</div><div class="lbl">Por liquidar factura(s)</div></div><div class="kpi"><div class="disp" style="color:var(--ok)">'+he.length+'</div><div class="lbl">Liquidadas</div></div></div>';
+    var todos=pa.concat(pl).concat(he);
+    if(todos.length===0) h+='<div class="muted">Sin registros todavía.</div>';
+    else h+='<div style="overflow-x:auto"><table><thead><tr><th>N° Ticket</th><th>Cliente</th><th>Factura(s)</th><th>Estado</th><th></th></tr></thead><tbody>'+todos.map(function(t){
+      var pendienteAut=t.estado==="DACION_ADMIN", liquidada=t.estado==="DACION"&&t.dacion&&t.dacion.hecha;
+      var tagEstado=pendienteAut?'<span class="tag tag-merc">Por autorizar</span>':(liquidada?'<span class="tag tag-nc">Liquidada</span>':'<span class="tag tag-dev">Por liquidar</span>');
+      var accion=pendienteAut?('<button class="btn btn-a btn-sm" onclick="revisarDacion(findT(\''+t.id+'\'))">Autorizar</button>'):('<button class="btn btn-ok btn-sm" onclick="abrirLiquidarDacion(\''+t.id+'\')">'+(liquidada?"Editar liquidación":"Liquidar")+'</button>');
+      return '<tr><td><b>'+esc(t.numero)+'</b></td><td>'+esc(t.razonSocial)+'</td><td>'+esc((t.facturas&&t.facturas.length?t.facturas:[t.factura]).join(", "))+'</td><td>'+tagEstado+'</td><td style="white-space:nowrap"><button class="btn btn-g btn-sm" onclick="verTicket(\''+t.id+'\')">Ver</button> '+accion+'</td></tr>';
+    }).join("")+'</tbody></table></div>';
+    if(he.length) h+='<div style="margin-top:12px"><button class="btn btn-ok btn-sm" onclick="exportarDacion()">⬇ Excel de dación en pagos</button></div>';
+    h+='</div>';
+  })();
   h+='<div class="card" style="border-left:5px solid #C77F00"><h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">📦 Ítems extra reportados en guías</h3>';
   h+='<div class="muted" style="margin-bottom:10px">Cuando mercadería reporta ítems que llegaron pero no están en el ticket, el asesor debe crear un ticket nuevo. Aquí ves cuánto lleva sin resolverse cada caso.</div>';
   if(avisosPend.length===0) h+='<div class="muted">Sin avisos pendientes.</div>';
@@ -1640,7 +1881,7 @@ function reporteConsolidado(){
   var tks=state.tickets;
   if(desde||hasta) tks=tks.filter(function(t){ var f=hoyStr(t.fechaTicket); if(desde&&f<desde) return false; if(hasta&&f>hasta) return false; return true; });
   if(tks.length===0){ toast("No hay tickets en ese rango."); return; }
-  var rows=tks.map(function(t){ return {"N° TICKET":t.numero,"GUIA":t.guiaNumero||"","SOBRE":t.sobre?"SÍ":"NO","SOBRE LLEGÓ":t.sobre?(t.sobreLlego===true?"SÍ":t.sobreLlego===false?"NO":"PENDIENTE"):"","SUCURSAL":sucursalDe(t.factura).nombre,"FECHA CREACION":fdatetime(t.fechaTicket),"FACTURA":t.factura,"FACTURADOR":t.facturador||"","EMISION":fdate(t.emision),"CLIENTE":t.razonSocial,"RUC":t.ruc||"","VENDEDOR":t.vendedor,"MOTIVO":t.motivo,"FECHA MERCADERIA":t.fechas&&t.fechas.mercaderia?fdatetime(t.fechas.mercaderia):"","FECHA DEVOLUCION":t.fechas&&t.fechas.devolucion?fdatetime(t.fechas.devolucion):"","FECHA GARANTIA":t.fechas&&t.fechas.garantia?fdatetime(t.fechas.garantia):"","FECHA NC":t.fechas&&t.fechas.nc?fdatetime(t.fechas.nc):"","N° NC":t.nc&&t.nc.numero?t.nc.numero:"","ESTADO NC":t.nc?(t.nc.hecha?"HECHA":"PENDIENTE"):"","ESTADO":ESTADO_LABEL[t.estado]||t.estado,"GUIA INCORRECTA":t.guiaIncorrecta?t.guiaIncorrecta.motivo:"","TOTAL TICKET":+t.items.reduce(function(s,i){return s+i.total;},0).toFixed(2),"TOTAL ACEPTADO":(t.estado==="NC"||(t.fechas&&t.fechas.nc))?+totalAceptado(t).toFixed(2):""}; });
+  var rows=tks.map(function(t){ return {"N° TICKET":t.numero,"GUIA":t.guiaNumero||"","SOBRE":t.sobre?"SÍ":"NO","SOBRE LLEGÓ":t.sobre?(t.sobreLlego===true?"SÍ":t.sobreLlego===false?"NO":"PENDIENTE"):"","SUCURSAL":sucursalDe(t.factura).nombre,"FECHA CREACION":fdatetime(t.fechaTicket),"FACTURA":t.factura,"FACTURADOR":t.facturador||"","EMISION":fdate(t.emision),"CLIENTE":t.razonSocial,"RUC":t.ruc||"","VENDEDOR":t.vendedor,"MOTIVO":t.motivo,"FECHA MERCADERIA":t.fechas&&t.fechas.mercaderia?fdatetime(t.fechas.mercaderia):"","FECHA DEVOLUCION":t.fechas&&t.fechas.devolucion?fdatetime(t.fechas.devolucion):"","FECHA GARANTIA":t.fechas&&t.fechas.garantia?fdatetime(t.fechas.garantia):"","FECHA NC":t.fechas&&t.fechas.nc?fdatetime(t.fechas.nc):"","N° NC":t.nc&&t.nc.numero?t.nc.numero:"","ESTADO NC":t.nc?(t.nc.hecha?"HECHA":"PENDIENTE"):"","ESTADO":ESTADO_LABEL[t.estado]||t.estado,"GUIA INCORRECTA":t.guiaIncorrecta?t.guiaIncorrecta.motivo:"","TOTAL TICKET":+t.items.reduce(function(s,i){return s+i.total;},0).toFixed(2),"TOTAL ACEPTADO":(t.estado==="NC"||(t.fechas&&t.fechas.nc))?+totalAceptado(t).toFixed(2):"","FECHA AUTORIZACION DACION":t.fechas&&t.fechas.dacionAutorizacion?fdatetime(t.fechas.dacionAutorizacion):"","FECHA LIQUIDACION DACION":t.dacion&&t.dacion.fecha?fdatetime(t.dacion.fecha):"","TOTAL APLICADO DACION":t.dacion&&t.dacion.hecha?t.dacion.totalAplicado:""}; });
   var ws=XLSX.utils.json_to_sheet(rows), wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,ws,"Consolidado");
   var suf=(desde||hasta)?("_"+(desde||"inicio")+"_a_"+(hasta||"hoy")):"";
