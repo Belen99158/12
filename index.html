@@ -424,8 +424,23 @@ function actualizarChipBase(){ var el=document.getElementById("chip-base"); if(e
 function $(id){ return document.getElementById(id); }
 function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];}); }
 function money(n){ return "$"+(Number(n)||0).toFixed(2); }
-function fdate(d){ if(!d) return ""; var x=new Date(d); return isNaN(x)?String(d):x.toLocaleDateString("es-EC",{day:"2-digit",month:"2-digit",year:"numeric"}); }
-function fdatetime(d){ if(!d) return ""; var x=new Date(d); return isNaN(x)?String(d):x.toLocaleDateString("es-EC",{day:"2-digit",month:"2-digit",year:"numeric"})+" "+x.toLocaleTimeString("es-EC",{hour:"2-digit",minute:"2-digit"}); }
+/* Interpreta fechas tipo "25/01/2026 12:35:54" (DD/MM/AAAA, como las exporta el Sheet) de forma correcta.
+   new Date() nativo asume MM/DD/AAAA (formato EEUU) y o bien calcula mal el día/mes, o falla en silencio
+   cuando el día es >12 (ej: 25/01/2026 -> mes 25 inválido). Para fechas ISO (las que genera el propio
+   sistema con toISOString) se delega en el parser nativo, que sí las interpreta bien. */
+function parseFechaFlexible(d){
+  if(!d) return new Date(NaN);
+  var s=String(d).trim();
+  var m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+  if(m){
+    var dia=parseInt(m[1],10), mes=parseInt(m[2],10)-1, anio=parseInt(m[3],10);
+    var hh=m[4]?parseInt(m[4],10):0, mi=m[5]?parseInt(m[5],10):0, ss=m[6]?parseInt(m[6],10):0;
+    return new Date(anio,mes,dia,hh,mi,ss);
+  }
+  return new Date(s);
+}
+function fdate(d){ if(!d) return ""; var x=parseFechaFlexible(d); return isNaN(x)?String(d):x.toLocaleDateString("es-EC",{day:"2-digit",month:"2-digit",year:"numeric"}); }
+function fdatetime(d){ if(!d) return ""; var x=parseFechaFlexible(d); return isNaN(x)?String(d):x.toLocaleDateString("es-EC",{day:"2-digit",month:"2-digit",year:"numeric"})+" "+x.toLocaleTimeString("es-EC",{hour:"2-digit",minute:"2-digit"}); }
 function fechaLarga(d){ var x=d?new Date(d):new Date(); if(isNaN(x))return String(d); return x.getDate()+" de "+MESES[x.getMonth()]+" de "+x.getFullYear()+"."; }
 function hoyStr(d){ var x=d?new Date(d):new Date(); return x.getFullYear()+"-"+String(x.getMonth()+1).padStart(2,"0")+"-"+String(x.getDate()).padStart(2,"0"); }
 /* ===== CONTROL DE TIEMPOS (guía incorrecta / avisos extra) ===== */
@@ -697,7 +712,7 @@ function nFact(){
 }
 function avisoDias30(emision){
   var cont=$("n-aviso-dias"); if(!cont) return;
-  var em=new Date(emision);
+  var em=parseFechaFlexible(emision);
   if(isNaN(em)){ cont.innerHTML=""; return; }
   var dias=Math.floor((Date.now()-em.getTime())/86400000);
   cont.innerHTML=dias>30?'<div class="card" style="background:var(--bad-bg);border-color:#E8B0AB;margin-bottom:12px">⚠ <b>Recordatorio:</b> esta factura fue emitida hace <b>'+dias+' días</b>. Las guías solo se aceptan dentro de los <b>30 días</b> de la emisión. Cuida esos días.</div>':"";
@@ -808,7 +823,7 @@ function recalcularLineasMulti(){
   (nuevo.facturas||[]).forEach(function(f){ base.forEach(function(x){ if(x.razon.trim()===razon&&x.factura===f) rows.push(x); }); });
   nuevo.lineas=rows; nuevo.cant=nuevo.cant||{}; nuevo.com=nuevo.com||{};
   nuevo.factura=(nuevo.facturas||[]).join(", ");
-  var minEmi=null; rows.forEach(function(r){ if(!minEmi||new Date(r.emision)<new Date(minEmi)) minEmi=r.emision; });
+  var minEmi=null; rows.forEach(function(r){ if(!minEmi||parseFechaFlexible(r.emision)<parseFechaFlexible(minEmi)) minEmi=r.emision; });
   nuevo.emision=minEmi||""; nuevo.ruc=rows[0]?rows[0].ruc:""; nuevo.facturador=rows[0]?rows[0].facturador:"";
   var emiEl=$("n-emi"); if(emiEl) emiEl.value=(nuevo.facturas&&nuevo.facturas.length)?(nuevo.facturas.length+" factura(s) seleccionada(s)"):"";
   avisoDias30(nuevo.emision);
