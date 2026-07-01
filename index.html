@@ -149,12 +149,12 @@ var SUPER_ADMINS=["BELEN MANZANO","TANNIA BASSANTES"];
 var VISTAS=[{role:"ASESOR",label:"Asesor"},{role:"MERCADERIA",label:"Rev. Mercadería"},{role:"DEVOLUCION",label:"Rev. Devolución"},{role:"GARANTIA",label:"Rev. Garantía"},{role:"NC",label:"Notas de crédito"},{role:"ADMIN",label:"Administrativo"}];
 var MOTIVOS=["DACION EN PAGOS","GESTION COMERCIAL CLIENTE VENDEDOR","LOGISTICA BODEGA","DEVOLUCION","GARANTIAS","INCIDENCIA GESTIONES ERRONEAS IMPORTACIONES"];
 var MARCAS=["PERMATEX","ORIGINAL","VALEO","MAHLE","ABRO","LUBA AUTOPARTS","SEIWA","NPR","SABO","APLIC","JCC","MAGNETI MARELLI","AUTOTOP","GMP","AISIN","AMC","FTE","YSK","GEN","SCHADEK","OTRO"];
-var ESTADO_LABEL={MERCADERIA:"En revisión mercadería",DEVOLUCION:"En revisión devolución",GARANTIA:"En revisión garantía",MIXTO:"Mixto: devolución + garantía",NC:"En notas de crédito",NO_LLEGO:"No llegó",DEV_RECHAZADA:"Devolución no aceptada",GAR_RECHAZADA:"Garantía no aceptada",RECHAZADA:"Devolución y garantía no aceptadas",GUIA_INCORRECTA:"Devuelto por guía incorrecta",ELIMINADO:"Eliminado",DACION_ADMIN:"En autorización administrativa (dación en pagos)",DACION_RECHAZADA:"Dación en pagos no aceptada"};
+var ESTADO_LABEL={SIN_GUIA:"Guardado · pendiente de guía",MERCADERIA:"En revisión mercadería",DEVOLUCION:"En revisión devolución",GARANTIA:"En revisión garantía",MIXTO:"Mixto: devolución + garantía",NC:"En notas de crédito",NO_LLEGO:"No llegó",DEV_RECHAZADA:"Devolución no aceptada",GAR_RECHAZADA:"Garantía no aceptada",RECHAZADA:"Devolución y garantía no aceptadas",GUIA_INCORRECTA:"Devuelto por guía incorrecta",ELIMINADO:"Eliminado",DACION_ADMIN:"En autorización administrativa (dación en pagos)",DACION_RECHAZADA:"Dación en pagos no aceptada"};
 var MESES=["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 var SUCURSALES={"004":"AV. EL REY","002":"BODEGA","003":"AV. 6 DE DICIEMBRE","007":"AGENCIA LA PRENSA","006":"AGENCIA TUMBACO"};
 
 var me=null, base=[], RAZONES=[];
-var ncAplicados=0, ncSinMatch=0, ncFilasNegativas=0;
+var ncAplicados=0, ncSinMatch=0, ncFilasNegativas=0, ncFilasCrudas=0;
 var ncSinMatchList=[], ncNegativasList=[];   /* para exportar a Excel desde Admin */
 var state={seq3200:0,seq5200:0,tickets:[],guias:[],avisos:[]};
 var baseLoaded=false, baseLineas=0, baseFechaStr="";
@@ -245,7 +245,7 @@ async function subirBaseAFirebase(rows,onProg){
     await fbDB.ref("baseFacturas/chunks/"+j).set(chunks[j]);
   }
   await fbDB.ref("baseFacturas/meta").set(meta);
-  await fbDB.ref("baseFacturas/ncDiag").set({aplicados:ncAplicados,sinMatch:ncSinMatch,negativas:ncFilasNegativas});
+  await fbDB.ref("baseFacturas/ncDiag").set({aplicados:ncAplicados,sinMatch:ncSinMatch,negativas:ncFilasNegativas,crudas:ncFilasCrudas});
   return meta;
 }
 async function leerBaseDeFirebase(onProg){
@@ -260,7 +260,7 @@ async function leerBaseDeFirebase(onProg){
     var c=await fbDB.ref("baseFacturas/chunks/"+i).get();
     json+=c.val()||"";
   }
-  try{ var dg=await fbDB.ref("baseFacturas/ncDiag").get(); var v=dg.val()||{}; ncAplicados=v.aplicados||0; ncSinMatch=v.sinMatch||0; ncFilasNegativas=v.negativas||0; }catch(e){}
+  try{ var dg=await fbDB.ref("baseFacturas/ncDiag").get(); var v=dg.val()||{}; ncAplicados=v.aplicados||0; ncSinMatch=v.sinMatch||0; ncFilasNegativas=v.negativas||0; ncFilasCrudas=v.crudas||0; }catch(e){}
   return {rows:descomprimirBase(JSON.parse(json)),meta:meta};
 }
 
@@ -272,8 +272,8 @@ async function cargarBase(forzar,onProg){
     var to=new Promise(function(res,rej){ setTimeout(function(){ rej(new Error("timeout")); },20000); });
     var r=await Promise.race([leerBaseDeFirebase(onProg),to]);
     if(r&&r.rows&&r.rows.length){
-      base=r.rows; indexarBase(); baseLoaded=true; baseLineas=base.length; baseFechaStr="Firebase"; actualizarChipBase();
-      if(onProg) onProg("Base lista: "+base.length.toLocaleString("es-EC")+" líneas (Firebase)",100);
+      base=r.rows; indexarBase(); baseLoaded=true; baseLineas=base.length+(ncFilasCrudas||0); baseFechaStr="Firebase"; actualizarChipBase();
+      if(onProg) onProg("Base lista: "+baseLineas.toLocaleString("es-EC")+" líneas (Firebase)",100);
       return;
     }
   }catch(e){ console.warn("Firebase base:",e&&e.message); }
@@ -308,8 +308,8 @@ async function cargarBaseDesdeSheets(forzar,onProg){
   }
   if(!csvText) throw new Error("No se pudo descargar la base. "+ultimoError+".");
   if(onProg) onProg("Procesando filas…",60);
-  base=parsearCSV(csvText); indexarBase(); baseLoaded=true; baseLineas=base.length; baseFechaStr="Google Sheets"; actualizarChipBase();
-  if(onProg) onProg("Base lista: "+base.length.toLocaleString("es-EC")+" líneas",100);
+  base=parsearCSV(csvText); indexarBase(); baseLoaded=true; baseLineas=base.length+(ncFilasCrudas||0); baseFechaStr="Google Sheets"; actualizarChipBase();
+  if(onProg) onProg("Base lista: "+baseLineas.toLocaleString("es-EC")+" líneas",100);
 }
 /* Conversor numérico robusto: entiende "1,0000" (coma decimal, formato latino) y también "1.0000" */
 function numEC(s){
@@ -354,6 +354,7 @@ function parsearCSV(text){
     rows.push({emision:String(c[iEmi]||"").trim(),factura:fact,ruc:String(c[iRuc]||"").trim(),razon:razon,codigo:codigo,desc:String(c[iDesc]||"").trim(),sub:String(c[iSub]||"").trim(),facturador:String(c[iF2]||"").trim(),cant:cant,neto:neto,iva:iva,total:tot,creditoAplicado:0});
   }
   conciliarCreditosNC(rows,ncList);
+  ncFilasCrudas=ncList.length;   /* NC crudas: se restan de sus facturas pero SÍ cuentan como líneas de la base */
   return rows;
 }
 /* ===== CONCILIACIÓN DE NOTAS DE CRÉDITO (mismo razonamiento que el script de reconciliación) =====
@@ -417,7 +418,7 @@ function splitCSVLine(line,sep){
   return cols;
 }
 function indexarBase(){ var s={}; base.forEach(function(r){ s[r.razon.trim()]=1; }); RAZONES=Object.keys(s).sort(); }
-function actualizarChipBase(){ var el=document.getElementById("chip-base"); if(el) el.textContent=baseLoaded?("📋 "+baseLineas.toLocaleString("es-EC")+" líneas"):""; }
+function actualizarChipBase(){ var el=document.getElementById("chip-base"); if(el) el.textContent=baseLoaded?("📋 "+baseLineas.toLocaleString("es-EC")+" líneas"+(ncFilasCrudas?" ("+base.length.toLocaleString("es-EC")+" ventas + "+ncFilasCrudas.toLocaleString("es-EC")+" NC)":"")):""; }
 
 /* ===== UTIL ===== */
 function $(id){ return document.getElementById(id); }
@@ -479,6 +480,7 @@ function devolucionesPorCodigo(factura){
 function guiasSeleccionables(asesor){ var hoy=hoyStr(); return (state.guias||[]).filter(function(g){ return g.asesor===asesor&&g.estado!=="ANULADA"&&hoyStr(g.fechaCreacion)===hoy; }); }
 function guiaUsadaEnTickets(id){ return state.tickets.some(function(t){ return t.estado!=="ELIMINADO"&&t.guiaId===id; }); }
 function tagFor(t){
+  if(t.estado==="SIN_GUIA") return '<span class="tag" style="background:var(--warn-bg);color:#8A6400">⏳ Pendiente de guía · sin enviar</span>';
   if(t.estado==="MERCADERIA") return '<span class="tag tag-merc">En mercadería</span>';
   if(t.estado==="DEVOLUCION") return '<span class="tag tag-dev">En devolución</span>';
   if(t.estado==="GARANTIA") return '<span class="tag tag-gar">En garantía</span>';
@@ -588,9 +590,11 @@ function cambiarVista(role){ vistaActiva=role; $("chip-role").textContent=ROLE_L
 /* ===== ASESOR ===== */
 function renderAsesor(){
   var gi=state.tickets.filter(function(t){ return t.vendedor===me.name&&t.estado==="GUIA_INCORRECTA"; }).slice().reverse();
+  var sg=state.tickets.filter(function(t){ return t.vendedor===me.name&&t.estado==="SIN_GUIA"; }).slice().reverse();
   var avisosExtra=(state.avisos||[]).filter(function(a){ return a.vendedor===me.name&&!a.atendido; }).slice().reverse();
   $("main").innerHTML='<div style="display:flex;align-items:center;gap:14px;margin-bottom:18px;flex-wrap:wrap"><h2 style="font-size:28px;color:var(--navy)">Orden Lubamaqui</h2><div style="flex:1"></div>'+(!baseLoaded?'<button class="btn btn-g" onclick="recargarBase()">🔄 Cargar base</button>':'')+'<button class="btn btn-a" onclick="abrirNuevo()">+ Nuevo ticket</button></div>'+
     (!baseLoaded?'<div class="card" style="background:var(--warn-bg);border-color:#E8C766">⚠ Base no cargada. Presiona "Cargar base" o espera.</div>':'')+
+    sg.map(function(t){ var dS=diasDesde(t.fechaTicket); return '<div class="alert-del" style="background:var(--warn-bg);border-color:#E8C766">⏳ <b>Ticket '+esc(t.numero)+' guardado sin guía</b> ('+esc(t.razonSocial)+' · Factura '+esc(t.factura)+').<br>No se ha enviado a mercadería. · <b style="color:'+colorDias(dS)+'">Lleva '+diasTexto(dS)+' pendiente</b><div style="margin-top:6px"><button class="btn btn-a btn-sm" onclick="asignarGuiaTicket(\''+t.id+'\')">⭐ Seleccionar guía y enviar</button></div></div>'; }).join("")+
     gi.map(function(t){ var dG=diasDesde(t.guiaIncorrecta&&t.guiaIncorrecta.f); return '<div class="alert-del">⚠ <b>Ticket '+esc(t.numero)+' devuelto por guía incorrecta</b> ('+esc(t.guiaIncorrecta&&t.guiaIncorrecta.por||"")+', '+fdate(t.guiaIncorrecta&&t.guiaIncorrecta.f)+').<br>Motivo: <b>'+esc(t.guiaIncorrecta&&t.guiaIncorrecta.motivo||"")+'</b> · La guía volvió a estar disponible. · <b style="color:'+colorDias(dG)+'">Lleva '+diasTexto(dG)+' sin corregir</b></div>'; }).join("")+
     avisosExtra.map(function(a){ var dA=diasDesde(a.f); return '<div class="alert-del" style="background:#FFF4D6;border-color:#E8C766">📦 <b>Llegaron ítems adicionales en la guía '+esc(a.guiaNumero||"—")+'</b> (factura '+esc(a.factura)+') que NO estaban en el ticket '+esc(a.ticketNumero)+'.<br>Códigos reportados: <b>'+esc(a.codigos)+'</b>'+(a.comentario?('<br>Nota de mercadería: '+esc(a.comentario)):'')+'<br><b style="color:'+colorDias(dA)+'">Lleva '+diasTexto(dA)+' sin resolverse</b><br><div style="margin-top:6px"><button class="btn btn-a btn-sm" onclick="abrirNuevo()">+ Crear ticket nuevo</button> <button class="btn btn-g btn-sm" onclick="abrirMarcarAviso(\''+a.id+'\')">✓ Ya lo gestioné</button></div></div>'; }).join("")+
     '<div class="card"><h3 style="font-size:19px;color:var(--navy);margin-bottom:10px">Mis tickets</h3>'+
@@ -632,20 +636,19 @@ function renderMisTicketsTabla(){
   var mios=ticketsAsesorFiltrados();
   var cont=$("mis-tickets-tabla"); if(!cont) return;
   if(mios.length===0){ cont.innerHTML=(filtroMisTickets||filtroMisDesde||filtroMisHasta)?'<div class="empty"><div class="big">Sin resultados</div></div>':'<div class="empty"><div class="big">Sin tickets todavía</div>Crea tu primer ticket.</div>'; return; }
-  cont.innerHTML='<div class="muted" style="margin-bottom:6px">'+mios.length+' ticket(s)</div><div style="overflow-x:auto"><table><thead><tr><th>N° Ticket</th><th>Fecha</th><th>Guía</th><th>Cliente</th><th>Factura</th><th>Motivo</th><th>Estado</th><th></th></tr></thead><tbody>'+mios.map(function(t){ return '<tr><td><b>'+esc(t.numero)+'</b></td><td>'+fdate(t.fechaTicket)+'</td><td>'+esc(t.guiaNumero||"—")+'</td><td>'+esc(t.razonSocial)+'</td><td>'+esc(t.factura)+'</td><td>'+esc(t.motivo)+'</td><td>'+tagFor(t)+'</td><td style="white-space:nowrap">'+(t.estado==="GUIA_INCORRECTA"?'<button class="btn btn-a btn-sm" onclick="editarGuiaTicket(\''+t.id+'\')">✎ Corregir guía</button> ':'')+'<button class="btn btn-g btn-sm" onclick="verTicket(\''+t.id+'\')">Ver</button> <button class="btn btn-a btn-sm" onclick="imprimirTicket(\''+t.id+'\')">🖨</button></td></tr>'; }).join("")+'</tbody></table></div>';
+  cont.innerHTML='<div class="muted" style="margin-bottom:6px">'+mios.length+' ticket(s)</div><div style="overflow-x:auto"><table><thead><tr><th>N° Ticket</th><th>Fecha</th><th>Guía</th><th>Cliente</th><th>Factura</th><th>Motivo</th><th>Estado</th><th></th></tr></thead><tbody>'+mios.map(function(t){ return '<tr><td><b>'+esc(t.numero)+'</b></td><td>'+fdate(t.fechaTicket)+'</td><td>'+esc(t.guiaNumero||"—")+'</td><td>'+esc(t.razonSocial)+'</td><td>'+esc(t.factura)+'</td><td>'+esc(t.motivo)+'</td><td>'+tagFor(t)+'</td><td style="white-space:nowrap">'+(t.estado==="SIN_GUIA"?'<button class="btn btn-a btn-sm" onclick="asignarGuiaTicket(\''+t.id+'\')">⭐ Seleccionar guía</button> ':'')+(t.estado==="GUIA_INCORRECTA"?'<button class="btn btn-a btn-sm" onclick="editarGuiaTicket(\''+t.id+'\')">✎ Corregir guía</button> ':'')+'<button class="btn btn-g btn-sm" onclick="verTicket(\''+t.id+'\')">Ver</button> <button class="btn btn-a btn-sm" onclick="imprimirTicket(\''+t.id+'\')">🖨</button></td></tr>'; }).join("")+'</tbody></table></div>';
 }
-async function recargarBase(){ toast("Cargando base…"); try{ await cargarBase(true,function(m){toast(m,2000);}); toast("✓ Base: "+base.length.toLocaleString("es-EC")+" líneas"); render(); }catch(e){ toast("Error: "+e.message,6000); } }
+async function recargarBase(){ toast("Cargando base…"); try{ await cargarBase(true,function(m){toast(m,2000);}); toast("✓ Base: "+baseLineas.toLocaleString("es-EC")+" líneas"); render(); }catch(e){ toast("Error: "+e.message,6000); } }
 function abrirNuevo(){
   if(!baseLoaded||base.length===0){ toast("Base no disponible."); return; }
   var pideGuia=requiereGuia(me.name);
   var gd=pideGuia?guiasSeleccionables(me.name):[];
-  if(pideGuia&&gd.length===0){
-    $("modal-root").innerHTML='<div class="modal-bg"><div class="modal" style="max-width:520px"><h2 style="font-size:24px;color:var(--bad);margin-bottom:8px">No tienes guías activas hoy</h2><div class="muted" style="margin-bottom:16px">Para crear un ticket necesitas una <b>guía activa registrada hoy</b> a tu nombre. Solicita al área de Notas de Crédito que registre tu guía.</div><div style="text-align:right"><button class="btn btn-p" onclick="cerrarModal()">Entendido</button></div></div></div>';
-    return;
-  }
   nuevo={razon:"",factura:"",motivo:"",items:[],lineas:[],cant:{},com:{},facturas:[],facturasDisponibles:[],externos:[]}; filtroItems="";
   $("modal-root").innerHTML='<div class="modal-bg"><div class="modal"><h2 style="font-size:26px;color:var(--navy);margin-bottom:4px">Nuevo ticket</h2><div class="muted" style="margin-bottom:18px">Fecha: <b>'+fdate(new Date())+'</b> · Vendedor: <b>'+esc(me.name)+'</b></div>'+
-    (pideGuia?'<div class="card" style="background:#FFF1F1;border-color:#E8B0AB"><div class="field" style="margin-bottom:0"><label>⭐ Guía (obligatoria · solo tus guías activas de hoy)</label><select id="n-guia"><option value="">— Selecciona tu guía —</option>'+gd.map(function(g){ return '<option value="'+g.id+'">'+esc(g.numero)+' — '+fdate(g.fechaCreacion)+'</option>'; }).join("")+'</select></div></div>':'')+
+    (pideGuia?(gd.length>0
+      ?'<div class="card" style="background:#FFF1F1;border-color:#E8B0AB"><div class="field" style="margin-bottom:0"><label>⭐ Guía (solo tus guías activas de hoy)</label><select id="n-guia"><option value="">— Guardar sin guía (se enviará cuando la selecciones) —</option>'+gd.map(function(g){ return '<option value="'+g.id+'">'+esc(g.numero)+' — '+fdate(g.fechaCreacion)+'</option>'; }).join("")+'</select><div class="muted" style="margin-top:6px">Puedes guardar el ticket sin guía; quedará <b>pendiente</b> y NO se enviará a mercadería hasta que le asignes la guía.</div></div></div>'
+      :'<div class="card" style="background:var(--warn-bg);border-color:#E8C766"><b>⏳ No tienes guías activas hoy.</b><div class="muted" style="margin-top:4px">Puedes crear y guardar el ticket ahora; quedará <b>pendiente de guía</b> y NO se enviará a mercadería. Cuando Notas de Crédito registre tu guía, podrás seleccionarla desde "Mis tickets" y ahí recién se enviará.</div></div>')
+    :'')+
     '<div class="grid3"><div class="field ac-wrap"><label>Razón social</label><input id="n-razon" placeholder="Escribe mín. 2 letras…" autocomplete="off" oninput="buscarRazon()" onfocus="buscarRazon()"><div class="ac-list" id="n-razon-list"></div></div><div class="field" id="n-fact-wrap"><label>Factura</label><select id="n-fact" onchange="nFact()" disabled><option value="">—</option></select></div><div class="field"><label>Emisión</label><input id="n-emi" disabled></div></div>'+
     '<div id="n-fact-msg" class="muted" style="margin:-6px 0 10px"></div>'+
     '<div class="card" id="n-fact-multi-wrap" style="display:none;background:#FFF1F1;border-color:#E8B0AB"><label style="margin-bottom:6px">⭐ Facturas a saldar (Dación en pagos · puedes elegir varias)</label><div class="muted" style="margin-bottom:8px">Selecciona todas las facturas del cliente que se van a saldar con esta entrega de mercadería.</div><div id="n-fact-multi-list" style="max-height:220px;overflow:auto"></div></div>'+
@@ -865,9 +868,11 @@ async function guardarTicket(){
   var pideGuia=requiereGuia(me.name), guia=null;
   if(pideGuia){
     var guiaId=$("n-guia")?$("n-guia").value:"";
-    if(!guiaId){ toast("⭐ Debes seleccionar una guía."); return; }
-    guia=findGuia(guiaId);
-    if(!guia||guia.estado==="ANULADA"||hoyStr(guia.fechaCreacion)!==hoyStr()){ toast("Esa guía ya no es válida hoy."); return; }
+    if(guiaId){
+      guia=findGuia(guiaId);
+      if(!guia||guia.estado==="ANULADA"||hoyStr(guia.fechaCreacion)!==hoyStr()){ toast("Esa guía ya no es válida hoy."); return; }
+    }
+    /* Sin guía: se permite guardar; el ticket quedará PENDIENTE y no se enviará a mercadería */
   }
   var dacion=esDacion();
   if(!nuevo.razon){ toast("Selecciona la razón social."); return; }
@@ -905,12 +910,33 @@ async function guardarTicket(){
   var sobre=$("n-sobre")?$("n-sobre").checked:false;
   var facturasTicket=dacion?nuevo.facturas.slice():[nuevo.factura];
   var facturaTxt=dacion?nuevo.facturas.join(", "):nuevo.factura;
-  var t={id:"T"+Date.now(),numero:num,motivo:nuevo.motivo,razonSocial:nuevo.razon,ruc:nuevo.ruc,factura:facturaTxt,facturas:facturasTicket,emision:nuevo.emision,facturador:nuevo.facturador||"",fechaTicket:new Date().toISOString(),vendedor:me.name,estado:"MERCADERIA",items:items,fechas:{},guiaId:guia?guia.id:null,guiaNumero:guia?guia.numero:"",sobre:sobre,historial:[{f:new Date().toISOString(),e:"Creado por "+me.name+(guia?" · Guía "+guia.numero:" · sin guía")+(sobre?" · con sobre":"")}]};
+  var estadoInicial=(pideGuia&&!guia)?"SIN_GUIA":"MERCADERIA";
+  var t={id:"T"+Date.now(),numero:num,motivo:nuevo.motivo,razonSocial:nuevo.razon,ruc:nuevo.ruc,factura:facturaTxt,facturas:facturasTicket,emision:nuevo.emision,facturador:nuevo.facturador||"",fechaTicket:new Date().toISOString(),vendedor:me.name,estado:estadoInicial,items:items,fechas:{},guiaId:guia?guia.id:null,guiaNumero:guia?guia.numero:"",sobre:sobre,historial:[{f:new Date().toISOString(),e:"Creado por "+me.name+(guia?" · Guía "+guia.numero:(pideGuia?" · guardado SIN guía (pendiente de envío)":" · sin guía"))+(sobre?" · con sobre":"")}]};
   state.tickets.push(t); await saveState();
-  cerrarModal(); toast("✓ Ticket "+num+" creado"+(guia?" con guía "+guia.numero:"")+".");
+  cerrarModal();
+  if(estadoInicial==="SIN_GUIA") toast("✓ Ticket "+num+" guardado. ⏳ Pendiente: selecciona la guía en \"Mis tickets\" para enviarlo a mercadería.",6000);
+  else toast("✓ Ticket "+num+" creado"+(guia?" con guía "+guia.numero:"")+".");
   setTimeout(function(){ imprimirTicket(t.id); },400);
   render();
 }
+/* ===== ASIGNAR GUÍA A TICKET PENDIENTE (SIN_GUIA) Y ENVIAR ===== */
+function asignarGuiaTicket(id){
+  var t=findT(id); if(!t) return;
+  var gd=guiasSeleccionables(t.vendedor);
+  $("modal-root").innerHTML='<div class="modal-bg"><div class="modal" style="max-width:560px"><h2 style="font-size:22px;color:var(--navy);margin-bottom:6px">Seleccionar guía · '+esc(t.numero)+'</h2><div class="muted" style="margin-bottom:8px">'+esc(t.razonSocial)+' · Factura '+esc(t.factura)+'</div><div class="card" style="background:var(--warn-bg);border-color:#E8C766;margin-bottom:14px">⏳ Este ticket está <b>guardado pero sin enviar</b>. Al seleccionar la guía se enviará a la bandeja de mercadería.</div>'+(gd.length===0?'<div class="card" style="background:var(--bad-bg);border-color:#E8B0AB">No tienes guías activas hoy. Solicita a Notas de Crédito que registre tu guía y vuelve a intentarlo.</div>':'<div class="field"><label>⭐ Guía (solo tus guías activas de hoy)</label><select id="ag-tk-guia"><option value="">— Selecciona —</option>'+gd.map(function(g){ return '<option value="'+g.id+'">'+esc(g.numero)+' — '+fdate(g.fechaCreacion)+'</option>'; }).join("")+'</select></div>')+'<div style="display:flex;gap:10px;justify-content:flex-end"><button class="btn btn-g" onclick="cerrarModal()">Cancelar</button>'+(gd.length>0?'<button class="btn btn-p" onclick="guardarAsignacionGuia(\''+t.id+'\')">Asignar guía y enviar</button>':'')+'</div></div></div>';
+}
+async function guardarAsignacionGuia(id){
+  var t=findT(id); if(!t) return;
+  if(t.estado!=="SIN_GUIA"){ toast("Este ticket ya fue enviado."); cerrarModal(); render(); return; }
+  var guiaId=$("ag-tk-guia").value;
+  if(!guiaId){ toast("Selecciona una guía."); return; }
+  var guia=findGuia(guiaId);
+  if(!guia||guia.estado==="ANULADA"||hoyStr(guia.fechaCreacion)!==hoyStr()){ toast("Guía no válida hoy."); return; }
+  t.guiaId=guia.id; t.guiaNumero=guia.numero; t.estado="MERCADERIA";
+  t.historial.push({f:new Date().toISOString(),e:"Guía "+guia.numero+" asignada por "+me.name+" · enviado a mercadería"});
+  await saveState(); cerrarModal(); toast("✓ Guía "+guia.numero+" asignada. Ticket "+t.numero+" enviado a mercadería."); render();
+}
+
 function editarGuiaTicket(id){
   var t=findT(id), gd=guiasSeleccionables(t.vendedor);
   $("modal-root").innerHTML='<div class="modal-bg"><div class="modal" style="max-width:560px"><h2 style="font-size:22px;color:var(--navy);margin-bottom:6px">Corregir guía · '+esc(t.numero)+'</h2><div class="muted" style="margin-bottom:8px">'+esc(t.razonSocial)+' · Factura '+esc(t.factura)+'</div><div class="alert-del" style="margin-bottom:14px">Devuelto por: <b>'+esc(t.guiaIncorrecta&&t.guiaIncorrecta.motivo||"guía incorrecta")+'</b></div>'+(gd.length===0?'<div class="card" style="background:var(--bad-bg);border-color:#E8B0AB">No tienes guías activas hoy.</div>':'<div class="field"><label>⭐ Selecciona la guía correcta</label><select id="eg-tk-guia"><option value="">— Selecciona —</option>'+gd.map(function(g){ return '<option value="'+g.id+'">'+esc(g.numero)+' — '+fdate(g.fechaCreacion)+'</option>'; }).join("")+'</select></div>')+'<div style="display:flex;gap:10px;justify-content:flex-end"><button class="btn btn-g" onclick="cerrarModal()">Cancelar</button>'+(gd.length>0?'<button class="btn btn-p" onclick="guardarGuiaTicket(\''+t.id+'\')">Guardar y reenviar</button>':'')+'</div></div></div>';
@@ -1066,7 +1092,7 @@ function verTicket(id){
     if(me&&rolActivo()==="ADMIN"&&t.estado==="DACION_ADMIN") h+='<div style="margin-top:8px"><button class="btn btn-a btn-sm" onclick="cerrarModal();revisarDacion(findT(\''+t.id+'\'))">Autorizar</button></div>';
     h+='</div>';
   }
-  h+='<div style="text-align:right;margin-top:12px;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap"><button class="btn btn-a" onclick="imprimirTicket(\''+t.id+'\')">🖨 Imprimir</button><button class="btn btn-p" onclick="cerrarModal()">Cerrar</button></div></div></div>';
+  h+='<div style="text-align:right;margin-top:12px;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">'+(t.estado==="SIN_GUIA"&&me&&t.vendedor===me.name?'<button class="btn btn-a" onclick="asignarGuiaTicket(\''+t.id+'\')">⭐ Seleccionar guía y enviar</button>':'')+'<button class="btn btn-a" onclick="imprimirTicket(\''+t.id+'\')">🖨 Imprimir</button><button class="btn btn-p" onclick="cerrarModal()">Cerrar</button></div></div></div>';
   $("modal-root").innerHTML=h;
 }
 
@@ -1700,7 +1726,7 @@ function renderAdmin(){
   h+='<div class="card" style="border-left:5px solid var(--navy)"><h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">⏱ Reporte de control de respuesta (asesores)</h3>';
   h+='<div class="muted" style="margin-bottom:10px">Excel con TODOS los avisos de ítems extra y todas las incidencias de guía incorrecta (resueltas y pendientes), con la fecha en que se originaron y cuánto tardó (o lleva) el asesor en responder. Filtra por la fecha en que se originó cada caso.</div>';
   h+='<div class="grid3"><div class="field" style="margin-bottom:0"><label>Desde</label><input type="date" id="ctrl-desde" value="'+ctrlDesde+'" onchange="ctrlDesde=this.value"></div><div class="field" style="margin-bottom:0"><label>Hasta</label><input type="date" id="ctrl-hasta" value="'+ctrlHasta+'" onchange="ctrlHasta=this.value"></div><div style="display:flex;align-items:end"><button class="btn btn-ok" style="width:100%;justify-content:center" onclick="exportarControlVendedores()">⬇ Reporte de control</button></div></div></div>';
-  h+='<div class="card" style="border-left:5px solid var(--amber)"><h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">Base de facturas</h3><div class="muted" style="margin-bottom:10px">'+(baseLoaded?'✓ Base: <b>'+base.length.toLocaleString("es-EC")+'</b> líneas ('+esc(baseFechaStr)+')':"Base no cargada")+'</div><div class="muted" style="margin-bottom:12px;background:#E2F3EA;padding:10px 12px;border-radius:6px"><b>💡</b> Cuando actualices el Excel, presiona "Actualizar base a Firebase" para que todos entren rápido.</div><button class="btn btn-a" onclick="actualizarBaseFirebase()">📤 Actualizar base a Firebase</button> <button class="btn btn-g" onclick="recargarBase()">🔄 Recargar</button><div id="adm-prog" style="margin-top:10px"></div></div>';
+  h+='<div class="card" style="border-left:5px solid var(--amber)"><h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">Base de facturas</h3><div class="muted" style="margin-bottom:10px">'+(baseLoaded?'✓ Base: <b>'+baseLineas.toLocaleString("es-EC")+'</b> líneas ('+esc(baseFechaStr)+')'+(ncFilasCrudas?' · '+base.length.toLocaleString("es-EC")+' ventas + '+ncFilasCrudas.toLocaleString("es-EC")+' NC conciliadas':''):"Base no cargada")+'</div><div class="muted" style="margin-bottom:12px;background:#E2F3EA;padding:10px 12px;border-radius:6px"><b>💡</b> Cuando actualices el Excel, presiona "Actualizar base a Firebase" para que todos entren rápido.</div><button class="btn btn-a" onclick="actualizarBaseFirebase()">📤 Actualizar base a Firebase</button> <button class="btn btn-g" onclick="recargarBase()">🔄 Recargar</button><div id="adm-prog" style="margin-top:10px"></div></div>';
 
   if(baseLoaded){
     h+='<div class="card" style="border-left:5px solid #6A2E91"><h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">🧾 Conciliación de Notas de Crédito (desde el Sheet)</h3>';
@@ -1809,7 +1835,7 @@ async function actualizarBaseFirebase(){
     if(!base.length) throw new Error("No se descargaron facturas.");
     var meta=await subirBaseAFirebase(base,function(m,p){ setP(m,p); });
     baseFechaStr="Firebase";
-    setP("✓ Base actualizada en Firebase: "+meta.rows.toLocaleString("es-EC")+" líneas",100);
+    setP("✓ Base actualizada en Firebase: "+baseLineas.toLocaleString("es-EC")+" líneas ("+meta.rows.toLocaleString("es-EC")+" ventas + "+(ncFilasCrudas||0).toLocaleString("es-EC")+" NC)",100);
     toast("✓ Base subida. Ahora todos cargan rápido."); render();
   }catch(e){ console.error(e); toast("Error: "+e.message,6000); var el=$("adm-prog"); if(el) el.innerHTML='<div class="muted" style="color:var(--bad)">'+esc(e.message)+'</div>'; }
 }
