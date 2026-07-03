@@ -165,11 +165,12 @@ var filtroMisDesde="", filtroMisHasta="";   /* reportes del asesor: rango de fec
 var repDesde="", repHasta="";               /* reportes de bandejas mercadería/devolución/garantía */
 var ctrlDesde="", ctrlHasta="";              /* reporte de control de respuesta de asesores */
 
-/* ===== GUÍA OBLIGATORIA PARA TODOS ===== */
-/* Antes existían asesores exentos de guía; ahora TODOS deben enviar con guía.
-   Los tickets sin guía se guardan como PENDIENTES (SIN_GUIA) y no llegan a mercadería. */
+/* ===== GUÍA OBLIGATORIA (con excepciones autorizadas) ===== */
+/* Solo STALIN COBA, MABEL JACOME y CALL CENTER 1 pueden enviar directo sin guía.
+   Todos los demás: sin guía el ticket queda PENDIENTE (SIN_GUIA) y no llega a mercadería. */
 function normNombre(s){ return String(s||"").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/\s+/g," ").trim(); }
-function requiereGuia(nombre){ return true; }
+var SIN_GUIA_NOMBRES=["STALIN COBA","MABEL JACOME","CALL CENTER 1","CALLCENTER1","CALL CENTER1"].map(normNombre);
+function requiereGuia(nombre){ return SIN_GUIA_NOMBRES.indexOf(normNombre(nombre))<0; }
 
 /* ===== FIREBASE ===== */
 var fbApp=null, fbDB=null, fbReady=false, fbSuscrito=false;
@@ -943,13 +944,14 @@ function abrirDevolverTicket(id){
   var t=findT(id); if(!t) return;
   $("modal-root").innerHTML='<div class="modal-bg"><div class="modal" style="max-width:560px"><h2 style="font-size:22px;color:var(--navy);margin-bottom:6px">↩ Devolver ticket · '+esc(t.numero)+'</h2><div class="muted" style="margin-bottom:10px">'+esc(t.razonSocial)+' · Factura '+esc(t.factura)+' · Asesor: '+esc(t.vendedor)+'</div>'+
   '<div class="card" style="background:var(--bad-bg);border-color:#E8B0AB;margin-bottom:14px">Este ticket llegó <b>sin guía</b>. Al devolverlo saldrá de la bandeja de mercadería y quedará como <b>pendiente de guía</b> para el asesor; NO podrá reenviarse hasta que seleccione una guía válida.</div>'+
-  '<div class="field"><label>Motivo (el asesor lo verá)</label><input id="dv-motivo" value="Enviado sin guía. Todo envío debe tener guía obligatoriamente."></div>'+
+  '<div class="field"><label>Motivo · obligatorio (el asesor lo verá)</label><input id="dv-motivo" placeholder="Ej.: Enviado sin guía. Todo envío debe tener guía obligatoriamente."></div>'+
   '<div style="display:flex;gap:10px;justify-content:flex-end"><button class="btn btn-g" onclick="cerrarModal()">Cancelar</button><button class="btn btn-bad" onclick="guardarDevolverTicket(\''+t.id+'\')">↩ Devolver ticket</button></div></div></div>';
 }
 async function guardarDevolverTicket(id){
   var t=findT(id); if(!t) return;
   if(t.estado!=="MERCADERIA"){ toast("Este ticket ya no está en la bandeja de mercadería."); cerrarModal(); render(); return; }
-  var motivo=($("dv-motivo")?$("dv-motivo").value:"").trim()||"Enviado sin guía";
+  var motivo=($("dv-motivo")?$("dv-motivo").value:"").trim();
+  if(!motivo){ toast("⚠ Escribe el motivo de la devolución. Es obligatorio."); var el=$("dv-motivo"); if(el) el.focus(); return; }
   var ahora=new Date().toISOString();
   t.estado="SIN_GUIA"; t.guiaId=null; t.guiaNumero="";
   t.devueltoSinGuia={motivo:motivo,por:me.name,f:ahora};
@@ -1136,7 +1138,7 @@ function renderBandejaTabla(role){
   if(q) lista=lista.filter(function(t){ return (t.vendedor+" "+t.numero+" "+t.razonSocial+" "+t.factura+" "+(t.guiaNumero||"")+" "+t.motivo).toUpperCase().indexOf(q)>=0; });
   var cont=$("band-tabla"); if(!cont) return;
   if(lista.length===0){ cont.innerHTML=q?'<div class="empty"><div class="big">Sin resultados</div></div>':'<div class="empty"><div class="big">Bandeja vacía</div>No hay tickets pendientes.</div>'; return; }
-  cont.innerHTML='<table><thead><tr><th>N° Ticket</th><th>Fecha</th><th>Guía</th><th>Cliente</th><th>Factura</th><th>Motivo</th><th>Vendedor</th><th></th></tr></thead><tbody>'+lista.map(function(t){ return '<tr><td><b>'+esc(t.numero)+'</b>'+(t.estado==="MIXTO"?' <span class="tag tag-gar" style="font-size:9px">MIXTO</span>':'')+'</td><td>'+fdate(t.fechaTicket)+'</td><td>'+esc(t.guiaNumero||"—")+'</td><td>'+esc(t.razonSocial)+'</td><td>'+esc(t.factura)+'</td><td>'+esc(t.motivo)+'</td><td>'+esc(t.vendedor)+'</td><td style="white-space:nowrap"><button class="btn btn-a btn-sm" onclick="revisar(\''+role+'\',\''+t.id+'\')">Revisar</button>'+((role==="MERCADERIA"&&!t.guiaNumero)?' <button class="btn btn-bad btn-sm" onclick="abrirDevolverTicket(\''+t.id+'\')" title="Devolver al asesor: llegó sin guía">↩ Devolver</button>':'')+'</td></tr>'; }).join("")+'</tbody></table>';
+  cont.innerHTML='<table><thead><tr><th>N° Ticket</th><th>Fecha</th><th>Guía</th><th>Cliente</th><th>Factura</th><th>Motivo</th><th>Vendedor</th><th></th></tr></thead><tbody>'+lista.map(function(t){ return '<tr><td><b>'+esc(t.numero)+'</b>'+(t.estado==="MIXTO"?' <span class="tag tag-gar" style="font-size:9px">MIXTO</span>':'')+'</td><td>'+fdate(t.fechaTicket)+'</td><td>'+esc(t.guiaNumero||"—")+'</td><td>'+esc(t.razonSocial)+'</td><td>'+esc(t.factura)+'</td><td>'+esc(t.motivo)+'</td><td>'+esc(t.vendedor)+'</td><td style="white-space:nowrap"><button class="btn btn-a btn-sm" onclick="revisar(\''+role+'\',\''+t.id+'\')">Revisar</button>'+((role==="MERCADERIA"&&!t.guiaNumero&&requiereGuia(t.vendedor))?' <button class="btn btn-bad btn-sm" onclick="abrirDevolverTicket(\''+t.id+'\')" title="Devolver al asesor: llegó sin guía">↩ Devolver</button>':'')+'</td></tr>'; }).join("")+'</tbody></table>';
 }
 function fechaRepRef(role,t){
   if(role==="MERCADERIA") return t.fechas&&t.fechas.mercaderia;
@@ -1262,7 +1264,8 @@ function revisarMerc(t){
   var h='<div class="modal-bg"><div class="modal"><h2 style="font-size:24px;color:var(--navy)">'+(soloGuia?"Validar guía corregida · ":"Revisión de mercadería · ")+esc(t.numero)+'</h2><div class="muted" style="margin-bottom:10px">'+esc(t.razonSocial)+' · Factura '+esc(t.factura)+'</div>';
   h+='<div class="card" style="background:#FFF1F1;border-color:#E8B0AB">'+(t.guiaModificada?'<div style="background:var(--amber);color:#fff;padding:6px 10px;border-radius:6px;font-weight:700;margin-bottom:10px;font-size:13px">✎ GUÍA MODIFICADA — el vendedor corrigió la guía.'+(soloGuia?' La mercadería ya fue revisada: solo valida la guía.':' Verifica de nuevo.')+'</div>':'')+'<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><div><span class="muted">Guía:</span> <b style="font-size:16px">'+esc(t.guiaNumero||"(sin guía)")+'</b></div>'+(t.sobre?'<span class="tag tag-dev">📨 Incluye sobre</span>':'<span class="muted">Sin sobre</span>')+'</div>';
   if(tieneGuia) h+='<div class="field" style="margin-top:10px;margin-bottom:0"><label>¿La guía es correcta?</label><select id="m-guia" onchange="var e=document.getElementById(\'m-guia-motivo\');if(e)e.style.display=this.value===\'0\'?\'block\':\'none\'"><option value="">— Seleccionar —</option><option value="1">SÍ, la guía es correcta</option><option value="0">NO, guía incorrecta (devolver)</option></select></div><div id="m-guia-motivo" style="display:none;margin-top:8px"><label>Motivo (el vendedor lo verá)</label><input id="m-guia-com" placeholder="Ej.: número de guía no coincide…"></div>';
-  else h+='<div style="margin-top:10px;background:var(--bad-bg);border:1px solid #E8B0AB;border-radius:8px;padding:10px 12px">⚠ <b>Este ticket llegó SIN guía.</b> Todo envío debe tener guía obligatoriamente.<div style="margin-top:8px"><button class="btn btn-bad btn-sm" onclick="abrirDevolverTicket(\''+t.id+'\')">↩ Devolver ticket al asesor</button></div></div>';
+  else if(requiereGuia(t.vendedor)) h+='<div style="margin-top:10px;background:var(--bad-bg);border:1px solid #E8B0AB;border-radius:8px;padding:10px 12px">⚠ <b>Este ticket llegó SIN guía.</b> Todo envío debe tener guía obligatoriamente.<div style="margin-top:8px"><button class="btn btn-bad btn-sm" onclick="abrirDevolverTicket(\''+t.id+'\')">↩ Devolver ticket al asesor</button></div></div>';
+  else h+='<div class="muted" style="margin-top:10px">Este ticket se creó sin guía (asesor autorizado a enviar sin guía), no requiere validación de guía.</div>';
   if(t.sobre&&!soloGuia) h+='<div class="field" style="margin-top:10px;margin-bottom:0"><label>📨 ¿Llegó el sobre?</label><select id="m-sobre"><option value="">— Seleccionar —</option><option value="1">SÍ, el sobre llegó</option><option value="0">NO llegó</option></select></div>';
   h+='</div>';
   if(soloGuia){
