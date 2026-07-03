@@ -651,6 +651,7 @@ function abrirNuevo(){
       ?'<div class="card" style="background:#FFF1F1;border-color:#E8B0AB"><div class="field" style="margin-bottom:0"><label>⭐ Guía (solo tus guías activas de hoy)</label><select id="n-guia"><option value="">— Guardar sin guía (se enviará cuando la selecciones) —</option>'+gd.map(function(g){ return '<option value="'+g.id+'">'+esc(g.numero)+' — '+fdate(g.fechaCreacion)+'</option>'; }).join("")+'</select><div class="muted" style="margin-top:6px">Puedes guardar el ticket sin guía; quedará <b>pendiente</b> y NO se enviará a mercadería hasta que le asignes la guía.</div></div></div>'
       :'<div class="card" style="background:var(--warn-bg);border-color:#E8C766"><b>⏳ No tienes guías activas hoy.</b><div class="muted" style="margin-top:4px">Puedes crear y guardar el ticket ahora; quedará <b>pendiente de guía</b> y NO se enviará a mercadería. Cuando Notas de Crédito registre tu guía, podrás seleccionarla desde "Mis tickets" y ahí recién se enviará.</div></div>')
     :'')+
+    '<div class="field ac-wrap"><label>🔍 Buscar por N° de factura (opcional)</label><input id="n-buscafact" placeholder="Escribe el número de factura y se llenará el cliente automáticamente…" autocomplete="off" oninput="buscarFactura()" onfocus="buscarFactura()"><div class="ac-list" id="n-buscafact-list"></div></div>'+
     '<div class="grid3"><div class="field ac-wrap"><label>Razón social</label><input id="n-razon" placeholder="Escribe mín. 2 letras…" autocomplete="off" oninput="buscarRazon()" onfocus="buscarRazon()"><div class="ac-list" id="n-razon-list"></div></div><div class="field" id="n-fact-wrap"><label>Factura</label><select id="n-fact" onchange="nFact()" disabled><option value="">—</option></select></div><div class="field"><label>Emisión</label><input id="n-emi" disabled></div></div>'+
     '<div id="n-fact-msg" class="muted" style="margin:-6px 0 10px"></div>'+
     '<div class="card" id="n-fact-multi-wrap" style="display:none;background:#FFF1F1;border-color:#E8B0AB"><label style="margin-bottom:6px">⭐ Facturas a saldar (Dación en pagos · puedes elegir varias)</label><div class="muted" style="margin-bottom:8px">Selecciona todas las facturas del cliente que se van a saldar con esta entrega de mercadería.</div><div id="n-fact-multi-list" style="max-height:220px;overflow:auto"></div></div>'+
@@ -670,6 +671,34 @@ function buscarRazon(){
   list.style.display="block";
 }
 function elegirRazon(r){ $("n-razon").value=r; $("n-razon-list").style.display="none"; nRazon(); }
+/* ===== BUSCAR DIRECTAMENTE POR N° DE FACTURA ===== */
+function buscarFactura(){
+  var inp=$("n-buscafact"), list=$("n-buscafact-list"); if(!inp||!list) return;
+  var q=inp.value.trim().toUpperCase();
+  if(q.length<3){ list.style.display="none"; return; }
+  var vistos={}, matches=[];
+  for(var i=0;i<base.length;i++){
+    var f=String(base[i].factura||"");
+    if(f.toUpperCase().indexOf(q)<0) continue;
+    if(vistos[f]) continue;
+    vistos[f]=1;
+    matches.push({f:f,r:base[i].razon.trim(),e:base[i].emision});
+    if(matches.length>=60) break;
+  }
+  if(matches.length===0){ list.innerHTML='<div class="muted" style="cursor:default">Sin coincidencias en la base</div>'; list.style.display="block"; return; }
+  list.innerHTML=matches.map(function(m){ return '<div data-f="'+esc(m.f)+'" data-r="'+esc(m.r)+'" onclick="elegirFactura(this.dataset.f,this.dataset.r)"><b>'+esc(m.f)+'</b> — '+esc(m.r)+' <span class="muted">('+fdate(m.e)+')</span></div>'; }).join("");
+  list.style.display="block";
+}
+function elegirFactura(f,r){
+  var list=$("n-buscafact-list"); if(list) list.style.display="none";
+  var inp=$("n-buscafact"); if(inp) inp.value=f;
+  $("n-razon").value=r; $("n-razon-list").style.display="none";
+  nRazon();
+  var sel=$("n-fact"), existe=false;
+  for(var i=0;i<sel.options.length;i++){ if(sel.options[i].value===f){ existe=true; break; } }
+  if(existe){ sel.value=f; nFact(); toast("✓ Factura "+f+" cargada · "+r); }
+  else{ toast("⚠ La factura "+f+" ya no tiene saldo disponible (devuelta por completo o con nota de crédito). Se cargó el cliente para que revises sus otras facturas.",6000); }
+}
 /* ¿Esta factura todavía tiene algún código con saldo disponible (sin contar lo ya devuelto en este sistema NI lo ya acreditado por NC en contabilidad)? */
 function facturaTieneSaldo(factura){
   try{
