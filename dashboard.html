@@ -157,17 +157,21 @@ async function initFirebase(){
   try{
     if(typeof firebase==="undefined") throw new Error("SDK no cargó");
     firebase.initializeApp(firebaseConfig);
-    /* Igual que index.html: inicia sesión anónima de Firebase para que las reglas
-       de seguridad (auth != null) permitan leer los datos. Sin esto, Firebase
-       responde "Permission denied" en cuanto las reglas exigen sesión. */
-    await firebase.auth().signInAnonymously();
+    /* Este dashboard ya NO inicia sesión anónima: las reglas de la base solo dejan
+       leer a usuarios reales de Firebase Authentication. Reaprovecha la sesión que
+       ya abriste en el sistema principal (index.html) en este mismo navegador. */
+    var user=await new Promise(function(resolve){
+      var unsub=firebase.auth().onAuthStateChanged(function(u){ unsub(); resolve(u); });
+      setTimeout(function(){ resolve(firebase.auth().currentUser); },4000);
+    });
+    if(!user) throw new Error("Sin sesión activa.");
     fbReady=true;
     var fb=$("chip-fb"); if(fb) fb.textContent="🟢 En línea";
     return true;
   }catch(e){ console.error(e); var fb=$("chip-fb"); if(fb) fb.textContent="🔴 Sin conexión"; return false; }
 }
 function cargarEstado(){
-  if(!fbReady){ $("main").innerHTML='<div class="card"><div class="empty"><div class="big">Sin conexión a Firebase</div>No se pudieron cargar los datos.</div></div>'; return; }
+  if(!fbReady){ $("main").innerHTML='<div class="card"><div class="empty"><div class="big">Sin conexión a Firebase</div>Abre este dashboard desde el botón "Abrir dashboard" del sistema principal después de iniciar sesión ahí; este dashboard reutiliza esa sesión y ya no acepta visitantes anónimos.</div></div>'; return; }
   var prog=$("load-prog"); if(prog) prog.style.width="40%";
   firebase.database().ref("estado").get().then(function(snap){
     var val=snap.val()||{};
