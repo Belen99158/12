@@ -222,6 +222,7 @@ function svgLinea(labels,valores){
 function ticketsFiltrados(){
   return state.tickets.filter(function(t){
     if(t.estado==="ELIMINADO") return false;
+    if(t.anioAnterior) return false;   /* los 2200 (años anteriores) van en su propio reporte, no en los indicadores del año actual */
     var f=hoyStr(t.fechaTicket);
     if(desde&&f<desde) return false;
     if(hasta&&f>hasta) return false;
@@ -602,7 +603,45 @@ function render(){
 
   if(nTickets===0){ h='<div class="card"><div class="empty"><div class="big">Sin datos en este periodo</div>Ajusta el rango de fechas o crea tickets en el sistema.</div></div>'+'<div class="card"><div class="grid4" style="align-items:end"><div><label>Desde</label><input type="date" id="f-desde" value="'+desde+'"></div><div><label>Hasta</label><input type="date" id="f-hasta" value="'+hasta+'"></div><div><button class="btn btn-p" style="width:100%;justify-content:center" onclick="aplicarFiltro()">Aplicar filtro</button></div><div><button class="btn btn-g" style="width:100%;justify-content:center" onclick="desde=\'\';hasta=\'\';render()">Limpiar</button></div></div></div>'; }
 
+  h+=reporteAnioAnterior();
   $("main").innerHTML=h;
+}
+/* ===== REPORTE APARTE: garantías/devoluciones de años anteriores (tickets 2200) ===== */
+function estadoAnioLabel(t){
+  if(t.estado==="NC") return t.nc&&t.nc.hecha?"NC hecha":"En NC";
+  if(t.estado==="DEV_RECHAZADA"||t.estado==="RECHAZADA"||t.estado==="GAR_RECHAZADA") return "No aceptada";
+  if(t.estado==="MERCADERIA") return "En mercadería";
+  if(t.estado==="DEVOLUCION") return "Validando total";
+  if(t.estado==="GARANTIA") return "En garantía";
+  if(t.estado==="SIN_GUIA") return "Pendiente de guía";
+  return t.estado;
+}
+function reporteAnioAnterior(){
+  var lista=state.tickets.filter(function(t){
+    if(!t.anioAnterior||t.estado==="ELIMINADO") return false;
+    var f=hoyStr(t.fechaTicket);
+    if(desde&&f<desde) return false;
+    if(hasta&&f>hasta) return false;
+    return true;
+  });
+  if(lista.length===0) return "";
+  var totalAcep=0, nAcep=0, enProceso=0, porAnio={}, porCli={};
+  lista.forEach(function(t){
+    var acep=(t.estado==="NC"||(t.fechas&&t.fechas.nc))?totalAceptado(t):0;
+    if(acep>0){ totalAcep+=acep; nAcep++; }
+    else if(t.estado!=="DEV_RECHAZADA"&&t.estado!=="RECHAZADA"&&t.estado!=="GAR_RECHAZADA") enProceso++;
+    var a=t.anioFactura||"?"; if(!porAnio[a]) porAnio[a]={n:0,monto:0}; porAnio[a].n++; porAnio[a].monto+=acep;
+    porCli[t.razonSocial]=(porCli[t.razonSocial]||0)+acep;
+  });
+  var h='<div class="card" style="border-left:5px solid #6A2E91"><div class="sec-title" style="margin-top:0">📅 Garantías / devoluciones de años anteriores <span class="muted" style="font-weight:400">(reporte aparte · no cuenta en los indicadores del año actual)</span></div>';
+  h+='<div class="grid4"><div class="kpi"><div class="disp" style="color:var(--navy)">'+lista.length+'</div><div class="lbl">Tickets 2200</div></div><div class="kpi"><div class="disp" style="color:var(--ok)">'+money(totalAcep)+'</div><div class="lbl">Total aceptado (NC)</div></div><div class="kpi"><div class="disp" style="color:#C77F00">'+enProceso+'</div><div class="lbl">En proceso</div></div><div class="kpi"><div class="disp" style="color:var(--navy)">'+nAcep+'</div><div class="lbl">Tickets aceptados</div></div></div>';
+  var anios=Object.keys(porAnio).sort();
+  h+='<div class="grid2" style="margin-top:12px"><div><div class="sec-title">Por año de factura</div><div style="overflow-x:auto"><table><thead><tr><th>Año</th><th class="num">Tickets</th><th class="num">Total aceptado</th></tr></thead><tbody>'+anios.map(function(a){ return '<tr><td>'+esc(a)+'</td><td class="num">'+porAnio[a].n+'</td><td class="num">'+money(porAnio[a].monto)+'</td></tr>'; }).join("")+'</tbody></table></div></div>';
+  var cliArr=Object.keys(porCli).map(function(k){return {k:k,v:porCli[k]};}).sort(function(a,b){return b.v-a.v;}).slice(0,10);
+  h+='<div><div class="sec-title">Top clientes (aceptado)</div><div style="overflow-x:auto"><table><thead><tr><th>Cliente</th><th class="num">Total aceptado</th></tr></thead><tbody>'+cliArr.map(function(c){ return '<tr><td style="font-size:12px">'+esc(c.k)+'</td><td class="num">'+money(c.v)+'</td></tr>'; }).join("")+'</tbody></table></div></div></div>';
+  h+='<div class="sec-title">Detalle</div><div style="overflow-x:auto"><table><thead><tr><th>N° Ticket</th><th>Año</th><th>Cliente</th><th>Factura</th><th>Motivo</th><th>Estado</th><th class="num">Total aceptado</th></tr></thead><tbody>'+lista.slice().reverse().map(function(t){ var acep=(t.estado==="NC"||(t.fechas&&t.fechas.nc))?totalAceptado(t):0; return '<tr><td><b>'+esc(t.numero)+'</b></td><td>'+esc(t.anioFactura||"")+'</td><td>'+esc(t.razonSocial)+'</td><td>'+esc(t.factura)+'</td><td>'+(t.motivo==="GARANTIAS"?"Garantía":"Devolución")+'</td><td>'+esc(estadoAnioLabel(t))+'</td><td class="num">'+(acep>0?money(acep):'<span class="muted">—</span>')+'</td></tr>'; }).join("")+'</tbody></table></div>';
+  h+='</div>';
+  return h;
 }
 function aplicarFiltro(){ desde=$("f-desde")?$("f-desde").value:""; hasta=$("f-hasta")?$("f-hasta").value:""; render(); }
 
