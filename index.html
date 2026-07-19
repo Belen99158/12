@@ -166,7 +166,7 @@ var SUCURSALES={"004":"AV. EL REY","002":"BODEGA","003":"AV. 6 DE DICIEMBRE","00
 var me=null, base=[], RAZONES=[];
 var ncAplicados=0, ncSinMatch=0, ncFilasNegativas=0, ncFilasCrudas=0;
 var ncSinMatchList=[], ncNegativasList=[];   /* para exportar a Excel desde Admin */
-var state={seq3200:0,seq5200:0,tickets:[],guias:[],avisos:[],sobres:[]};
+var state={seq3200:0,seq5200:0,seq2200:0,tickets:[],guias:[],avisos:[],sobres:[]};
 var baseLoaded=false, baseLineas=0, baseFechaStr="";
 var vistaActiva=null;
 var nuevo=null, filtroItems="", filtroMisTickets="", filtroBandeja="", filtroAdmin="", guiaFiltroTexto="", ncTab="pend", ncVista="tickets", guiaFiltroAsesor="", garFotos=[], garFotos2=[], ncPdfData=null, logoDataUrl=null, pdfUrl=null;
@@ -204,9 +204,9 @@ function suscribirEstado(onPrimera){
   fbDB.ref("estado").on("value",function(snap){
     var val=snap.val();
     if(val){
-      state={seq3200:val.seq3200||0,seq5200:val.seq5200||0,tickets:arr(val.tickets),guias:arr(val.guias),avisos:arr(val.avisos),sobres:arr(val.sobres)};
+      state={seq3200:val.seq3200||0,seq5200:val.seq5200||0,seq2200:val.seq2200||0,tickets:arr(val.tickets),guias:arr(val.guias),avisos:arr(val.avisos),sobres:arr(val.sobres)};
     }else{
-      state={seq3200:0,seq5200:0,tickets:[],guias:[],avisos:[],sobres:[]};
+      state={seq3200:0,seq5200:0,seq2200:0,tickets:[],guias:[],avisos:[],sobres:[]};
     }
     if(primera){ primera=false; if(onPrimera) onPrimera(); }
     else if(me){ render(); }
@@ -223,7 +223,7 @@ function limpiarUndefined(obj){
 }
 async function saveState(){
   if(!fbReady){ toast("⚠ Sin conexión. No se guardó. Si recargas la página, perderás este cambio."); throw new Error("Sin conexión a Firebase"); }
-  var payload=limpiarUndefined({seq3200:state.seq3200||0,seq5200:state.seq5200||0,tickets:state.tickets||[],guias:state.guias||[],avisos:state.avisos||[],sobres:state.sobres||[]});
+  var payload=limpiarUndefined({seq3200:state.seq3200||0,seq5200:state.seq5200||0,seq2200:state.seq2200||0,tickets:state.tickets||[],guias:state.guias||[],avisos:state.avisos||[],sobres:state.sobres||[]});
   payload._updated=firebase.database.ServerValue.TIMESTAMP;
   try{
     await fbDB.ref("estado").set(payload);
@@ -232,6 +232,32 @@ async function saveState(){
     toast("⚠ NO se guardó: "+(e&&e.message||e)+". Vuelve a intentar; no cierres ni recargues la página todavía.",8000);
     throw e;
   }
+}
+/* ===== NUMERACIÓN DE TICKETS A PRUEBA DE CHOQUES =====
+   Antes: dos personas que guardaban a la vez podían tomar el mismo número o pisarse.
+   Ahora el número se pide con una transacción atómica en Firebase (contadores/seqXXXX),
+   así Firebase garantiza que cada ticket reciba un número único aunque varios guarden
+   simultáneamente. La copia en state.seqXXXX solo sirve para la vista previa del formulario. */
+function maxNumeroSerie(prefijo){
+  var mx=0;
+  (state.tickets||[]).forEach(function(t){
+    var m=String(t.numero||"").match(/^(\d{4})-(\d+)/);
+    if(m&&m[1]===prefijo){ var n=+m[2]; if(n>mx) mx=n; }
+  });
+  return mx;
+}
+async function siguienteNumero(prefijo){
+  var seedLocal=(prefijo==="5200"?state.seq5200:(prefijo==="3200"?state.seq3200:state.seq2200))||0;
+  var seed=Math.max(seedLocal,maxNumeroSerie(prefijo));
+  var n;
+  if(fbReady){
+    var res=await fbDB.ref("contadores/seq"+prefijo).transaction(function(cur){ return (cur==null?seed:cur)+1; });
+    n=res.snapshot.val();
+  }else{
+    n=seed+1;
+  }
+  if(prefijo==="5200") state.seq5200=n; else if(prefijo==="3200") state.seq3200=n; else state.seq2200=n;
+  return prefijo+"-"+String(n).padStart(4,"0");
 }
 async function guardarPdfNC(id,obj){ if(!fbReady) throw new Error("Sin Firebase"); await fbDB.ref("ncpdf/"+id).set(obj); }
 async function leerPdfNCfb(id){ if(!fbReady) throw new Error("Sin Firebase"); var s=await fbDB.ref("ncpdf/"+id).get(); return s.val(); }
@@ -622,7 +648,7 @@ function renderAsesor(){
   var sg=state.tickets.filter(function(t){ return t.vendedor===me.name&&t.estado==="SIN_GUIA"; }).slice().reverse();
   var avisosExtra=(state.avisos||[]).filter(function(a){ return a.vendedor===me.name&&!a.atendido&&a.tipo!=="REFACT"; }).slice().reverse();
   var avisosRefact=(state.avisos||[]).filter(function(a){ return a.vendedor===me.name&&!a.atendido&&a.tipo==="REFACT"; }).slice().reverse();
-  $("main").innerHTML='<div style="display:flex;align-items:center;gap:14px;margin-bottom:18px;flex-wrap:wrap"><h2 style="font-size:28px;color:var(--navy)">Orden Lubamaqui</h2><div style="flex:1"></div>'+(!baseLoaded?'<button class="btn btn-g" onclick="recargarBase()">🔄 Cargar base</button>':'')+(puedeActuar()?'<button class="btn btn-g" onclick="abrirSoloSobre()">📨 Solo enviar sobre</button><button class="btn btn-a" onclick="abrirNuevo()">+ Nuevo ticket</button>':'')+'</div>'+
+  $("main").innerHTML='<div style="display:flex;align-items:center;gap:14px;margin-bottom:18px;flex-wrap:wrap"><h2 style="font-size:28px;color:var(--navy)">Orden Lubamaqui</h2><div style="flex:1"></div>'+(!baseLoaded?'<button class="btn btn-g" onclick="recargarBase()">🔄 Cargar base</button>':'')+(puedeActuar()?'<button class="btn btn-g" onclick="abrirSoloSobre()">📨 Solo enviar sobre</button><button class="btn btn-g" onclick="abrirAnioAnterior()">📅 Factura de año anterior</button><button class="btn btn-a" onclick="abrirNuevo()">+ Nuevo ticket</button>':'')+'</div>'+
     (!baseLoaded?'<div class="card" style="background:var(--warn-bg);border-color:#E8C766">⚠ Base no cargada. Presiona "Cargar base" o espera.</div>':'')+
     sg.map(function(t){ var dS=diasDesde(t.devueltoSinGuia&&t.devueltoSinGuia.f||t.fechaTicket); var dv=t.devueltoSinGuia; return '<div class="alert-del" style="background:var(--warn-bg);border-color:#E8C766">'+(dv?('↩ <b>Ticket '+esc(t.numero)+' devuelto por mercadería: llegó SIN guía</b> ('+esc(t.razonSocial)+' · Factura '+esc(t.factura)+').<br>Devuelto por '+esc(dv.por||"")+' el '+fdate(dv.f)+'. Motivo: <b>'+esc(dv.motivo||"")+'</b><br>'):('⏳ <b>Ticket '+esc(t.numero)+' guardado sin guía</b> ('+esc(t.razonSocial)+' · Factura '+esc(t.factura)+').<br>'))+'No se enviará a mercadería hasta que selecciones la guía. · <b style="color:'+colorDias(dS)+'">Lleva '+diasTexto(dS)+' pendiente</b><div style="margin-top:6px"><button class="btn btn-a btn-sm" onclick="asignarGuiaTicket(\''+t.id+'\')">⭐ Seleccionar guía y enviar</button></div></div>'; }).join("")+
     gi.map(function(t){ var dG=diasDesde(t.guiaIncorrecta&&t.guiaIncorrecta.f); return '<div class="alert-del">⚠ <b>Ticket '+esc(t.numero)+' devuelto por guía incorrecta</b> ('+esc(t.guiaIncorrecta&&t.guiaIncorrecta.por||"")+', '+fdate(t.guiaIncorrecta&&t.guiaIncorrecta.f)+').<br>Motivo: <b>'+esc(t.guiaIncorrecta&&t.guiaIncorrecta.motivo||"")+'</b> · La guía volvió a estar disponible. · <b style="color:'+colorDias(dG)+'">Lleva '+diasTexto(dG)+' sin corregir</b></div>'; }).join("")+
@@ -844,7 +870,7 @@ function renderItemsBody(){
 }
 function nCalc(i){ var r=nuevo.lineas[i]; if(!r) return; var max=(nuevo.restante&&nuevo.restante[i]!==undefined)?nuevo.restante[i]:r.cant; var el=$("q-"+i); var q=Math.max(0,Math.min(max,+(el?el.value:0))); if(el) el.value=q; nuevo.cant=nuevo.cant||{}; nuevo.cant[i]=q; if($("tt-"+i)) $("tt-"+i).textContent=money(totalLinea(r,q)); }
 function nCom(i){ var el=$("c-"+i); if(!el) return; nuevo.com=nuevo.com||{}; nuevo.com[i]=el.value; }
-function nNum(){ var m=$("n-motivo").value; nuevo.motivo=m; if(!m){ $("n-num").value=""; return; } var gar=m==="GARANTIAS"; var nx=gar?state.seq5200+1:state.seq3200+1; $("n-num").value=(gar?"5200":"3200")+"-"+String(nx).padStart(4,"0"); }
+function nNum(){ var m=$("n-motivo").value; nuevo.motivo=m; if(!m){ $("n-num").value=""; return; } var gar=m==="GARANTIAS"; var pref=gar?"5200":"3200"; var nx=Math.max((gar?state.seq5200:state.seq3200)||0,maxNumeroSerie(pref))+1; $("n-num").value=pref+"-"+String(nx).padStart(4,"0"); }
 /* ===== DACIÓN EN PAGOS: facturas múltiples + mercadería externa ===== */
 function esDacion(){ return !!(nuevo&&nuevo.motivo==="DACION EN PAGOS"); }
 /* ===== DEVOLUCIÓN Y REFACTURACIÓN ===== */
@@ -990,8 +1016,7 @@ async function guardarTicket(){
   }
   if(items.length===0){ toast(dacion?"Ingresa cantidad en al menos un producto o agrega mercadería externa.":"Ingresa cantidad en al menos un producto."); return; }
   var gar=nuevo.motivo==="GARANTIAS";
-  if(gar) state.seq5200++; else state.seq3200++;
-  var num=(gar?"5200":"3200")+"-"+String(gar?state.seq5200:state.seq3200).padStart(4,"0");
+  var num=await siguienteNumero(gar?"5200":"3200");
   var sobre=$("n-sobre")?$("n-sobre").checked:false;
   var facturasTicket=dacion?nuevo.facturas.slice():[nuevo.factura];
   var facturaTxt=dacion?nuevo.facturas.join(", "):nuevo.factura;
@@ -1042,6 +1067,78 @@ function renderSobresPendientes(){
   var pend=(state.sobres||[]).filter(function(s){return s.estado==="ENVIADO";}).slice().reverse();
   if(pend.length===0) return "";
   return '<div class="card" style="border-left:5px solid var(--navy)"><h3 style="font-size:18px;color:var(--navy);margin-bottom:8px">📨 Sobres por recibir</h3><div class="muted" style="margin-bottom:10px">Solo documentos, sin productos asociados.</div><div style="overflow-x:auto"><table><thead><tr><th>Guía</th><th>Asesor</th><th>Fecha</th><th>Referencia</th><th></th></tr></thead><tbody>'+pend.map(function(s){ return '<tr><td><b>'+esc(s.guiaNumero)+'</b></td><td>'+esc(s.asesor)+'</td><td>'+fdatetime(s.fecha)+'</td><td>'+esc(s.comentario||"—")+'</td><td>'+(puedeActuar()?'<button class="btn btn-ok btn-sm" onclick="marcarSobreRecibido(\''+s.id+'\')">✓ Recibido</button>':'')+'</td></tr>'; }).join("")+'</tbody></table></div></div>';
+}
+
+/* ===== FACTURA DE AÑO ANTERIOR (garantías/devoluciones fuera de la base cargada) ===== */
+var nuevoAnio=null;
+function abrirAnioAnterior(){
+  if(!puedeActuar()){ toast("👁 Modo solo lectura: no puedes crear tickets fuera de tu propia pestaña.",4000); return; }
+  var pideGuia=requiereGuia(me.name);
+  var gd=pideGuia?guiasSeleccionables(me.name):[];
+  nuevoAnio={lineas:[{codigo:"",desc:"",cantidad:"",total:"",com:""}]};
+  var anioActual=new Date().getFullYear();
+  var anios=[]; for(var y=anioActual-1;y>=anioActual-6;y--) anios.push(y);
+  $("modal-root").innerHTML='<div class="modal-bg"><div class="modal"><h2 style="font-size:26px;color:var(--navy);margin-bottom:4px">📅 Factura de año anterior</h2><div class="muted" style="margin-bottom:18px">Para garantías o devoluciones de facturas que <b>no están</b> en la base cargada. Se escribe todo a mano. Vendedor: <b>'+esc(me.name)+'</b> · Numeración <b>2200</b></div>'+
+    '<div id="na-guia-card">'+(pideGuia?(gd.length>0
+      ?'<div class="card" style="background:#FFF1F1;border-color:#E8B0AB"><div class="field" style="margin-bottom:0"><label>⭐ Guía (solo tus guías activas de hoy)</label><select id="na-guia"><option value="">— Guardar sin guía (se enviará cuando la selecciones) —</option>'+gd.map(function(g){ return '<option value="'+g.id+'">'+esc(g.numero)+' — '+fdate(g.fechaCreacion)+'</option>'; }).join("")+'</select><div class="muted" style="margin-top:6px">Puedes guardar sin guía; quedará <b>pendiente</b> y no se enviará a mercadería hasta que le asignes la guía.</div></div></div>'
+      :'<div class="card" style="background:var(--warn-bg);border-color:#E8C766"><b>⏳ No tienes guías activas hoy.</b><div class="muted" style="margin-top:4px">Puedes guardar el ticket ahora; quedará pendiente de guía.</div></div>')
+    :'')+'</div>'+
+    '<div class="grid3"><div class="field"><label>Año de la factura</label><select id="na-anio">'+anios.map(function(y){return '<option>'+y+'</option>';}).join("")+'</select></div><div class="field"><label>N° factura anterior</label><input id="na-factura" placeholder="Ej.: 002-001-000012345" autocomplete="off"></div><div class="field"><label>Motivo</label><select id="na-motivo"><option value="GARANTIAS">Garantía</option><option value="DEVOLUCION">Devolución</option></select></div></div>'+
+    '<div class="field"><label>Cliente (razón social)</label><input id="na-cliente" placeholder="Nombre del cliente" autocomplete="off"></div>'+
+    '<div class="muted" style="margin:-4px 0 10px">💡 El <b>total</b> que escribas (con IVA incluido) será <b>validado por Devoluciones</b> antes de continuar. Si es garantía, luego pasa al revisor de Garantías.</div>'+
+    '<div id="na-items"></div>'+
+    '<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px"><button class="btn btn-g" onclick="cerrarModal()">Cancelar</button><button class="btn btn-p" onclick="guardarAnioAnterior()">Guardar ticket 2200</button></div></div></div>';
+  renderItemsAnio();
+}
+function renderItemsAnio(){
+  var cont=$("na-items"); if(!cont) return;
+  cont.innerHTML='<div style="overflow-x:auto"><table><thead><tr><th>Código</th><th>Descripción</th><th class="num" style="width:90px">Cantidad</th><th class="num" style="width:110px">Total $</th><th>Comentario</th><th></th></tr></thead><tbody>'+nuevoAnio.lineas.map(function(r,ix){
+    return '<tr>'+
+      '<td><input value="'+esc(r.codigo||"")+'" placeholder="Código" oninput="anioSet('+ix+',\'codigo\',this.value)"></td>'+
+      '<td><input value="'+esc(r.desc||"")+'" placeholder="Descripción" oninput="anioSet('+ix+',\'desc\',this.value)"></td>'+
+      '<td><input type="number" min="0" step="1" value="'+esc(r.cantidad||"")+'" style="text-align:right" oninput="anioSet('+ix+',\'cantidad\',this.value)"></td>'+
+      '<td><input type="number" min="0" step="0.01" value="'+esc(r.total||"")+'" style="text-align:right" oninput="anioSet('+ix+',\'total\',this.value)"></td>'+
+      '<td><input value="'+esc(r.com||"")+'" placeholder="Comentario" oninput="anioSet('+ix+',\'com\',this.value)"></td>'+
+      '<td>'+(nuevoAnio.lineas.length>1?'<button class="btn btn-bad btn-sm" onclick="anioQuitar('+ix+')">✕</button>':'')+'</td>'+
+    '</tr>';
+  }).join("")+'</tbody></table></div><button class="btn btn-g btn-sm" style="margin-top:10px" onclick="anioAgregar()">+ Agregar línea</button>';
+}
+function anioSet(ix,campo,val){ if(nuevoAnio&&nuevoAnio.lineas[ix]) nuevoAnio.lineas[ix][campo]=val; }
+function anioAgregar(){ nuevoAnio.lineas.push({codigo:"",desc:"",cantidad:"",total:"",com:""}); renderItemsAnio(); }
+function anioQuitar(ix){ nuevoAnio.lineas.splice(ix,1); renderItemsAnio(); }
+async function guardarAnioAnterior(){
+  if(!puedeActuar()){ toast("👁 Modo solo lectura.",4000); return; }
+  var pideGuia=requiereGuia(me.name), guia=null;
+  if(pideGuia){
+    var guiaId=$("na-guia")?$("na-guia").value:"";
+    if(guiaId){
+      guia=findGuia(guiaId);
+      if(!guia||guia.estado==="ANULADA"||hoyStr(guia.fechaCreacion)!==hoyStr()){ toast("Esa guía ya no es válida hoy."); return; }
+    }
+  }
+  var anio=+($("na-anio")?$("na-anio").value:0);
+  var factura=($("na-factura")?$("na-factura").value:"").trim();
+  var motivo=$("na-motivo")?$("na-motivo").value:"GARANTIAS";
+  var cliente=($("na-cliente")?$("na-cliente").value:"").trim();
+  if(!cliente){ toast("Escribe el cliente."); return; }
+  if(!factura){ toast("Escribe el N° de factura anterior."); return; }
+  var items=[];
+  (nuevoAnio.lineas||[]).forEach(function(r){
+    var cod=(r.codigo||"").trim(), cant=+r.cantidad||0, tot=+r.total||0;
+    if(!cod||cant<=0) return;
+    items.push({codigo:cod,desc:(r.desc||"").trim()||"(sin descripción)",sub:"AÑO ANTERIOR "+anio,cantidad:cant,comVendedor:(r.com||"").trim(),neto:+tot.toFixed(2),iva:0,total:+tot.toFixed(2),factura:factura,anioAnterior:true});
+  });
+  if(items.length===0){ toast("Ingresa al menos una línea con código, cantidad y total."); return; }
+  var num=await siguienteNumero("2200");
+  var estadoInicial=(pideGuia&&!guia)?"SIN_GUIA":"MERCADERIA";
+  var ahora=new Date().toISOString();
+  var t={id:"T"+Date.now(),numero:num,anioAnterior:true,anioFactura:anio,motivo:motivo,razonSocial:cliente,ruc:"",factura:factura,facturas:[factura],emision:anio+"-01-01",facturador:"",fechaTicket:ahora,vendedor:me.name,estado:estadoInicial,items:items,fechas:{},guiaId:guia?guia.id:null,guiaNumero:guia?guia.numero:"",sobre:false,historial:[{f:ahora,e:"Creado (año anterior "+anio+", "+(motivo==="GARANTIAS"?"garantía":"devolución")+") por "+me.name+(guia?" · Guía "+guia.numero:(pideGuia?" · guardado SIN guía (pendiente de envío)":""))}]};
+  state.tickets.push(t); await saveState();
+  cerrarModal();
+  if(estadoInicial==="SIN_GUIA") toast("✓ Ticket "+num+" guardado. ⏳ Selecciona la guía en \"Mis tickets\" para enviarlo a mercadería.",6000);
+  else toast("✓ Ticket "+num+" creado"+(guia?" con guía "+guia.numero:"")+".");
+  setTimeout(function(){ imprimirTicket(t.id); },400);
+  render();
 }
 
 /* ===== ASIGNAR GUÍA A TICKET PENDIENTE (SIN_GUIA) Y ENVIAR ===== */
@@ -1229,7 +1326,7 @@ function verTicket(id){
   var h='<div class="modal-bg" onclick="if(event.target===this)this.remove()"><div class="modal"><h2 style="font-size:24px;color:var(--navy);margin-bottom:8px">Ticket '+esc(t.numero)+' '+tagFor(t)+'</h2>';
   if(t.estado==="GUIA_INCORRECTA") h+='<div class="alert-del">⚠ Devuelto por guía incorrecta. Motivo: <b>'+esc(t.guiaIncorrecta&&t.guiaIncorrecta.motivo||"")+'</b></div>';
   if(t.estado==="SIN_GUIA"&&t.devueltoSinGuia) h+='<div class="alert-del">↩ Devuelto por mercadería ('+esc(t.devueltoSinGuia.por||"")+', '+fdate(t.devueltoSinGuia.f)+'): llegó sin guía. Motivo: <b>'+esc(t.devueltoSinGuia.motivo||"")+'</b></div>';
-  h+='<div class="kv" style="margin-bottom:12px"><b>Guía</b><span>'+esc(t.guiaNumero||"—")+sobreTag+'</span><b>Cliente</b><span>'+esc(t.razonSocial)+'</span><b>RUC</b><span>'+esc(t.ruc||"")+'</span><b>Factura(s)</b><span>'+esc(t.factura)+'</span><b>Sucursal</b><span>'+esc(sucursalDe(t.factura).nombre)+'</span><b>Emisión</b><span>'+fdate(t.emision)+'</span><b>Fecha ticket</b><span>'+fdate(t.fechaTicket)+'</span><b>Vendedor</b><span>'+esc(t.vendedor)+'</span><b>Motivo</b><span>'+esc(t.motivo)+'</span>'+(t.refactCliente?'<b>Refacturar a</b><span><b>'+esc(t.refactCliente)+'</b>'+(t.refactValidado?' <span class="tag tag-nc">✅ refacturado'+(t.refactValidado.facturaNueva?(' · '+esc(t.refactValidado.facturaNueva)):'')+'</span>':' <span class="tag tag-merc">pendiente de validar</span>')+'</span>':'')+'</div>';
+  h+='<div class="kv" style="margin-bottom:12px"><b>Guía</b><span>'+esc(t.guiaNumero||"—")+sobreTag+'</span><b>Cliente</b><span>'+esc(t.razonSocial)+'</span><b>RUC</b><span>'+esc(t.ruc||"")+'</span><b>Factura(s)</b><span>'+esc(t.factura)+'</span><b>Sucursal</b><span>'+esc(sucursalDe(t.factura).nombre)+'</span><b>Emisión</b><span>'+fdate(t.emision)+'</span><b>Fecha ticket</b><span>'+fdate(t.fechaTicket)+'</span><b>Vendedor</b><span>'+esc(t.vendedor)+'</span><b>Motivo</b><span>'+esc(t.motivo)+'</span>'+(t.anioAnterior?'<b>Año factura</b><span><span class="tag tag-gar">📅 Año anterior '+esc(t.anioFactura)+'</span>'+(t.valorValidado?' <span class="tag tag-nc">total validado</span>':' <span class="tag tag-merc">total por validar</span>')+'</span>':'')+(t.refactCliente?'<b>Refacturar a</b><span><b>'+esc(t.refactCliente)+'</b>'+(t.refactValidado?' <span class="tag tag-nc">✅ refacturado'+(t.refactValidado.facturaNueva?(' · '+esc(t.refactValidado.facturaNueva)):'')+'</span>':' <span class="tag tag-merc">pendiente de validar</span>')+'</span>':'')+'</div>';
   h+='<div style="overflow-x:auto"><table><thead><tr><th>Código</th><th>Cant.</th><th>Tipo</th><th>Descripción</th><th>Comentario</th><th class="num">Total</th></tr></thead><tbody>'+t.items.map(function(i){ var tp=tipoDeItem(t,i); var tagTipo=tp==="GARANTIA"?'<span class="tag tag-gar">Garantía</span>':(tp==="DACION"?'<span class="tag tag-merc">Dación'+(i.esExterna?" externa":"")+'</span>':'<span class="tag tag-dev">Devolución</span>'); var origen=i.esExterna?('<div class="muted">Mercadería externa'+(i.facturaCliente?(' · Fact. cliente: '+esc(i.facturaCliente)):'')+(i.fechaCliente?(' · '+fdate(i.fechaCliente)):'')+'</div>'):''; return '<tr><td>'+esc(i.codigo)+'</td><td>'+i.cantidad+'</td><td>'+tagTipo+'</td><td style="max-width:260px">'+esc(i.desc)+'<div class="muted">'+esc(i.sub)+'</div>'+origen+'</td><td style="max-width:170px">'+esc(i.comVendedor||"")+'</td><td class="num">'+money(i.total)+'</td></tr>'; }).join("")+'</tbody></table></div>';
   if(t.items.some(function(i){return i.merc;})) h+='<div class="card" style="margin-top:12px"><h3 style="color:var(--navy)">Revisión de mercadería</h3>'+t.items.map(function(i){ return i.merc?'<div style="margin:6px 0">• <b>'+esc(i.codigo)+'</b>: llegaron <b>'+llegoQ(i)+'</b> de '+i.cantidad+' — '+esc(i.merc.com||"sin comentario")+'</div>':''; }).join("")+'</div>';
   if(t.gar){ var rechV=garItemsRechazados(t), hayR=rechV.length>0, totAcepV=totalAceptado(t); h+='<div class="card"><h3 style="color:var(--navy)">Revisión de garantía</h3>'; h+=t.items.map(function(i,x){ if(llegoQ(i)>0&&tipoDeItem(t,i)==="GARANTIA"){ var ca=garCantAcep(t,i,x), cr=garCantRech(t,i,x); return '<div style="margin:6px 0">• <b>'+esc(i.codigo)+'</b>: '+(ca>0?'<span style="color:var(--ok)">'+ca+' aceptada(s) → NC</span>':'')+(ca>0&&cr>0?' · ':'')+(cr>0?'<span style="color:var(--bad)">'+cr+' rechazada(s) → informe</span>':'')+' <span class="muted">(de '+llegoQ(i)+' que llegaron)</span></div>'; } return ""; }).join(""); if(totAcepV>0) h+='<div style="margin-top:6px;font-weight:600">Total aceptado (NC): '+money(totAcepV)+'</div>'; h+='<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">'; if(hayR) h+='<button class="btn btn-g btn-sm" onclick="pdfCartaGar(\''+t.id+'\')">Ver carta + informe</button>'; if(me&&puedeActuar()&&(rolActivo()==="GARANTIA"||rolActivo()==="ADMIN")) h+='<button class="btn btn-a btn-sm" onclick="editarGar(\''+t.id+'\')">✎ Editar</button>'; h+='</div></div>'; }
@@ -1294,7 +1391,43 @@ function histTable(role){
   if(l.length===0) return '<div class="muted">'+((repDesde||repHasta)?"Sin registros en este rango de fechas.":"Sin tickets procesados aún.")+'</div>';
   return '<div class="muted" style="margin-bottom:6px">'+l.length+' ticket(s)'+((repDesde||repHasta)?" en el rango filtrado":"")+'</div><table><thead><tr><th>N° Ticket</th><th>Cliente</th><th>Estado</th><th></th></tr></thead><tbody>'+l.map(function(t){ return '<tr><td><b>'+esc(t.numero)+'</b></td><td>'+esc(t.razonSocial)+'</td><td>'+tagFor(t)+'</td><td style="white-space:nowrap"><button class="btn btn-g btn-sm" onclick="verTicket(\''+t.id+'\')">Ver</button> <button class="btn btn-g btn-sm" onclick="imprimirTicket(\''+t.id+'\')" title="Imprimir ticket">🖨</button>'+(role==="GARANTIA"&&t.gar?' <button class="btn btn-a btn-sm" onclick="editarGar(\''+t.id+'\')">✎</button>':'')+'</td></tr>'; }).join("")+'</tbody></table>';
 }
-function revisar(role,id){ if(!puedeActuar()){ toast("👁 Modo solo lectura: no puedes revisar tickets fuera de tu propia pestaña.",4000); return; } var t=findT(id); if(role==="MERCADERIA") revisarMerc(t); else if(role==="DEVOLUCION") revisarDev(t); else revisarGar(t); }
+function revisar(role,id){ if(!puedeActuar()){ toast("👁 Modo solo lectura: no puedes revisar tickets fuera de tu propia pestaña.",4000); return; } var t=findT(id); if(role==="MERCADERIA") revisarMerc(t); else if(role==="DEVOLUCION"){ if(t.anioAnterior) revisarValidacionAnio(t); else revisarDev(t); } else revisarGar(t); }
+/* ===== VALIDACIÓN DE TOTAL (tickets 2200 de año anterior, por Devoluciones) ===== */
+function revisarValidacionAnio(t){
+  var esGar=t.motivo==="GARANTIAS";
+  var h='<div class="modal-bg"><div class="modal"><h2 style="font-size:24px;color:var(--navy)">Validar total · '+esc(t.numero)+'</h2><div class="muted" style="margin-bottom:12px">'+esc(t.razonSocial)+' · Factura '+esc(t.factura)+' · Año <b>'+esc(t.anioFactura)+'</b> · '+(esGar?"Garantía":"Devolución")+'</div>';
+  h+='<div class="card" style="background:#F0F3F7;border-color:#C9D3DD">Revisa y corrige el <b>total</b> que puso el asesor en cada línea. '+(esGar?'Al guardar, el ticket pasa al revisor de <b>Garantías</b> para el informe técnico.':'Indica además si se <b>acepta o se rechaza</b> cada línea (las devoluciones de años anteriores suelen rechazarse por tiempo expirado).')+'</div>';
+  h+=t.items.map(function(i,x){
+    if(llegoQ(i)<=0) return "";
+    var q=llegoQ(i);
+    var dec=esGar?'':'<div><label>Decisión</label><select id="va-ac-'+x+'"><option value="">—</option><option value="1">SÍ SE ACEPTA</option><option value="0">NO SE ACEPTA</option></select></div><div><label>Cantidad aceptada</label><input type="number" min="0" max="'+q+'" value="'+q+'" id="va-ca-'+x+'" style="text-align:right"></div>';
+    return '<div class="itm"><div style="margin-bottom:8px"><b>'+esc(i.codigo)+'</b> <span class="muted">Cant. que llegó: '+q+' de '+i.cantidad+'</span><div style="font-size:12px">'+esc(i.desc)+'</div>'+(i.comVendedor?'<div class="muted">'+esc(i.comVendedor)+'</div>':'')+'</div><div class="grid3"><div><label>Total $ (validado)</label><input type="number" min="0" step="0.01" value="'+(+i.total).toFixed(2)+'" id="va-tot-'+x+'" style="text-align:right"></div>'+dec+'</div></div>';
+  }).join("");
+  h+='<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px"><button class="btn btn-g" onclick="cerrarModal()">Cancelar</button><button class="btn btn-p" onclick="guardarValidacionAnio(\''+t.id+'\')">'+(esGar?"Validar y enviar a Garantía":"Guardar validación")+'</button></div></div></div>';
+  $("modal-root").innerHTML=h;
+}
+async function guardarValidacionAnio(id){
+  if(!puedeActuar()){ toast("👁 Modo solo lectura.",4000); return; }
+  var t=findT(id); if(!t) return;
+  var esGar=t.motivo==="GARANTIAS";
+  var ahora=new Date().toISOString();
+  var idxs=[]; t.items.forEach(function(i,x){ if(llegoQ(i)>0) idxs.push(x); });
+  idxs.forEach(function(x){ var el=$("va-tot-"+x); var tv=el?(+el.value||0):0; t.items[x].total=+tv.toFixed(2); t.items[x].neto=+tv.toFixed(2); t.items[x].iva=0; });
+  t.valorValidado={por:me.name,f:ahora};
+  t.fechas=t.fechas||{}; t.fechas.devolucion=ahora;
+  if(esGar){
+    t.estado="GARANTIA"; t.validacionAnioPendiente=false; t.garPendiente=true; t.devPendiente=false;
+    t.historial.push({f:ahora,e:"Total validado por Devoluciones ("+me.name+") → enviado a revisión de garantía"});
+    await saveState(); cerrarModal(); toast("✓ Total validado. Ticket "+t.numero+" enviado a Garantías."); render(); return;
+  }
+  for(var j=0;j<idxs.length;j++){ if($("va-ac-"+idxs[j]).value===""){ toast("Selecciona la decisión en todos los productos."); return; } }
+  idxs.forEach(function(x){ var i=t.items[x], max=llegoQ(i); i.dev={acepta:$("va-ac-"+x).value==="1",cantAcep:Math.max(0,Math.min(max,+($("va-ca-"+x).value||0))),com:"",por:me.name,f:ahora}; });
+  var alguna=idxs.some(function(x){ return t.items[x].dev.acepta&&t.items[x].dev.cantAcep>0; });
+  t.validacionAnioPendiente=false; t.devPendiente=false;
+  if(alguna){ t.estado="NC"; t.nc=t.nc||{hecha:false}; t.historial.push({f:ahora,e:"Total validado y devolución aceptada → NC ("+me.name+")"}); }
+  else { t.estado="DEV_RECHAZADA"; t.historial.push({f:ahora,e:"Total validado, devolución NO aceptada por tiempo/criterio ("+me.name+")"}); }
+  await saveState(); cerrarModal(); toast("✓ Validación guardada."); render();
+}
 
 /* ===== EXCEL CONSOLIDADO POR BANDEJA (mercadería / devolución / garantía) ===== */
 function exportarBandeja(role){
@@ -1471,6 +1604,12 @@ function routeTrasMerc(t,ahora,prefix){
   });
   if(!hayDev&&!hayGar&&!hayDacion){
     t.estado="NO_LLEGO"; t.historial.push({f:ahora,e:prefix+"no llegó mercadería ("+me.name+")"});
+    return;
+  }
+  /* Año anterior: TODO pasa primero por Devoluciones a validar el total escrito por el asesor */
+  if(t.anioAnterior){
+    t.estado="DEVOLUCION"; t.validacionAnioPendiente=true; t.devPendiente=true; t.garPendiente=false;
+    t.historial.push({f:ahora,e:prefix+"año anterior → Devoluciones valida el total ("+me.name+")"});
     return;
   }
   t.devPendiente=hayDev; t.garPendiente=hayGar; t.devSolicitado=hayDev; t.garSolicitado=hayGar;
@@ -2122,9 +2261,9 @@ function abrirLimpiarTodo(){
 async function ejecutarLimpiarTodo(){
   if(!puedeActuar()){ toast("👁 Modo solo lectura.",4000); return; }
   if(($("conf-borrar").value||"").trim().toUpperCase()!=="BORRAR"){ toast("Escribe BORRAR para confirmar."); return; }
-  state.tickets=[]; state.guias=[]; state.seq3200=0; state.seq5200=0;
+  state.tickets=[]; state.guias=[]; state.sobres=[]; state.seq3200=0; state.seq5200=0; state.seq2200=0;
   await saveState();
-  try{ if(fbReady) await fbDB.ref("ncpdf").remove(); }catch(e){}
+  try{ if(fbReady){ await fbDB.ref("ncpdf").remove(); await fbDB.ref("contadores").remove(); } }catch(e){}
   cerrarModal(); toast("✓ Datos de prueba borrados."); render();
 }
 
