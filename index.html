@@ -693,7 +693,7 @@ function renderMisTicketsTabla(){
   var mios=ticketsAsesorFiltrados();
   var cont=$("mis-tickets-tabla"); if(!cont) return;
   if(mios.length===0){ cont.innerHTML=(filtroMisTickets||filtroMisDesde||filtroMisHasta)?'<div class="empty"><div class="big">Sin resultados</div></div>':'<div class="empty"><div class="big">Sin tickets todavía</div>Crea tu primer ticket.</div>'; return; }
-  cont.innerHTML='<div class="muted" style="margin-bottom:6px">'+mios.length+' ticket(s)</div><div style="overflow-x:auto"><table><thead><tr><th>N° Ticket</th><th>Fecha</th><th>Guía</th><th>Cliente</th><th>Factura</th><th>Motivo</th><th>Estado</th><th></th></tr></thead><tbody>'+mios.map(function(t){ return '<tr><td><b>'+esc(t.numero)+'</b></td><td>'+fdate(t.fechaTicket)+'</td><td>'+esc(t.guiaNumero||"—")+'</td><td>'+esc(t.razonSocial)+'</td><td>'+esc(t.factura)+'</td><td>'+esc(t.motivo)+'</td><td>'+tagFor(t)+'</td><td style="white-space:nowrap">'+(t.estado==="SIN_GUIA"?'<button class="btn btn-a btn-sm" onclick="asignarGuiaTicket(\''+t.id+'\')">⭐ Seleccionar guía</button> ':'')+(t.estado==="GUIA_INCORRECTA"?'<button class="btn btn-a btn-sm" onclick="editarGuiaTicket(\''+t.id+'\')">✎ Corregir guía</button> ':'')+'<button class="btn btn-g btn-sm" onclick="verTicket(\''+t.id+'\')">Ver</button> <button class="btn btn-a btn-sm" onclick="imprimirTicket(\''+t.id+'\')">🖨</button></td></tr>'; }).join("")+'</tbody></table></div>';
+  cont.innerHTML='<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px"><span class="muted">'+mios.length+' ticket(s)</span><div style="flex:1"></div><button class="btn btn-g btn-sm" onclick="imprimirSeleccionados()" title="Marca las casillas y imprime varios en una hoja">🖨 Imprimir seleccionados</button></div><div style="overflow-x:auto"><table><thead><tr><th></th><th>N° Ticket</th><th>Fecha</th><th>Guía</th><th>Cliente</th><th>Factura</th><th>Motivo</th><th>Estado</th><th></th></tr></thead><tbody>'+mios.map(function(t){ return '<tr><td><input type="checkbox" class="sel-tk" value="'+t.id+'" style="width:auto"></td><td><b>'+esc(t.numero)+'</b></td><td>'+fdate(t.fechaTicket)+'</td><td>'+esc(t.guiaNumero||"—")+'</td><td>'+esc(t.razonSocial)+'</td><td>'+esc(t.factura)+'</td><td>'+esc(t.motivo)+'</td><td>'+tagFor(t)+'</td><td style="white-space:nowrap">'+(t.estado==="SIN_GUIA"?'<button class="btn btn-a btn-sm" onclick="asignarGuiaTicket(\''+t.id+'\')">⭐ Seleccionar guía</button> ':'')+(t.estado==="GUIA_INCORRECTA"?'<button class="btn btn-a btn-sm" onclick="editarGuiaTicket(\''+t.id+'\')">✎ Corregir guía</button> ':'')+'<button class="btn btn-g btn-sm" onclick="verTicket(\''+t.id+'\')">Ver</button> <button class="btn btn-a btn-sm" onclick="imprimirTicket(\''+t.id+'\')">🖨</button></td></tr>'; }).join("")+'</tbody></table></div>';
 }
 async function recargarBase(){ toast("Cargando base…"); try{ await cargarBase(true,function(m){toast(m,2000);}); toast("✓ Base: "+baseLineas.toLocaleString("es-EC")+" líneas"); render(); }catch(e){ toast("Error: "+e.message,6000); } }
 function abrirNuevo(){
@@ -1225,20 +1225,47 @@ async function guardarGuiaTicket(id){
 }
 
 /* ===== TICKET TÉRMICO ===== */
-function imprimirTicket(id){
-  var t=findT(id);
+/* Contenido del recibo (se reutiliza para imprimir uno solo o varios en una hoja) */
+function contenidoRecibo(t){
   var sub=t.items.reduce(function(s,i){return s+i.neto;},0), iva=t.items.reduce(function(s,i){return s+i.iva;},0), tot=t.items.reduce(function(s,i){return s+i.total;},0);
-  var rows=t.items.map(function(i){ return '<tr><td>'+i.cantidad+'</td><td>'+esc(i.codigo)+'<br>'+esc(i.desc)+'<br>'+esc(i.sub)+(i.comVendedor?'<br><i>'+esc(i.comVendedor)+'</i>':'')+'</td><td class="right">'+money(i.total)+'</td></tr>'; }).join("");
-  var html='<!DOCTYPE html><html><head><meta charset="UTF-8"><style>@page{size:80mm auto;margin:3mm}body{width:74mm;font-family:"Courier New",monospace;font-size:10pt;margin:0;padding:0}.center{text-align:center}.bold{font-weight:bold}.line{border-top:1px dashed #000;margin:4px 0}table{width:100%;border-collapse:collapse}th,td{font-size:9pt;padding:1px 2px;vertical-align:top}.right{text-align:right}.small{font-size:8pt}</style></head><body>'+
-    '<div class="center bold">COMERCIALIZADORA AUTOREPUESTOS<br>UNIVERSAL LUBAMAQUI CIA LTDA</div><div class="center">RUC: 1792788129001<br>AV. 10 DE AGOSTO Y JUAN PABLO SAENZ</div><div class="line"></div>'+
-    '<div class="bold">Ticket:</div> '+esc(t.numero)+'<br><div class="bold">Cliente:</div> '+esc(t.razonSocial)+'<br><div class="bold">RUC:</div> '+esc(t.ruc||"")+'<br><div class="bold">Vendedor:</div> '+esc(t.vendedor)+'<div class="line"></div>'+
-    '<table><tr><td><b>Guía:</b></td><td>'+esc(t.guiaNumero||"—")+'</td></tr><tr><td><b>Factura:</b></td><td>'+esc(t.factura)+'</td></tr><tr><td><b>Motivo:</b></td><td>'+esc(t.motivo)+'</td></tr><tr><td><b>Emisión:</b></td><td>'+fdate(t.emision)+'</td></tr><tr><td><b>Fecha ticket:</b></td><td>'+fdate(t.fechaTicket)+'</td></tr>'+(t.facturador?'<tr><td><b>Facturador:</b></td><td>'+esc(t.facturador)+'</td></tr>':'')+(t.refactCliente?'<tr><td><b>Refacturar a:</b></td><td>'+esc(t.refactCliente)+(t.refactValidado&&t.refactValidado.facturaNueva?(' (Fact. '+esc(t.refactValidado.facturaNueva)+')'):'')+'</td></tr>':'')+(t.sobre?'<tr><td><b>Sobre:</b></td><td>SÍ</td></tr>':'')+'</table><div class="line"></div>'+
-    '<div class="center bold">DETALLE PRODUCTOS</div><table><thead><tr><th>Cant</th><th>Descripción</th><th class="right">Total</th></tr></thead><tbody>'+rows+'</tbody></table><div class="line"></div>'+
-    '<table><tr><td><b>Subtotal</b></td><td class="right">'+money(sub)+'</td></tr><tr><td><b>IVA</b></td><td class="right">'+money(iva)+'</td></tr><tr><td><b>Total</b></td><td class="right">'+money(tot)+'</td></tr></table><div class="line"></div><br><br><div class="center">_________________________<br>FIRMA CLIENTE</div><br><div class="center small">'+esc(t.razonSocial)+'</div></body></html>';
+  var rows=t.items.map(function(i){ return '<tr><td>'+i.cantidad+'</td><td>'+esc(i.codigo)+' '+esc(i.desc)+(i.comVendedor?'<br><span class="sm">'+esc(i.comVendedor)+'</span>':'')+'</td><td class="right">'+money(i.total)+'</td></tr>'; }).join("");
+  var extra=(t.refactCliente?'<div class="sm"><b>Refact. a:</b> '+esc(t.refactCliente)+(t.refactValidado&&t.refactValidado.facturaNueva?(' (Fact '+esc(t.refactValidado.facturaNueva)+')'):'')+'</div>':'')+(t.sobre?'<div class="sm"><b>Incluye sobre</b></div>':'')+(t.anioAnterior?'<div class="sm"><b>Garantía año anterior '+esc(t.anioFactura)+'</b></div>':'')+(t.facturador?'<div class="sm">Facturador: '+esc(t.facturador)+'</div>':'');
+  return '<div class="center b">COMERCIALIZADORA AUTOREPUESTOS UNIVERSAL LUBAMAQUI CIA LTDA</div><div class="center sm">RUC 1792788129001 · Av. 10 de Agosto y J.P. Saenz</div><div class="line"></div>'+
+    '<div><span class="b">Ticket:</span> '+esc(t.numero)+' &nbsp; <span class="b">Fecha:</span> '+fdate(t.fechaTicket)+'</div>'+
+    '<div><span class="b">Cliente:</span> '+esc(t.razonSocial)+'</div>'+
+    '<div class="sm">RUC/CI: '+esc(t.ruc||"—")+' · Vend: '+esc(t.vendedor)+'</div>'+
+    '<div class="sm"><span class="b">Guía:</span> '+esc(t.guiaNumero||"—")+' · <span class="b">Fact:</span> '+esc(t.factura)+' · <span class="b">Emis:</span> '+fdate(t.emision)+'</div>'+
+    '<div class="sm"><span class="b">Motivo:</span> '+esc(t.motivo)+'</div>'+extra+
+    '<div class="line"></div>'+
+    '<table><tr><td class="b">Cant</td><td class="b">Detalle</td><td class="b right">Total</td></tr>'+rows+'</table>'+
+    '<div class="line"></div>'+
+    '<table><tr><td class="b">Subtotal</td><td class="right">'+money(sub)+'</td></tr><tr><td class="b">IVA</td><td class="right">'+money(iva)+'</td></tr><tr><td class="b">TOTAL</td><td class="right b">'+money(tot)+'</td></tr></table>'+
+    '<div class="line"></div>'+
+    '<div class="center" style="margin-top:8mm">________________________<br>FIRMA CLIENTE</div><div class="center sm">'+esc(t.razonSocial)+'</div>';
+}
+var CSS_RECIBO='.center{text-align:center}.b{font-weight:bold}.line{border-top:1px dashed #000;margin:2px 0}table{width:100%;border-collapse:collapse}td{font-size:8.5pt;padding:0 2px;vertical-align:top}.right{text-align:right}.sm{font-size:7.5pt}';
+function imprimirTicket(id){
+  var t=findT(id); if(!t) return;
+  var html='<!DOCTYPE html><html><head><meta charset="UTF-8"><style>@page{size:80mm auto;margin:2mm}body{width:76mm;font-family:"Courier New",monospace;font-size:9pt;line-height:1.18;margin:0;padding:0}'+CSS_RECIBO+'</style></head><body>'+contenidoRecibo(t)+'</body></html>';
   var win=window.open("","_blank","width=400,height=600");
   if(!win){ toast("Activa los popups para imprimir."); return; }
   win.document.write(html); win.document.close(); win.focus();
   setTimeout(function(){ win.print(); },300);
+}
+/* Imprime varios recibos en una sola hoja A4 (varios por página, para ahorrar papel) */
+function imprimirVarios(ids){
+  if(!ids||ids.length===0){ toast("Marca al menos un ticket (casilla ☑)."); return; }
+  var bloques=ids.map(function(id){ var t=findT(id); return t?'<div class="recibo">'+contenidoRecibo(t)+'</div>':''; }).join("");
+  var html='<!DOCTYPE html><html><head><meta charset="UTF-8"><style>@page{size:A4;margin:6mm}body{font-family:"Courier New",monospace;margin:0}'+CSS_RECIBO+'.recibo{display:inline-block;width:32%;vertical-align:top;box-sizing:border-box;border:1px dashed #999;border-radius:4px;padding:4mm 3mm;margin:0 0.4% 6px;font-size:8.5pt;line-height:1.15;page-break-inside:avoid}</style></head><body>'+bloques+'</body></html>';
+  var win=window.open("","_blank","width=850,height=950");
+  if(!win){ toast("Activa los popups para imprimir."); return; }
+  win.document.write(html); win.document.close(); win.focus();
+  setTimeout(function(){ win.print(); },400);
+}
+function imprimirSeleccionados(){
+  var ids=[].slice.call(document.querySelectorAll(".sel-tk:checked")).map(function(c){ return c.value; });
+  if(ids.length===0){ toast("Marca las casillas ☑ de los tickets que quieres imprimir juntos."); return; }
+  imprimirVarios(ids);
 }
 
 /* ===== PDF MEMBRETE ===== */
@@ -1384,7 +1411,7 @@ function renderBandejaTabla(role){
   if(q) lista=lista.filter(function(t){ return (t.vendedor+" "+t.numero+" "+t.razonSocial+" "+t.factura+" "+(t.guiaNumero||"")+" "+t.motivo).toUpperCase().indexOf(q)>=0; });
   var cont=$("band-tabla"); if(!cont) return;
   if(lista.length===0){ cont.innerHTML=q?'<div class="empty"><div class="big">Sin resultados</div></div>':'<div class="empty"><div class="big">Bandeja vacía</div>No hay tickets pendientes.</div>'; return; }
-  cont.innerHTML='<table><thead><tr><th>N° Ticket</th><th>Fecha</th><th>Guía</th><th>Cliente</th><th>Factura</th><th>Motivo</th><th>Vendedor</th><th></th></tr></thead><tbody>'+lista.map(function(t){ return '<tr><td><b>'+esc(t.numero)+'</b>'+(t.estado==="MIXTO"?' <span class="tag tag-gar" style="font-size:9px">MIXTO</span>':'')+'</td><td>'+fdate(t.fechaTicket)+'</td><td>'+esc(t.guiaNumero||"—")+'</td><td>'+esc(t.razonSocial)+'</td><td>'+esc(t.factura)+'</td><td>'+esc(t.motivo)+'</td><td>'+esc(t.vendedor)+'</td><td style="white-space:nowrap"><button class="btn btn-g btn-sm" onclick="verTicket(\''+t.id+'\')">Ver</button> <button class="btn btn-a btn-sm" onclick="revisar(\''+role+'\',\''+t.id+'\')">Revisar</button> <button class="btn btn-g btn-sm" onclick="imprimirTicket(\''+t.id+'\')" title="Imprimir ticket">🖨</button>'+((role==="MERCADERIA"&&!t.guiaNumero&&requiereGuia(t.vendedor))?' <button class="btn btn-bad btn-sm" onclick="abrirDevolverTicket(\''+t.id+'\')" title="Devolver al asesor: llegó sin guía">↩ Devolver</button>':'')+'</td></tr>'; }).join("")+'</tbody></table>';
+  cont.innerHTML='<div style="display:flex;justify-content:flex-end;margin-bottom:8px"><button class="btn btn-g btn-sm" onclick="imprimirSeleccionados()" title="Marca las casillas y imprime varios en una hoja">🖨 Imprimir seleccionados</button></div><table><thead><tr><th></th><th>N° Ticket</th><th>Fecha</th><th>Guía</th><th>Cliente</th><th>Factura</th><th>Motivo</th><th>Vendedor</th><th></th></tr></thead><tbody>'+lista.map(function(t){ return '<tr><td><input type="checkbox" class="sel-tk" value="'+t.id+'" style="width:auto"></td><td><b>'+esc(t.numero)+'</b>'+(t.estado==="MIXTO"?' <span class="tag tag-gar" style="font-size:9px">MIXTO</span>':'')+'</td><td>'+fdate(t.fechaTicket)+'</td><td>'+esc(t.guiaNumero||"—")+'</td><td>'+esc(t.razonSocial)+'</td><td>'+esc(t.factura)+'</td><td>'+esc(t.motivo)+'</td><td>'+esc(t.vendedor)+'</td><td style="white-space:nowrap"><button class="btn btn-g btn-sm" onclick="verTicket(\''+t.id+'\')">Ver</button> <button class="btn btn-a btn-sm" onclick="revisar(\''+role+'\',\''+t.id+'\')">Revisar</button> <button class="btn btn-g btn-sm" onclick="imprimirTicket(\''+t.id+'\')" title="Imprimir ticket">🖨</button>'+((role==="MERCADERIA"&&!t.guiaNumero&&requiereGuia(t.vendedor))?' <button class="btn btn-bad btn-sm" onclick="abrirDevolverTicket(\''+t.id+'\')" title="Devolver al asesor: llegó sin guía">↩ Devolver</button>':'')+'</td></tr>'; }).join("")+'</tbody></table>';
 }
 function fechaRepRef(role,t){
   if(role==="MERCADERIA") return t.fechas&&t.fechas.mercaderia;
