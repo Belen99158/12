@@ -655,19 +655,31 @@ function reporteAnioAnterior(){
   });
   if(lista.length===0) return "";
   var totalAcep=0, nAcep=0, enProceso=0, porAnio={}, porCli={};
+  var cic={t2m:{s:0,n:0},m2v:{s:0,n:0},v2g:{s:0,n:0},g2nc:{s:0,n:0},tot:{s:0,n:0}};
+  function accC(o,v){ if(v==null) return; o.s+=v; o.n++; }
+  function promC(o){ return o.n?(o.s/o.n):null; }
+  function kpiC(o,lbl,col){ var p=promC(o); return '<div class="kpi"><div class="disp" style="color:'+(col||"var(--navy)")+'">'+(p==null?"—":dnum(p))+'</div><div class="lbl">'+lbl+'</div></div>'; }
   lista.forEach(function(t){
     var acep=(t.estado==="NC"||(t.fechas&&t.fechas.nc))?totalAceptado(t):0;
     if(acep>0){ totalAcep+=acep; nAcep++; }
     else if(t.estado!=="DEV_RECHAZADA"&&t.estado!=="RECHAZADA"&&t.estado!=="GAR_RECHAZADA") enProceso++;
     var a=t.anioFactura||"?"; if(!porAnio[a]) porAnio[a]={n:0,monto:0}; porAnio[a].n++; porAnio[a].monto+=acep;
-    porCli[t.razonSocial]=(porCli[t.razonSocial]||0)+acep;
+    if(!porCli[t.razonSocial]) porCli[t.razonSocial]={n:0,monto:0};
+    porCli[t.razonSocial].n++; porCli[t.razonSocial].monto+=acep;
+    var f=t.fechas||{};
+    accC(cic.t2m,diasEntre(t.fechaTicket,f.mercaderia));
+    accC(cic.m2v,diasEntre(f.mercaderia,f.devolucion));
+    accC(cic.v2g,diasEntre(f.devolucion,f.garantia));
+    accC(cic.g2nc,diasEntre(f.garantia,f.nc));
+    accC(cic.tot,diasEntre(t.fechaTicket,f.nc));
   });
   var h='<div class="card" style="border-left:5px solid #6A2E91"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px"><div class="sec-title" style="margin:0;border:none;flex:1">📅 Garantías / devoluciones de años anteriores <span class="muted" style="font-weight:400">(reporte aparte · no cuenta en los indicadores del año actual)</span></div><button class="btn btn-ok btn-sm" onclick="exportarAnioAnterior()">⬇ Excel</button></div>';
   h+='<div class="grid4"><div class="kpi"><div class="disp" style="color:var(--navy)">'+lista.length+'</div><div class="lbl">Tickets 2200</div></div><div class="kpi"><div class="disp" style="color:var(--ok)">'+money(totalAcep)+'</div><div class="lbl">Total aceptado (NC)</div></div><div class="kpi"><div class="disp" style="color:#C77F00">'+enProceso+'</div><div class="lbl">En proceso</div></div><div class="kpi"><div class="disp" style="color:var(--navy)">'+nAcep+'</div><div class="lbl">Tickets aceptados</div></div></div>';
   var anios=Object.keys(porAnio).sort();
   h+='<div class="grid2" style="margin-top:12px"><div><div class="sec-title">Por año de factura</div><div style="overflow-x:auto"><table><thead><tr><th>Año</th><th class="num">Tickets</th><th class="num">Total aceptado</th></tr></thead><tbody>'+anios.map(function(a){ return '<tr><td>'+esc(a)+'</td><td class="num">'+porAnio[a].n+'</td><td class="num">'+money(porAnio[a].monto)+'</td></tr>'; }).join("")+'</tbody></table></div></div>';
-  var cliArr=Object.keys(porCli).map(function(k){return {k:k,v:porCli[k]};}).sort(function(a,b){return b.v-a.v;}).slice(0,10);
-  h+='<div><div class="sec-title">Top clientes (aceptado)</div><div style="overflow-x:auto"><table><thead><tr><th>Cliente</th><th class="num">Total aceptado</th></tr></thead><tbody>'+cliArr.map(function(c){ return '<tr><td style="font-size:12px">'+esc(c.k)+'</td><td class="num">'+money(c.v)+'</td></tr>'; }).join("")+'</tbody></table></div></div></div>';
+  var cliArr=Object.keys(porCli).map(function(k){return {k:k,n:porCli[k].n,monto:porCli[k].monto};}).sort(function(a,b){return (b.n-a.n)||(b.monto-a.monto);}).slice(0,10);
+  h+='<div><div class="sec-title">Clientes que más regresan</div><div style="overflow-x:auto"><table><thead><tr><th>Cliente</th><th class="num">N° tickets</th><th class="num">Total aceptado</th></tr></thead><tbody>'+cliArr.map(function(c){ return '<tr><td style="font-size:12px">'+esc(c.k)+'</td><td class="num">'+c.n+'</td><td class="num">'+money(c.monto)+'</td></tr>'; }).join("")+'</tbody></table></div></div></div>';
+  h+='<div class="sec-title">Ciclo del ticket (días promedio)</div><div class="grid5">'+kpiC(cic.t2m,"Ticket → Mercadería")+kpiC(cic.m2v,"Mercadería → Validación")+kpiC(cic.v2g,"Validación → Garantía")+kpiC(cic.g2nc,"Garantía → NC")+kpiC(cic.tot,"Ciclo total (Ticket → NC)","var(--rojo)")+'</div><div class="muted" style="margin-top:6px">Promedios calculados solo con tickets que tienen ambas fechas de cada etapa.</div>';
   h+='<div class="sec-title">Detalle</div><div style="overflow-x:auto"><table><thead><tr><th>N° Ticket</th><th>Año</th><th>Cliente</th><th>Factura</th><th>Motivo</th><th>Estado</th><th class="num">Total aceptado</th></tr></thead><tbody>'+lista.slice().reverse().map(function(t){ var acep=(t.estado==="NC"||(t.fechas&&t.fechas.nc))?totalAceptado(t):0; return '<tr><td><b>'+esc(t.numero)+'</b></td><td>'+esc(t.anioFactura||"")+'</td><td>'+esc(t.razonSocial)+'</td><td>'+esc(t.factura)+'</td><td>'+(t.motivo==="GARANTIAS"?"Garantía":"Devolución")+'</td><td>'+esc(estadoAnioLabel(t))+'</td><td class="num">'+(acep>0?money(acep):'<span class="muted">—</span>')+'</td></tr>'; }).join("")+'</tbody></table></div>';
   h+='</div>';
   return h;
