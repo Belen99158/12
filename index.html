@@ -1075,7 +1075,8 @@ function abrirAnioAnterior(){
   if(!puedeActuar()){ toast("👁 Modo solo lectura: no puedes crear tickets fuera de tu propia pestaña.",4000); return; }
   var pideGuia=requiereGuia(me.name);
   var gd=pideGuia?guiasSeleccionables(me.name):[];
-  nuevoAnio={lineas:[{codigo:"",desc:"",cantidad:"",total:"",com:""}]};
+  nuevoAnio={lineas:[{codigo:"",desc:"",cantidad:"",total:"",com:""}],codMap:{},codOpts:""};
+  (function(){ var cm={}, opts=""; for(var i=0;i<base.length;i++){ var c=String(base[i].codigo||"").trim(); if(!c) continue; var k=c.toUpperCase(); if(cm[k]) continue; cm[k]={desc:base[i].desc||""}; opts+='<option value="'+esc(c)+'">'+esc((base[i].desc||"").slice(0,45))+'</option>'; } nuevoAnio.codMap=cm; nuevoAnio.codOpts=opts; })();
   var anioActual=new Date().getFullYear();
   var anios=[]; for(var y=anioActual-1;y>=anioActual-6;y--) anios.push(y);
   $("modal-root").innerHTML='<div class="modal-bg"><div class="modal"><h2 style="font-size:26px;color:var(--navy);margin-bottom:4px">📅 Factura de año anterior</h2><div class="muted" style="margin-bottom:18px">Para <b>garantías</b> de facturas que <b>no están</b> en la base cargada. Se escribe todo a mano. Vendedor: <b>'+esc(me.name)+'</b> · Numeración <b>2200</b></div>'+
@@ -1094,14 +1095,19 @@ function renderItemsAnio(){
   var cont=$("na-items"); if(!cont) return;
   cont.innerHTML='<div style="overflow-x:auto"><table><thead><tr><th>Código</th><th>Descripción</th><th class="num" style="width:90px">Cantidad</th><th class="num" style="width:110px">Total $</th><th>Comentario</th><th></th></tr></thead><tbody>'+nuevoAnio.lineas.map(function(r,ix){
     return '<tr>'+
-      '<td><input value="'+esc(r.codigo||"")+'" placeholder="Código" oninput="anioSet('+ix+',\'codigo\',this.value)"></td>'+
-      '<td><input value="'+esc(r.desc||"")+'" placeholder="Descripción" oninput="anioSet('+ix+',\'desc\',this.value)"></td>'+
+      '<td><input id="na-cod-'+ix+'" list="na-cod-list" value="'+esc(r.codigo||"")+'" placeholder="Código" oninput="anioCodInput('+ix+',this.value)"></td>'+
+      '<td><input id="na-desc-'+ix+'" value="'+esc(r.desc||"")+'" placeholder="Descripción" oninput="anioSet('+ix+',\'desc\',this.value)"></td>'+
       '<td><input type="number" min="0" step="1" value="'+esc(r.cantidad||"")+'" style="text-align:right" oninput="anioSet('+ix+',\'cantidad\',this.value)"></td>'+
       '<td><input type="number" min="0" step="0.01" value="'+esc(r.total||"")+'" style="text-align:right" oninput="anioSet('+ix+',\'total\',this.value)"></td>'+
       '<td><input value="'+esc(r.com||"")+'" placeholder="Comentario" oninput="anioSet('+ix+',\'com\',this.value)"></td>'+
       '<td>'+(nuevoAnio.lineas.length>1?'<button class="btn btn-bad btn-sm" onclick="anioQuitar('+ix+')">✕</button>':'')+'</td>'+
     '</tr>';
-  }).join("")+'</tbody></table></div><button class="btn btn-g btn-sm" style="margin-top:10px" onclick="anioAgregar()">+ Agregar línea</button>';
+  }).join("")+'</tbody></table></div><datalist id="na-cod-list">'+(nuevoAnio.codOpts||"")+'</datalist><button class="btn btn-g btn-sm" style="margin-top:10px" onclick="anioAgregar()">+ Agregar línea</button>';
+}
+function anioCodInput(ix,val){
+  anioSet(ix,'codigo',val);
+  var cm=(nuevoAnio&&nuevoAnio.codMap)||{}, d=cm[String(val).trim().toUpperCase()];
+  if(d){ var de=$("na-desc-"+ix); if(de&&!de.value.trim()){ de.value=d.desc; anioSet(ix,'desc',d.desc); } }
 }
 function anioSet(ix,campo,val){ if(nuevoAnio&&nuevoAnio.lineas[ix]) nuevoAnio.lineas[ix][campo]=val; }
 function buscarClienteAnio(){
