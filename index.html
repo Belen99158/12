@@ -1084,7 +1084,7 @@ function abrirAnioAnterior(){
       :'<div class="card" style="background:var(--warn-bg);border-color:#E8C766"><b>⏳ No tienes guías activas hoy.</b><div class="muted" style="margin-top:4px">Puedes guardar el ticket ahora; quedará pendiente de guía.</div></div>')
     :'')+'</div>'+
     '<div class="grid3"><div class="field"><label>Año de la factura</label><select id="na-anio">'+anios.map(function(y){return '<option>'+y+'</option>';}).join("")+'</select></div><div class="field"><label>N° factura anterior</label><input id="na-factura" placeholder="Ej.: 002-001-000012345" autocomplete="off"></div><div class="field"><label>Motivo</label><select id="na-motivo"><option value="GARANTIAS">Garantía</option><option value="DEVOLUCION">Devolución</option></select></div></div>'+
-    '<div class="field"><label>Cliente (razón social)</label><input id="na-cliente" placeholder="Nombre del cliente" autocomplete="off"></div>'+
+    '<div class="grid2"><div class="field ac-wrap"><label>Cliente (razón social)</label><input id="na-cliente" placeholder="Escribe el nombre; si está en la base aparece como opción…" autocomplete="off" oninput="buscarClienteAnio()" onfocus="buscarClienteAnio()"><div class="ac-list" id="na-cliente-list"></div></div><div class="field"><label>RUC / CI</label><input id="na-ruc" placeholder="Se llena solo al elegir un cliente de la base" autocomplete="off"></div></div>'+
     '<div class="muted" style="margin:-4px 0 10px">💡 El <b>total</b> que escribas (con IVA incluido) será <b>validado por Devoluciones</b> antes de continuar. Si es garantía, luego pasa al revisor de Garantías.</div>'+
     '<div id="na-items"></div>'+
     '<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px"><button class="btn btn-g" onclick="cerrarModal()">Cancelar</button><button class="btn btn-p" onclick="guardarAnioAnterior()">Guardar ticket 2200</button></div></div></div>';
@@ -1104,6 +1104,22 @@ function renderItemsAnio(){
   }).join("")+'</tbody></table></div><button class="btn btn-g btn-sm" style="margin-top:10px" onclick="anioAgregar()">+ Agregar línea</button>';
 }
 function anioSet(ix,campo,val){ if(nuevoAnio&&nuevoAnio.lineas[ix]) nuevoAnio.lineas[ix][campo]=val; }
+function buscarClienteAnio(){
+  var inp=$("na-cliente"), list=$("na-cliente-list"); if(!inp||!list) return;
+  var q=inp.value.trim().toUpperCase();
+  if(q.length<2){ list.style.display="none"; return; }
+  var matches=[];
+  for(var i=0;i<RAZONES.length;i++){ if(RAZONES[i].toUpperCase().indexOf(q)>=0){ matches.push(RAZONES[i]); if(matches.length>=60) break; } }
+  if(matches.length===0){ list.innerHTML='<div class="muted" style="cursor:default">Sin coincidencias en la base · puedes dejar el nombre escrito tal cual</div>'; list.style.display="block"; return; }
+  list.innerHTML=matches.map(function(r){ return '<div onclick="elegirClienteAnio(this.textContent)">'+esc(r)+'</div>'; }).join("");
+  list.style.display="block";
+}
+function rucDeCliente(razon){
+  var r=String(razon||"").trim();
+  for(var i=0;i<base.length;i++){ if(base[i].razon.trim()===r&&base[i].ruc) return String(base[i].ruc).trim(); }
+  return "";
+}
+function elegirClienteAnio(r){ var inp=$("na-cliente"); if(inp) inp.value=r; var ru=$("na-ruc"); if(ru){ var rc=rucDeCliente(r); if(rc) ru.value=rc; } var list=$("na-cliente-list"); if(list) list.style.display="none"; }
 function anioAgregar(){ nuevoAnio.lineas.push({codigo:"",desc:"",cantidad:"",total:"",com:""}); renderItemsAnio(); }
 function anioQuitar(ix){ nuevoAnio.lineas.splice(ix,1); renderItemsAnio(); }
 async function guardarAnioAnterior(){
@@ -1120,6 +1136,7 @@ async function guardarAnioAnterior(){
   var factura=($("na-factura")?$("na-factura").value:"").trim();
   var motivo=$("na-motivo")?$("na-motivo").value:"GARANTIAS";
   var cliente=($("na-cliente")?$("na-cliente").value:"").trim();
+  var ruc=($("na-ruc")?$("na-ruc").value:"").trim();
   if(!cliente){ toast("Escribe el cliente."); return; }
   if(!factura){ toast("Escribe el N° de factura anterior."); return; }
   var items=[];
@@ -1132,7 +1149,7 @@ async function guardarAnioAnterior(){
   var num=await siguienteNumero("2200");
   var estadoInicial=(pideGuia&&!guia)?"SIN_GUIA":"MERCADERIA";
   var ahora=new Date().toISOString();
-  var t={id:"T"+Date.now(),numero:num,anioAnterior:true,anioFactura:anio,motivo:motivo,razonSocial:cliente,ruc:"",factura:factura,facturas:[factura],emision:anio+"-01-01",facturador:"",fechaTicket:ahora,vendedor:me.name,estado:estadoInicial,items:items,fechas:{},guiaId:guia?guia.id:null,guiaNumero:guia?guia.numero:"",sobre:false,historial:[{f:ahora,e:"Creado (año anterior "+anio+", "+(motivo==="GARANTIAS"?"garantía":"devolución")+") por "+me.name+(guia?" · Guía "+guia.numero:(pideGuia?" · guardado SIN guía (pendiente de envío)":""))}]};
+  var t={id:"T"+Date.now(),numero:num,anioAnterior:true,anioFactura:anio,motivo:motivo,razonSocial:cliente,ruc:ruc,factura:factura,facturas:[factura],emision:anio+"-01-01",facturador:"",fechaTicket:ahora,vendedor:me.name,estado:estadoInicial,items:items,fechas:{},guiaId:guia?guia.id:null,guiaNumero:guia?guia.numero:"",sobre:false,historial:[{f:ahora,e:"Creado (año anterior "+anio+", "+(motivo==="GARANTIAS"?"garantía":"devolución")+") por "+me.name+(guia?" · Guía "+guia.numero:(pideGuia?" · guardado SIN guía (pendiente de envío)":""))}]};
   state.tickets.push(t); await saveState();
   cerrarModal();
   if(estadoInicial==="SIN_GUIA") toast("✓ Ticket "+num+" guardado. ⏳ Selecciona la guía en \"Mis tickets\" para enviarlo a mercadería.",6000);
