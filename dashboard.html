@@ -616,6 +616,35 @@ function estadoAnioLabel(t){
   if(t.estado==="SIN_GUIA") return "Pendiente de guía";
   return t.estado;
 }
+function exportarAnioAnterior(){
+  var lista=state.tickets.filter(function(t){
+    if(!t.anioAnterior||t.estado==="ELIMINADO") return false;
+    var f=hoyStr(t.fechaTicket);
+    if(desde&&f<desde) return false;
+    if(hasta&&f>hasta) return false;
+    return true;
+  });
+  if(lista.length===0){ alert("No hay tickets de años anteriores en el periodo seleccionado."); return; }
+  var rows=[];
+  lista.forEach(function(t){
+    var esNC=(t.estado==="NC"||(t.fechas&&t.fechas.nc));
+    var acep=esNC?itemsAceptados(t):[];
+    if(acep.length){
+      acep.forEach(function(i){
+        rows.push({"N° TICKET":t.numero,"AÑO FACTURA":t.anioFactura||"","CLIENTE":t.razonSocial,"RUC":t.ruc||"","FACTURA ANTERIOR":t.factura,"CODIGO":i.codigo,"DESCRIPCION":i.desc,"CANT. ACEPTADA":i.cantNC||0,"TOTAL ACEPTADO":+(+i.total||0).toFixed(2),"ESTADO":estadoAnioLabel(t),"N° NC":t.nc&&t.nc.numero?t.nc.numero:"","FECHA NC":t.fechas&&t.fechas.nc?fdate(t.fechas.nc):"","VENDEDOR":t.vendedor||""});
+      });
+    }else{
+      t.items.forEach(function(i){
+        rows.push({"N° TICKET":t.numero,"AÑO FACTURA":t.anioFactura||"","CLIENTE":t.razonSocial,"RUC":t.ruc||"","FACTURA ANTERIOR":t.factura,"CODIGO":i.codigo,"DESCRIPCION":i.desc,"CANT. ACEPTADA":0,"TOTAL ACEPTADO":0,"ESTADO":estadoAnioLabel(t),"N° NC":"","FECHA NC":"","VENDEDOR":t.vendedor||""});
+      });
+    }
+  });
+  var ws=XLSX.utils.json_to_sheet(rows);
+  ws["!cols"]=[{wch:12},{wch:11},{wch:32},{wch:15},{wch:17},{wch:16},{wch:36},{wch:13},{wch:14},{wch:16},{wch:12},{wch:12},{wch:20}];
+  var wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,"Años anteriores");
+  var suf=(desde||hasta)?("_"+(desde||"inicio")+"_a_"+(hasta||"hoy")):"";
+  XLSX.writeFile(wb,"Garantias_anios_anteriores"+suf+".xlsx");
+}
 function reporteAnioAnterior(){
   var lista=state.tickets.filter(function(t){
     if(!t.anioAnterior||t.estado==="ELIMINADO") return false;
@@ -633,7 +662,7 @@ function reporteAnioAnterior(){
     var a=t.anioFactura||"?"; if(!porAnio[a]) porAnio[a]={n:0,monto:0}; porAnio[a].n++; porAnio[a].monto+=acep;
     porCli[t.razonSocial]=(porCli[t.razonSocial]||0)+acep;
   });
-  var h='<div class="card" style="border-left:5px solid #6A2E91"><div class="sec-title" style="margin-top:0">📅 Garantías / devoluciones de años anteriores <span class="muted" style="font-weight:400">(reporte aparte · no cuenta en los indicadores del año actual)</span></div>';
+  var h='<div class="card" style="border-left:5px solid #6A2E91"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px"><div class="sec-title" style="margin:0;border:none;flex:1">📅 Garantías / devoluciones de años anteriores <span class="muted" style="font-weight:400">(reporte aparte · no cuenta en los indicadores del año actual)</span></div><button class="btn btn-ok btn-sm" onclick="exportarAnioAnterior()">⬇ Excel</button></div>';
   h+='<div class="grid4"><div class="kpi"><div class="disp" style="color:var(--navy)">'+lista.length+'</div><div class="lbl">Tickets 2200</div></div><div class="kpi"><div class="disp" style="color:var(--ok)">'+money(totalAcep)+'</div><div class="lbl">Total aceptado (NC)</div></div><div class="kpi"><div class="disp" style="color:#C77F00">'+enProceso+'</div><div class="lbl">En proceso</div></div><div class="kpi"><div class="disp" style="color:var(--navy)">'+nAcep+'</div><div class="lbl">Tickets aceptados</div></div></div>';
   var anios=Object.keys(porAnio).sort();
   h+='<div class="grid2" style="margin-top:12px"><div><div class="sec-title">Por año de factura</div><div style="overflow-x:auto"><table><thead><tr><th>Año</th><th class="num">Tickets</th><th class="num">Total aceptado</th></tr></thead><tbody>'+anios.map(function(a){ return '<tr><td>'+esc(a)+'</td><td class="num">'+porAnio[a].n+'</td><td class="num">'+money(porAnio[a].monto)+'</td></tr>'; }).join("")+'</tbody></table></div></div>';
