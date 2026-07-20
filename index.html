@@ -1078,14 +1078,14 @@ function abrirAnioAnterior(){
   nuevoAnio={lineas:[{codigo:"",desc:"",cantidad:"",total:"",com:""}]};
   var anioActual=new Date().getFullYear();
   var anios=[]; for(var y=anioActual-1;y>=anioActual-6;y--) anios.push(y);
-  $("modal-root").innerHTML='<div class="modal-bg"><div class="modal"><h2 style="font-size:26px;color:var(--navy);margin-bottom:4px">📅 Factura de año anterior</h2><div class="muted" style="margin-bottom:18px">Para garantías o devoluciones de facturas que <b>no están</b> en la base cargada. Se escribe todo a mano. Vendedor: <b>'+esc(me.name)+'</b> · Numeración <b>2200</b></div>'+
+  $("modal-root").innerHTML='<div class="modal-bg"><div class="modal"><h2 style="font-size:26px;color:var(--navy);margin-bottom:4px">📅 Factura de año anterior</h2><div class="muted" style="margin-bottom:18px">Para <b>garantías</b> de facturas que <b>no están</b> en la base cargada. Se escribe todo a mano. Vendedor: <b>'+esc(me.name)+'</b> · Numeración <b>2200</b></div>'+
     '<div id="na-guia-card">'+(pideGuia?(gd.length>0
       ?'<div class="card" style="background:#FFF1F1;border-color:#E8B0AB"><div class="field" style="margin-bottom:0"><label>⭐ Guía (solo tus guías activas de hoy)</label><select id="na-guia"><option value="">— Guardar sin guía (se enviará cuando la selecciones) —</option>'+gd.map(function(g){ return '<option value="'+g.id+'">'+esc(g.numero)+' — '+fdate(g.fechaCreacion)+'</option>'; }).join("")+'</select><div class="muted" style="margin-top:6px">Puedes guardar sin guía; quedará <b>pendiente</b> y no se enviará a mercadería hasta que le asignes la guía.</div></div></div>'
       :'<div class="card" style="background:var(--warn-bg);border-color:#E8C766"><b>⏳ No tienes guías activas hoy.</b><div class="muted" style="margin-top:4px">Puedes guardar el ticket ahora; quedará pendiente de guía.</div></div>')
     :'')+'</div>'+
-    '<div class="grid3"><div class="field"><label>Año de la factura</label><select id="na-anio">'+anios.map(function(y){return '<option>'+y+'</option>';}).join("")+'</select></div><div class="field"><label>N° factura anterior</label><input id="na-factura" placeholder="Ej.: 002-001-000012345" autocomplete="off"></div><div class="field"><label>Motivo</label><select id="na-motivo"><option value="GARANTIAS">Garantía</option><option value="DEVOLUCION">Devolución</option></select></div></div>'+
+    '<div class="grid3"><div class="field"><label>Año de la factura</label><select id="na-anio">'+anios.map(function(y){return '<option>'+y+'</option>';}).join("")+'</select></div><div class="field"><label>N° factura anterior</label><input id="na-factura" placeholder="Ej.: 002-001-000012345" autocomplete="off"></div><div class="field"><label>Motivo</label><input value="Garantía" disabled></div></div>'+
     '<div class="grid2"><div class="field ac-wrap"><label>Cliente (razón social)</label><input id="na-cliente" placeholder="Escribe el nombre; si está en la base aparece como opción…" autocomplete="off" oninput="buscarClienteAnio()" onfocus="buscarClienteAnio()"><div class="ac-list" id="na-cliente-list"></div></div><div class="field"><label>RUC / CI</label><input id="na-ruc" placeholder="Se llena solo al elegir un cliente de la base" autocomplete="off"></div></div>'+
-    '<div class="muted" style="margin:-4px 0 10px">💡 El <b>total</b> que escribas (con IVA incluido) será <b>validado por Devoluciones</b> antes de continuar. Si es garantía, luego pasa al revisor de Garantías.</div>'+
+    '<div class="muted" style="margin:-4px 0 10px">💡 El <b>total</b> que escribas (con IVA incluido) será <b>validado por Devoluciones</b> y luego pasa al revisor de <b>Garantías</b>.</div>'+
     '<div id="na-items"></div>'+
     '<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px"><button class="btn btn-g" onclick="cerrarModal()">Cancelar</button><button class="btn btn-p" onclick="guardarAnioAnterior()">Guardar ticket 2200</button></div></div></div>';
   renderItemsAnio();
@@ -1134,7 +1134,7 @@ async function guardarAnioAnterior(){
   }
   var anio=+($("na-anio")?$("na-anio").value:0);
   var factura=($("na-factura")?$("na-factura").value:"").trim();
-  var motivo=$("na-motivo")?$("na-motivo").value:"GARANTIAS";
+  var motivo="GARANTIAS";
   var cliente=($("na-cliente")?$("na-cliente").value:"").trim();
   var ruc=($("na-ruc")?$("na-ruc").value:"").trim();
   if(!cliente){ toast("Escribe el cliente."); return; }
