@@ -693,7 +693,7 @@ function renderMisTicketsTabla(){
   var mios=ticketsAsesorFiltrados();
   var cont=$("mis-tickets-tabla"); if(!cont) return;
   if(mios.length===0){ cont.innerHTML=(filtroMisTickets||filtroMisDesde||filtroMisHasta)?'<div class="empty"><div class="big">Sin resultados</div></div>':'<div class="empty"><div class="big">Sin tickets todavía</div>Crea tu primer ticket.</div>'; return; }
-  cont.innerHTML='<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px"><span class="muted">'+mios.length+' ticket(s)</span><div style="flex:1"></div><button class="btn btn-g btn-sm" onclick="imprimirSeleccionados()" title="Marca las casillas y imprime varios en una hoja">🖨 Imprimir seleccionados</button></div><div style="overflow-x:auto"><table><thead><tr><th></th><th>N° Ticket</th><th>Fecha</th><th>Guía</th><th>Cliente</th><th>Factura</th><th>Motivo</th><th>Estado</th><th></th></tr></thead><tbody>'+mios.map(function(t){ return '<tr><td><input type="checkbox" class="sel-tk" value="'+t.id+'" style="width:auto"></td><td><b>'+esc(t.numero)+'</b></td><td>'+fdate(t.fechaTicket)+'</td><td>'+esc(t.guiaNumero||"—")+'</td><td>'+esc(t.razonSocial)+'</td><td>'+esc(t.factura)+'</td><td>'+esc(t.motivo)+'</td><td>'+tagFor(t)+'</td><td style="white-space:nowrap">'+(t.estado==="SIN_GUIA"?'<button class="btn btn-a btn-sm" onclick="asignarGuiaTicket(\''+t.id+'\')">⭐ Seleccionar guía</button> ':'')+(t.estado==="GUIA_INCORRECTA"?'<button class="btn btn-a btn-sm" onclick="editarGuiaTicket(\''+t.id+'\')">✎ Corregir guía</button> ':'')+'<button class="btn btn-g btn-sm" onclick="verTicket(\''+t.id+'\')">Ver</button> <button class="btn btn-a btn-sm" onclick="imprimirTicket(\''+t.id+'\')">🖨</button></td></tr>'; }).join("")+'</tbody></table></div>';
+  cont.innerHTML='<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px"><span class="muted">'+mios.length+' ticket(s)</span><div style="flex:1"></div><button class="btn btn-g btn-sm" onclick="imprimirSeleccionados()" title="Marca las casillas y imprime varios en una hoja">🖨 Imprimir seleccionados</button></div><div style="overflow-x:auto"><table><thead><tr><th></th><th>N° Ticket</th><th>Fecha</th><th>Guía</th><th>Cliente</th><th>Factura</th><th>Motivo</th><th>Estado</th><th></th></tr></thead><tbody>'+mios.map(function(t){ return '<tr><td><input type="checkbox" class="sel-tk" value="'+t.id+'" style="width:auto"></td><td><b>'+esc(t.numero)+'</b></td><td>'+fdate(t.fechaTicket)+'</td><td>'+esc(t.guiaNumero||"—")+'</td><td>'+esc(t.razonSocial)+'</td><td>'+esc(t.factura)+'</td><td>'+esc(t.motivo)+'</td><td>'+tagFor(t)+'</td><td style="white-space:nowrap">'+(t.estado==="SIN_GUIA"?'<button class="btn btn-a btn-sm" onclick="asignarGuiaTicket(\''+t.id+'\')">⭐ Seleccionar guía</button> ':'')+(t.estado==="GUIA_INCORRECTA"?'<button class="btn btn-a btn-sm" onclick="editarGuiaTicket(\''+t.id+'\')">✎ Corregir guía</button> ':'')+'<button class="btn btn-g btn-sm" onclick="verTicket(\''+t.id+'\')">Ver</button> <button class="btn btn-a btn-sm" onclick="imprimirTicket(\''+t.id+'\')" title="Imprimir">🖨</button> <button class="btn btn-p btn-sm" onclick="compartirTicket(\''+t.id+'\')" title="Compartir por WhatsApp">📲</button></td></tr>'; }).join("")+'</tbody></table></div>';
 }
 async function recargarBase(){ toast("Cargando base…"); try{ await cargarBase(true,function(m){toast(m,2000);}); toast("✓ Base: "+baseLineas.toLocaleString("es-EC")+" líneas"); render(); }catch(e){ toast("Error: "+e.message,6000); } }
 function abrirNuevo(){
@@ -1267,6 +1267,70 @@ function imprimirSeleccionados(){
   if(ids.length===0){ toast("Marca las casillas ☑ de los tickets que quieres imprimir juntos."); return; }
   imprimirVarios(ids);
 }
+/* ===== COMPARTIR (WhatsApp, etc.) SIN DESCARGAR — usa el menú nativo del teléfono ===== */
+async function compartirArchivoPDF(blob,nombre,titulo){
+  try{
+    var file=new File([blob],nombre,{type:"application/pdf"});
+    if(navigator.canShare&&navigator.canShare({files:[file]})){
+      await navigator.share({files:[file],title:titulo||nombre,text:titulo||nombre});
+      return true;
+    }
+  }catch(e){ if(e&&e.name==="AbortError") return true; /* el usuario canceló */ }
+  return false;
+}
+function descargarBlob(blob,nombre){
+  var url=URL.createObjectURL(blob);
+  var a=document.createElement("a"); a.href=url; a.download=nombre; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(function(){ try{URL.revokeObjectURL(url);}catch(e){} },4000);
+}
+/* Genera el ticket como PDF compacto (rollo 80mm) para compartir o guardar */
+function ticketPDF(t){
+  var J=window.jspdf.jsPDF, W=80, M=4, CW=W-2*M;
+  function mm(pt){ return pt*0.3528; }
+  var scratch=new J({unit:"mm",format:[W,400]});
+  var content=[];
+  function push(s,size,bold,center){ size=size||8; scratch.setFontSize(size); scratch.setFont("courier",bold?"bold":"normal"); content.push({lines:scratch.splitTextToSize(String(s==null?"":s),CW),size:size,bold:bold,center:center}); }
+  function sep(){ content.push({sep:true}); }
+  function blank(){ content.push({blank:true}); }
+  push("COMERCIALIZADORA AUTOREPUESTOS UNIVERSAL LUBAMAQUI CIA LTDA",8,true,true);
+  push("RUC 1792788129001 - Av. 10 de Agosto y J.P. Saenz",6.5,false,true);
+  sep();
+  push("Ticket: "+t.numero+"    Fecha: "+fdate(t.fechaTicket),8,true);
+  push("Cliente: "+t.razonSocial,8);
+  push("RUC/CI: "+(t.ruc||"-")+"   Vend: "+t.vendedor,6.5);
+  push("Guia: "+(t.guiaNumero||"-")+"   Fact: "+t.factura+"   Emis: "+fdate(t.emision),6.5);
+  push("Motivo: "+t.motivo,6.5);
+  if(t.refactCliente) push("Refact. a: "+t.refactCliente,6.5);
+  if(t.sobre) push("Incluye sobre",6.5,true);
+  if(t.anioAnterior) push("Garantia año anterior "+t.anioFactura,6.5,true);
+  sep();
+  t.items.forEach(function(i){ push(i.cantidad+" x "+i.codigo+" "+i.desc,7); push("      "+money(i.total)+(i.comVendedor?"   ("+i.comVendedor+")":""),6.5); });
+  sep();
+  var sub=t.items.reduce(function(s,i){return s+i.neto;},0), iva=t.items.reduce(function(s,i){return s+i.iva;},0), tot=t.items.reduce(function(s,i){return s+i.total;},0);
+  push("Subtotal: "+money(sub),7); push("IVA: "+money(iva),7); push("TOTAL: "+money(tot),8,true);
+  sep(); blank(); blank(); blank();
+  push("________________________",7,false,true); push("FIRMA CLIENTE",7,false,true); push(t.razonSocial,6.5,false,true);
+  var y=6;
+  content.forEach(function(c){ if(c.sep){ y+=2.6; } else if(c.blank){ y+=3; } else { y+=c.lines.length*(mm(c.size)*1.25)+0.8; } });
+  var d=new J({unit:"mm",format:[W,Math.max(90,y+4)]});
+  y=6;
+  content.forEach(function(c){
+    if(c.sep){ d.setDrawColor(120); d.setLineWidth(0.2); d.line(M,y,W-M,y); y+=2.6; return; }
+    if(c.blank){ y+=3; return; }
+    d.setFontSize(c.size); d.setFont("courier",c.bold?"bold":"normal");
+    var step=mm(c.size)*1.25;
+    c.lines.forEach(function(ln){ if(c.center) d.text(ln,W/2,y,{align:"center"}); else d.text(ln,M,y); y+=step; });
+    y+=0.8;
+  });
+  return d;
+}
+async function compartirTicket(id){
+  if(!pdfReady()) return;
+  var t=findT(id); if(!t) return;
+  var blob=ticketPDF(t).output("blob"), nombre="Ticket_"+String(t.numero).replace(/[^0-9A-Za-z_-]/g,"")+".pdf";
+  var ok=await compartirArchivoPDF(blob,nombre,"Ticket "+t.numero);
+  if(!ok){ descargarBlob(blob,nombre); toast("Tu equipo no permite compartir directo; se descargó el PDF del ticket."); }
+}
 
 /* ===== PDF MEMBRETE ===== */
 function pdfReady(){ if(!window.jspdf||!window.jspdf.jsPDF){ toast("Generador PDF no cargado."); return false; } return true; }
@@ -1291,10 +1355,18 @@ function pieCorporativo(d){
   d.text("033-700-870",18,288); d.text("www.autorepuestosuniversal.com",62,288); d.text("Av. Indoamérica y Querétaro",132,288);
   d.setTextColor(0,0,0);
 }
+var pdfDocActual=null, pdfNombreActual="";
 function mostrarPDF(d,nombre){
   if(pdfUrl){ try{ URL.revokeObjectURL(pdfUrl); }catch(e){} }
+  pdfDocActual=d; pdfNombreActual=nombre;
   pdfUrl=URL.createObjectURL(d.output("blob"));
-  $("modal-root").innerHTML='<div class="modal-bg"><div class="modal" style="max-width:880px"><div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap"><h3 style="color:var(--navy);font-size:19px;flex:1">'+esc(nombre)+'</h3><a class="btn btn-a" href="'+pdfUrl+'" download="'+esc(nombre)+'" target="_blank">⬇ Descargar</a><button class="btn btn-g" onclick="cerrarModal()">Cerrar</button></div><iframe src="'+pdfUrl+'" style="width:100%;height:68vh;border:1px solid var(--line);border-radius:8px;background:#fff"></iframe></div></div>';
+  $("modal-root").innerHTML='<div class="modal-bg"><div class="modal" style="max-width:880px"><div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap"><h3 style="color:var(--navy);font-size:19px;flex:1">'+esc(nombre)+'</h3><button class="btn btn-p" onclick="compartirPDFActual()">📲 Compartir</button><a class="btn btn-a" href="'+pdfUrl+'" download="'+esc(nombre)+'" target="_blank">⬇ Descargar</a><button class="btn btn-g" onclick="cerrarModal()">Cerrar</button></div><iframe src="'+pdfUrl+'" style="width:100%;height:68vh;border:1px solid var(--line);border-radius:8px;background:#fff"></iframe></div></div>';
+}
+async function compartirPDFActual(){
+  if(!pdfDocActual){ toast("No hay PDF para compartir."); return; }
+  var blob=pdfDocActual.output("blob"), nombre=pdfNombreActual||"documento.pdf";
+  var ok=await compartirArchivoPDF(blob,nombre,nombre);
+  if(!ok) toast("Tu equipo no permite compartir directo aquí; usa el botón ⬇ Descargar.",5000);
 }
 function dibujarAnexosPDF(d,fotos,titulo,y2){
   if(fotos&&fotos.length){
@@ -1388,7 +1460,7 @@ function verTicket(id){
     if(me&&puedeActuar()&&rolActivo()==="ADMIN"&&t.estado==="DACION_ADMIN") h+='<div style="margin-top:8px"><button class="btn btn-a btn-sm" onclick="cerrarModal();revisarDacion(findT(\''+t.id+'\'))">Autorizar</button></div>';
     h+='</div>';
   }
-  h+='<div style="text-align:right;margin-top:12px;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">'+(t.estado==="SIN_GUIA"&&me&&t.vendedor===me.name?'<button class="btn btn-a" onclick="asignarGuiaTicket(\''+t.id+'\')">⭐ Seleccionar guía y enviar</button>':'')+'<button class="btn btn-a" onclick="imprimirTicket(\''+t.id+'\')">🖨 Imprimir</button><button class="btn btn-p" onclick="cerrarModal()">Cerrar</button></div></div></div>';
+  h+='<div style="text-align:right;margin-top:12px;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">'+(t.estado==="SIN_GUIA"&&me&&t.vendedor===me.name?'<button class="btn btn-a" onclick="asignarGuiaTicket(\''+t.id+'\')">⭐ Seleccionar guía y enviar</button>':'')+'<button class="btn btn-a" onclick="imprimirTicket(\''+t.id+'\')">🖨 Imprimir</button><button class="btn btn-p" onclick="compartirTicket(\''+t.id+'\')">📲 Compartir</button><button class="btn btn-g" onclick="cerrarModal()">Cerrar</button></div></div></div>';
   $("modal-root").innerHTML=h;
 }
 
