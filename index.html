@@ -648,7 +648,7 @@ function renderAsesor(){
   var sg=state.tickets.filter(function(t){ return t.vendedor===me.name&&t.estado==="SIN_GUIA"; }).slice().reverse();
   var avisosExtra=(state.avisos||[]).filter(function(a){ return a.vendedor===me.name&&!a.atendido&&a.tipo!=="REFACT"; }).slice().reverse();
   var avisosRefact=(state.avisos||[]).filter(function(a){ return a.vendedor===me.name&&!a.atendido&&a.tipo==="REFACT"; }).slice().reverse();
-  $("main").innerHTML='<div style="display:flex;align-items:center;gap:14px;margin-bottom:18px;flex-wrap:wrap"><h2 style="font-size:28px;color:var(--navy)">Orden Lubamaqui</h2><div style="flex:1"></div>'+(!baseLoaded?'<button class="btn btn-g" onclick="recargarBase()">🔄 Cargar base</button>':'')+(puedeActuar()?'<button class="btn btn-g" onclick="abrirSoloSobre()">📨 Solo enviar sobre</button><button class="btn btn-g" onclick="abrirAnioAnterior()">📅 Factura de año anterior</button><button class="btn btn-a" onclick="abrirNuevo()">+ Nuevo ticket</button>':'')+'</div>'+
+  $("main").innerHTML='<div style="display:flex;align-items:center;gap:14px;margin-bottom:18px;flex-wrap:wrap"><h2 style="font-size:28px;color:var(--navy)">Orden Lubamaqui</h2><div style="flex:1"></div>'+(!baseLoaded?'<button class="btn btn-g" onclick="recargarBase()">🔄 Cargar base</button>':'')+(puedeActuar()?'<button class="btn btn-g" onclick="abrirSoloSobre()">📨 Solo enviar sobre</button>'+(ANIO_ANTERIOR_HABILITADO?'<button class="btn btn-g" onclick="abrirAnioAnterior()">📅 Factura de año anterior</button>':'')+'<button class="btn btn-a" onclick="abrirNuevo()">+ Nuevo ticket</button>':'')+'</div>'+
     (!baseLoaded?'<div class="card" style="background:var(--warn-bg);border-color:#E8C766">⚠ Base no cargada. Presiona "Cargar base" o espera.</div>':'')+
     sg.map(function(t){ var dS=diasDesde(t.devueltoSinGuia&&t.devueltoSinGuia.f||t.fechaTicket); var dv=t.devueltoSinGuia; return '<div class="alert-del" style="background:var(--warn-bg);border-color:#E8C766">'+(dv?('↩ <b>Ticket '+esc(t.numero)+' devuelto por mercadería: llegó SIN guía</b> ('+esc(t.razonSocial)+' · Factura '+esc(t.factura)+').<br>Devuelto por '+esc(dv.por||"")+' el '+fdate(dv.f)+'. Motivo: <b>'+esc(dv.motivo||"")+'</b><br>'):('⏳ <b>Ticket '+esc(t.numero)+' guardado sin guía</b> ('+esc(t.razonSocial)+' · Factura '+esc(t.factura)+').<br>'))+'No se enviará a mercadería hasta que selecciones la guía. · <b style="color:'+colorDias(dS)+'">Lleva '+diasTexto(dS)+' pendiente</b><div style="margin-top:6px"><button class="btn btn-a btn-sm" onclick="asignarGuiaTicket(\''+t.id+'\')">⭐ Seleccionar guía y enviar</button></div></div>'; }).join("")+
     gi.map(function(t){ var dG=diasDesde(t.guiaIncorrecta&&t.guiaIncorrecta.f); return '<div class="alert-del">⚠ <b>Ticket '+esc(t.numero)+' devuelto por guía incorrecta</b> ('+esc(t.guiaIncorrecta&&t.guiaIncorrecta.por||"")+', '+fdate(t.guiaIncorrecta&&t.guiaIncorrecta.f)+').<br>Motivo: <b>'+esc(t.guiaIncorrecta&&t.guiaIncorrecta.motivo||"")+'</b> · La guía volvió a estar disponible. · <b style="color:'+colorDias(dG)+'">Lleva '+diasTexto(dG)+' sin corregir</b></div>'; }).join("")+
@@ -1069,9 +1069,14 @@ function renderSobresPendientes(){
   return '<div class="card" style="border-left:5px solid var(--navy)"><h3 style="font-size:18px;color:var(--navy);margin-bottom:8px">📨 Sobres por recibir</h3><div class="muted" style="margin-bottom:10px">Solo documentos, sin productos asociados.</div><div style="overflow-x:auto"><table><thead><tr><th>Guía</th><th>Asesor</th><th>Fecha</th><th>Referencia</th><th></th></tr></thead><tbody>'+pend.map(function(s){ return '<tr><td><b>'+esc(s.guiaNumero)+'</b></td><td>'+esc(s.asesor)+'</td><td>'+fdatetime(s.fecha)+'</td><td>'+esc(s.comentario||"—")+'</td><td>'+(puedeActuar()?'<button class="btn btn-ok btn-sm" onclick="marcarSobreRecibido(\''+s.id+'\')">✓ Recibido</button>':'')+'</td></tr>'; }).join("")+'</tbody></table></div></div>';
 }
 
-/* ===== FACTURA DE AÑO ANTERIOR (garantías/devoluciones fuera de la base cargada) ===== */
+/* ===== FACTURA DE AÑO ANTERIOR (garantías fuera de la base cargada) =====
+   Creación DESHABILITADA. Los tickets 2200 ya creados siguen funcionando normal
+   (mercadería → validación → garantía → NC y el reporte del dashboard).
+   Para volver a habilitar la creación, cambia ANIO_ANTERIOR_HABILITADO a true. */
+var ANIO_ANTERIOR_HABILITADO=false;
 var nuevoAnio=null;
 function abrirAnioAnterior(){
+  if(!ANIO_ANTERIOR_HABILITADO){ toast("La creación de tickets de año anterior está deshabilitada.",4000); return; }
   if(!puedeActuar()){ toast("👁 Modo solo lectura: no puedes crear tickets fuera de tu propia pestaña.",4000); return; }
   var pideGuia=requiereGuia(me.name);
   var gd=pideGuia?guiasSeleccionables(me.name):[];
@@ -1129,6 +1134,7 @@ function elegirClienteAnio(r){ var inp=$("na-cliente"); if(inp) inp.value=r; var
 function anioAgregar(){ nuevoAnio.lineas.push({codigo:"",desc:"",cantidad:"",total:"",com:""}); renderItemsAnio(); }
 function anioQuitar(ix){ nuevoAnio.lineas.splice(ix,1); renderItemsAnio(); }
 async function guardarAnioAnterior(){
+  if(!ANIO_ANTERIOR_HABILITADO){ toast("La creación de tickets de año anterior está deshabilitada.",4000); return; }
   if(!puedeActuar()){ toast("👁 Modo solo lectura.",4000); return; }
   var pideGuia=requiereGuia(me.name), guia=null;
   if(pideGuia){
