@@ -2266,6 +2266,7 @@ function renderAdmin(){
   if(total===0) h+='<div class="empty"><div class="big">Sin tickets</div></div>';
   else h+='<div class="srch-bar"><span>🔍</span><input type="text" id="adm-srch" placeholder="Buscar por asesor, cliente, N° ticket, factura o guía…" value="'+esc(filtroAdmin)+'" oninput="filtroAdmin=this.value;renderAdminTabla()">'+(filtroAdmin?'<button class="btn btn-sm btn-g" onclick="filtroAdmin=\'\';render()">✕</button>':'')+'</div><div id="adm-tabla"></div>';
   h+='</div>';
+  h+='<div class="card" style="border-left:5px solid var(--ok)"><h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">💾 Respaldo de seguridad</h3><div class="muted" style="margin-bottom:12px">Descarga TODO (tickets, guías, avisos y sobres) en un archivo. Guárdalo cada cierto tiempo; si algún día pasara algo, se puede restaurar desde aquí.</div><button class="btn btn-ok" onclick="descargarRespaldo()">⬇ Descargar respaldo completo</button></div>';
   h+='<div class="card" style="border-left:5px solid var(--bad)"><h3 style="font-size:19px;color:var(--bad);margin-bottom:6px">⚠ Limpiar datos de prueba</h3><div class="muted" style="margin-bottom:12px">Borra todos los tickets y guías. La base de facturas NO se toca.</div><button class="btn btn-bad" onclick="abrirLimpiarTodo()">🗑 Borrar tickets y guías</button></div>';
   $("main").innerHTML=h;
   renderAdminTabla();
@@ -2360,6 +2361,16 @@ async function actualizarBaseFirebase(){
     setP("✓ Base actualizada en Firebase: "+baseLineas.toLocaleString("es-EC")+" líneas ("+meta.rows.toLocaleString("es-EC")+" ventas + "+(ncFilasCrudas||0).toLocaleString("es-EC")+" NC)",100);
     toast("✓ Base subida. Ahora todos cargan rápido."); render();
   }catch(e){ console.error(e); toast("Error: "+e.message,6000); var el=$("adm-prog"); if(el) el.innerHTML='<div class="muted" style="color:var(--bad)">'+esc(e.message)+'</div>'; }
+}
+function descargarRespaldo(){
+  try{
+    var data=JSON.stringify({_app:"devoluciones-lubamaqui",_fecha:new Date().toISOString(),seq3200:state.seq3200||0,seq5200:state.seq5200||0,seq2200:state.seq2200||0,tickets:state.tickets||[],guias:state.guias||[],avisos:state.avisos||[],sobres:state.sobres||[]},null,2);
+    var blob=new Blob([data],{type:"application/json"});
+    var url=URL.createObjectURL(blob);
+    var a=document.createElement("a"); a.href=url; a.download="respaldo_devoluciones_"+hoyStr()+".json"; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function(){ try{URL.revokeObjectURL(url);}catch(e){} },4000);
+    toast("✓ Respaldo descargado ("+(state.tickets||[]).length+" tickets, "+(state.guias||[]).length+" guías). Guárdalo en un lugar seguro.",5000);
+  }catch(e){ toast("Error al generar el respaldo: "+(e&&e.message||e),6000); }
 }
 function reporteConsolidado(){
   if(state.tickets.length===0){ toast("No hay tickets."); return; }
