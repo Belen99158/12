@@ -785,12 +785,12 @@ function exportarExcel(){
       });
     });
   });
-  /* A N°,B FACTURA,C EMISION,D FECHA TICKET,E FECHA NC,F SUCURSAL,G VENDEDOR,H MOTIVO,I CLIENTE,J COD,K DESC,L MARCA,M CANT DEVUELTA,N TOTAL DEVUELTO,O TOTAL PRODUCTO,P COM VENDEDOR,Q COM MERCADERIA,R COM REVISION */
+  /* A N°,B FACTURA,C EMISION,D FECHA TICKET,E FECHA NC,F SUCURSAL,G VENDEDOR,H MOTIVO,I REFACTURAR A,J CLIENTE,K COD,L DESC,M MARCA,N CANT DEVUELTA,O TOTAL DEVUELTO,P TOTAL PRODUCTO,Q COM VENDEDOR,R COM MERCADERIA,S COM REVISION */
   var wsD=XLSX.utils.json_to_sheet(dRows.length?dRows:[{}]);
-  wsD["!cols"]=[{wch:12},{wch:16},{wch:12},{wch:12},{wch:12},{wch:18},{wch:18},{wch:14},{wch:30},{wch:14},{wch:34},{wch:14},{wch:13},{wch:14},{wch:18},{wch:26},{wch:26},{wch:26}];
+  wsD["!cols"]=[{wch:12},{wch:16},{wch:12},{wch:12},{wch:12},{wch:18},{wch:18},{wch:14},{wch:20},{wch:30},{wch:14},{wch:34},{wch:14},{wch:13},{wch:14},{wch:18},{wch:26},{wch:26},{wch:26}];
   XLSX.utils.book_append_sheet(wb,wsD,"Datos Devoluciones");
   var nD=dRows.length, dEnd=(nD||1)+1, SD="'Datos Devoluciones'";
-  var D_SUC="F", D_VEN="G", D_MOT="H", D_CLI="I", D_COD="J", D_CANT="M", D_TOT="N";
+  var D_SUC="F", D_VEN="G", D_MOT="H", D_CLI="J", D_COD="K", D_CANT="N", D_TOT="O";
 
   /* ===================== HOJA ÚNICA: RESUMEN (todo junto, con fórmulas) ===================== */
   var A=[], merges=[], post=[];
@@ -853,20 +853,20 @@ function exportarExcel(){
   for(var rv=venStart;rv<=venEnd;rv++){ var fv=f1(rv);
     setF(rv,1,"SUMIF("+SD+"!"+D_VEN+"2:"+D_VEN+dEnd+",A"+fv+","+SD+"!"+D_TOT+"2:"+D_TOT+dEnd+")");
     setF(rv,2,"IFERROR(B"+fv+"/"+VB+"*100,0)");
-    setF(rv,3,"IFERROR(AVERAGEIFS("+ST+"!K2:K"+tEnd+","+ST+"!B2:B"+tEnd+",A"+fv+"),\"\")","0.0");
-    setF(rv,4,"IFERROR(AVERAGEIFS("+ST+"!L2:L"+tEnd+","+ST+"!B2:B"+tEnd+",A"+fv+"),\"\")","0.0");
-    setF(rv,5,"IFERROR(AVERAGEIFS("+ST+"!M2:M"+tEnd+","+ST+"!B2:B"+tEnd+",A"+fv+"),\"\")","0.0");
-    setF(rv,6,"IFERROR(AVERAGEIFS("+ST+"!N2:N"+tEnd+","+ST+"!B2:B"+tEnd+",A"+fv+"),\"\")","0.0");
-    setF(rv,7,"IFERROR(AVERAGEIFS("+ST+"!O2:O"+tEnd+","+ST+"!B2:B"+tEnd+",A"+fv+"),\"\")","0.0");
+    setF(rv,3,"IFERROR(AVERAGEIFS("+ST+"!L2:L"+tEnd+","+ST+"!B2:B"+tEnd+",A"+fv+"),\"\")","0.0");
+    setF(rv,4,"IFERROR(AVERAGEIFS("+ST+"!M2:M"+tEnd+","+ST+"!B2:B"+tEnd+",A"+fv+"),\"\")","0.0");
+    setF(rv,5,"IFERROR(AVERAGEIFS("+ST+"!N2:N"+tEnd+","+ST+"!B2:B"+tEnd+",A"+fv+"),\"\")","0.0");
+    setF(rv,6,"IFERROR(AVERAGEIFS("+ST+"!O2:O"+tEnd+","+ST+"!B2:B"+tEnd+",A"+fv+"),\"\")","0.0");
+    setF(rv,7,"IFERROR(AVERAGEIFS("+ST+"!P2:P"+tEnd+","+ST+"!B2:B"+tEnd+",A"+fv+"),\"\")","0.0");
   }
   var rVenTot=R(["TOTAL","","","","","","",""]);
   setF(rVenTot,1,"SUM(B"+f1(venStart)+":B"+f1(venEnd)+")");
   setF(rVenTot,2,"IFERROR(B"+f1(rVenTot)+"/"+VB+"*100,0)");
-  setF(rVenTot,3,"IFERROR(AVERAGE("+ST+"!K2:K"+tEnd+"),\"\")","0.0");
-  setF(rVenTot,4,"IFERROR(AVERAGE("+ST+"!L2:L"+tEnd+"),\"\")","0.0");
-  setF(rVenTot,5,"IFERROR(AVERAGE("+ST+"!M2:M"+tEnd+"),\"\")","0.0");
-  setF(rVenTot,6,"IFERROR(AVERAGE("+ST+"!N2:N"+tEnd+"),\"\")","0.0");
-  setF(rVenTot,7,"IFERROR(AVERAGE("+ST+"!O2:O"+tEnd+"),\"\")","0.0");
+  setF(rVenTot,3,"IFERROR(AVERAGE("+ST+"!L2:L"+tEnd+"),\"\")","0.0");
+  setF(rVenTot,4,"IFERROR(AVERAGE("+ST+"!M2:M"+tEnd+"),\"\")","0.0");
+  setF(rVenTot,5,"IFERROR(AVERAGE("+ST+"!N2:N"+tEnd+"),\"\")","0.0");
+  setF(rVenTot,6,"IFERROR(AVERAGE("+ST+"!O2:O"+tEnd+"),\"\")","0.0");
+  setF(rVenTot,7,"IFERROR(AVERAGE("+ST+"!P2:P"+tEnd+"),\"\")","0.0");
   R([]);
 
   /* ---- Por motivo ---- */
