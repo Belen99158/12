@@ -149,6 +149,18 @@ function itemsAceptados(t){
   return out;
 }
 function totalAceptado(t){ return itemsAceptados(t).reduce(function(s,i){return s+i.total;},0); }
+/* Valor que el revisor NO aceptó (llegó menos aceptado). Excluye el flujo 8800 (i.dev.auto). */
+function totalNoAceptado(t){
+  var s=0;
+  (t.items||[]).forEach(function(i){
+    if(!i.dev||i.dev.auto) return;
+    if(tipoDeItem(t,i)!=="DEVOLUCION") return;
+    var lleg=llegoQ(i); if(lleg<=0) return;
+    var rech=Math.max(0,lleg-(i.dev.acepta?(i.dev.cantAcep||0):0));
+    if(rech>0&&i.cantidad) s+=i.total*(rech/i.cantidad);
+  });
+  return s;
+}
 /* color según umbrales de tasa */
 function colorTasa(ta){ return ta>UMBRAL_ALERTA?"var(--rojo)":(ta>UMBRAL_OK?"#C77F00":"var(--ok)"); }
 
@@ -367,12 +379,16 @@ function facturasEnRango(){
 }
 
 /* ===== TIEMPOS DE GESTIÓN (días por etapa) ===== */
-/* Devuelve {emiTicket, ticketMerc, mercRev, revNC, ciclo} por ticket, null donde falte fecha */
+/* Devuelve {emiTicket, ticketPaq, paqMerc, ticketMerc, mercRev, revNC, ciclo} por ticket, null donde falte fecha.
+   ticketPaq/paqMerc separan el tiempo de la transportadora del tiempo que tarda bodega en revisar. */
 function diasTicket(t){
   var rev=fechaRevision(t);
   var fin=(t.fechas&&t.fechas.nc)||null;
+  var paq=(t.fechas&&t.fechas.paquete)||null;
   return {
     emiTicket: diasEntre(t.emision, t.fechaTicket),
+    ticketPaq: diasEntre(t.fechaTicket, paq),
+    paqMerc: diasEntre(paq, t.fechas&&t.fechas.mercaderia),
     ticketMerc: diasEntre(t.fechaTicket, t.fechas&&t.fechas.mercaderia),
     mercRev: diasEntre(t.fechas&&t.fechas.mercaderia, rev),
     revNC: diasEntre(rev, fin),
@@ -530,6 +546,33 @@ function render(){
   h+='<div class="kpi"><div class="disp" style="color:#C77F00">'+money(devProcesoG)+'</div><div class="lbl">Valor en proceso (aún no aprobado)</div></div>';
   h+='<div class="kpi"><div class="disp" style="color:var(--navy)">'+money(montoMesActual)+'</div><div class="lbl">'+nombreMes(mesActual)+(mesAnterior?(' · <span class="'+(deltaMes>=0?"delta-up":"delta-dn")+'">'+(deltaMes>=0?"▲":"▼")+' '+Math.abs(deltaMes).toFixed(1)+'%</span> vs '+nombreMes(mesAnterior)):'')+'</div></div>';
   h+='</div>';
+
+  /* ===== LLEGADA DE PAQUETES (paso 1 de mercadería) ===== */
+  var enMerc=datos.filter(function(d){ return !d.anulado&&d.t.estado==="MERCADERIA"; });
+  var enTransito=enMerc.filter(function(d){ return !(d.t.paquete&&d.t.paquete.llego); });
+  var recibidos=datos.filter(function(d){ return !d.anulado&&d.t.paquete&&d.t.paquete.llego; });
+  var sinRevisar=recibidos.filter(function(d){ return d.t.estado==="MERCADERIA"; });
+  if(enMerc.length||recibidos.length){
+    var esperaTot=0, esperaN=0;
+    recibidos.forEach(function(d){ var dd=diasTicket(d.t); if(dd.paqMerc!=null){ esperaTot+=dd.paqMerc; esperaN++; } });
+    h+='<div class="card" style="border-left:5px solid #C77F00"><div class="sec-title" style="margin-top:0">🚚 Llegada de paquetes</div>'+
+       '<div class="grid4" style="margin-bottom:10px">'+
+       '<div class="kpi"><div class="disp" style="color:#C77F00">'+enTransito.length+'</div><div class="lbl">En tránsito (paquete no llega)</div></div>'+
+       '<div class="kpi"><div class="disp" style="color:var(--navy)">'+recibidos.length+'</div><div class="lbl">Paquetes recibidos</div></div>'+
+       '<div class="kpi"><div class="disp" style="color:var(--rojo)">'+sinRevisar.length+'</div><div class="lbl">Llegaron pero falta revisarlos</div></div>'+
+       '<div class="kpi"><div class="disp" style="color:var(--navy)">'+(esperaN?(esperaTot/esperaN).toFixed(1):"—")+'</div><div class="lbl">Días promedio llegada → revisión</div></div>'+
+       '</div>';
+    var pend=enTransito.concat(sinRevisar).sort(function(a,b){ return String(a.t.fechaTicket).localeCompare(String(b.t.fechaTicket)); });
+    if(pend.length){
+      h+='<div style="overflow-x:auto"><table><thead><tr><th>N° Ticket</th><th>Guía</th><th>Asesor</th><th>Cliente</th><th>Fecha ticket</th><th>Llegó el paquete</th><th class="num">Días esperando</th><th>Estado</th></tr></thead><tbody>'+
+         pend.slice(0,30).map(function(d){ var t=d.t, lleg=t.paquete&&t.paquete.llego;
+           var ref=lleg?t.paquete.f:t.fechaTicket;
+           var dias=Math.max(0,Math.round((Date.now()-new Date(ref).getTime())/86400000));
+           return '<tr><td><b>'+esc(t.numero)+'</b></td><td>'+esc(t.guiaNumero||"—")+'</td><td>'+esc(t.vendedor)+'</td><td>'+esc(t.razonSocial)+'</td><td>'+fechaDMY(t.fechaTicket)+'</td><td>'+(lleg?fechaDMY(t.paquete.f):"—")+'</td><td class="num" style="color:'+(dias>7?"var(--rojo)":dias>3?"#C77F00":"var(--ok)")+'"><b>'+dias+'</b></td><td>'+(lleg?'<span style="color:var(--rojo)">Falta revisar</span>':'<span style="color:#C77F00">En tránsito</span>')+'</td></tr>'; }).join("")+
+         '</tbody></table></div>'+(pend.length>30?'<div class="muted" style="margin-top:6px">Mostrando 30 de '+pend.length+'.</div>':'');
+    } else h+='<div class="muted">No hay paquetes pendientes.</div>';
+    h+='<div class="muted" style="margin-top:8px">La fecha de llegada se registra en mercadería apenas llega el paquete de la transportadora, antes de revisar el contenido. Así queda medido cuánto tarda el transporte y cuánto tarda la revisión.</div></div>';
+  }
 
   /* ===== MOTIVO DEL ASESOR vs. COMPROBACIÓN DEL REVISOR ===== */
   var conRev=datos.filter(function(d){ return d.t.motivoRevision; });
@@ -796,6 +839,15 @@ function exportarExcel(){
   if(datos.length===0){ alert("Sin datos para exportar."); return; }
   var wb=XLSX.utils.book_new();
 
+  /* Letra de columna de Excel a partir del nombre de la cabecera.
+     Evita que las fórmulas del RESUMEN se rompan al agregar o mover columnas. */
+  function colDe(rows,nombre){
+    var k=rows.length?Object.keys(rows[0]):[];
+    var ix=k.indexOf(nombre);
+    if(ix<0) throw new Error("Columna no encontrada en el reporte: "+nombre);
+    return XLSX.utils.encode_col(ix);
+  }
+
   /* emisión del Sheet por factura (para que la fecha salga igual que en el Sheet) */
   var emiMap={};
   ventasBase.forEach(function(v){ if(emiMap[v.factura]===undefined) emiMap[v.factura]=v.emision; });
@@ -822,30 +874,34 @@ function exportarExcel(){
   var F_TOTDOC="G", F_NETO="H", F_CANT="I", F_SUC="C", F_CLI="E";
 
   /* ===================== HOJA: DATOS TICKETS (para tiempos) ===================== */
-  /* OJO: las columnas A..R no se pueden reordenar — el RESUMEN las referencia por letra
-     (B vendedor, L..P días). Todo lo nuevo se agrega al final, a partir de la S. */
   var tRows=datos.map(function(d){
     var t=d.t, dd=diasTicket(t), rev=fechaRevision(t);
     var estadoTxt=d.anulado?"ANULADO"
       :(t.estado==="NC"&&t.nc&&t.nc.hecha)?"APROBADO (NC hecha)"
       :(t.estado==="NC")?"APROBADO (NC pendiente)"
-      :(t.estado==="DACION_ADMIN")?"EN PROCESO (Dación: por autorizar)":"EN PROCESO";
+      :(t.estado==="DACION_ADMIN")?"EN PROCESO (Dación: por autorizar)"
+      :(t.estado==="MERCADERIA"&&!(t.paquete&&t.paquete.llego))?"EN TRANSITO (paquete no llega)":"EN PROCESO";
     if(!d.anulado&&t.motivo==="DEVOLUCION Y REFACTURACION"&&t.estado==="NC"&&t.mercPendiente) estadoTxt+=" · falta factura nueva";
     var mrv=t.motivoRevision||null;
     var elim=t.eliminacion||null;
+    var pq=t.paquete||null;
     return {
-      "N° TICKET":t.numero,"VENDEDOR":t.vendedor,"SUCURSAL":d.suc.nombre,"MOTIVO ASESOR":t.motivo,"REFACTURAR A":t.refactCliente||"","ESTADO":estadoTxt,
+      "N° TICKET":t.numero,"GUIA":t.guiaNumero||"","VENDEDOR":t.vendedor,"SUCURSAL":d.suc.nombre,"MOTIVO ASESOR":t.motivo,"REFACTURAR A":t.refactCliente||"","ESTADO":estadoTxt,
       "EMISION":emiDe(t),"FECHA TICKET":fechaDMY(t.fechaTicket),
+      "FECHA LLEGADA PAQUETE":pq&&pq.f?fechaDMY(pq.f):"",
+      "BULTOS RECIBIDOS":pq&&pq.cartones!=null?pq.cartones:"",
       "FECHA MERCADERIA":t.fechas&&t.fechas.mercaderia?fechaDMY(t.fechas.mercaderia):"",
       "FECHA REVISION":rev?fechaDMY(rev):"","FECHA NC":t.fechas&&t.fechas.nc?fechaDMY(t.fechas.nc):"",
       "DIAS EMI-TICKET":dd.emiTicket==null?null:+dd.emiTicket.toFixed(1),
+      "DIAS TICKET-PAQUETE":dd.ticketPaq==null?null:+dd.ticketPaq.toFixed(1),
+      "DIAS PAQUETE-REVISION":dd.paqMerc==null?null:+dd.paqMerc.toFixed(1),
       "DIAS TICKET-MERC":dd.ticketMerc==null?null:+dd.ticketMerc.toFixed(1),
       "DIAS MERC-REV":dd.mercRev==null?null:+dd.mercRev.toFixed(1),
       "DIAS REV-NC":dd.revNC==null?null:+dd.revNC.toFixed(1),
       "DIAS CICLO":dd.ciclo==null?null:+dd.ciclo.toFixed(1),
       "TOTAL APROBADO":+d.aceptado.toFixed(2),
       "VALOR TICKET":+d.totalTicket.toFixed(2),
-      /* --- columnas nuevas (siempre al final) --- */
+      "VALOR NO ACEPTADO":+totalNoAceptado(t).toFixed(2),
       "SERIE":String(t.numero||"").split("-")[0]||"",
       "MOTIVO REVISADO":mrv?(mrv.correcto?"SI COINCIDE":"NO COINCIDE"):"",
       "MOTIVO SEGUN REVISOR":mrv?(mrv.correcto?(mrv.motivoAsesor||t.motivo):(mrv.motivoCorregido||"")):"",
@@ -860,48 +916,70 @@ function exportarExcel(){
     };
   });
   var wsT=XLSX.utils.json_to_sheet(tRows.length?tRows:[{}]);
-  wsT["!cols"]=[{wch:12},{wch:18},{wch:18},{wch:14},{wch:20},{wch:26},{wch:12},{wch:14},{wch:14},{wch:12},{wch:13},{wch:14},{wch:13},{wch:11},{wch:11},{wch:14},{wch:14},{wch:14},
+  wsT["!cols"]=[{wch:12},{wch:14},{wch:18},{wch:18},{wch:26},{wch:20},{wch:28},{wch:12},{wch:14},{wch:16},{wch:11},{wch:14},{wch:12},{wch:13},
+                {wch:14},{wch:16},{wch:17},{wch:13},{wch:11},{wch:11},{wch:14},{wch:14},{wch:14},{wch:16},
                 {wch:8},{wch:15},{wch:24},{wch:30},{wch:18},{wch:18},{wch:22},{wch:9},{wch:30},{wch:18},{wch:14}];
   XLSX.utils.book_append_sheet(wb,wsT,"Datos Tickets");
   var nT=tRows.length, tEnd=(nT||1)+1, ST="'Datos Tickets'";
+  /* Letras reales de esta hoja: se calculan, no se escriben a mano */
+  var T_NUM=colDe(tRows,"N° TICKET"), T_VEN=colDe(tRows,"VENDEDOR"), T_VAL=colDe(tRows,"VALOR TICKET"), T_ANUL=colDe(tRows,"ANULADO");
+  var T_D_EMI=colDe(tRows,"DIAS EMI-TICKET"), T_D_TMERC=colDe(tRows,"DIAS TICKET-MERC"),
+      T_D_MREV=colDe(tRows,"DIAS MERC-REV"), T_D_RNC=colDe(tRows,"DIAS REV-NC"), T_D_CICLO=colDe(tRows,"DIAS CICLO");
 
   /* ===================== HOJA: DATOS DEVOLUCIONES (con fechas de los items) ===================== */
+  /* Incluye también los ítems de tickets ANULADOS para que se vean en el detalle, pero con
+     CANT/TOTAL en 0: así aparecen sin alterar ninguna suma del resumen. Su valor real queda
+     en las columnas "… ANULADA/O (NO CUENTA)". */
+  function filaDev(t,suc,i,anul){
+    var totProdReal=totalProdSheet[t.factura+"|"+i.codigo];
+    var comRevision=(i.dev&&i.dev.com)?i.dev.com:((t.gar&&t.gar.com)?t.gar.com:"");
+    var mrv=t.motivoRevision||null;
+    var cant=+(+(i.cantNC||i.cantidad||0)).toFixed(2), tot=+(+(i.total||0)).toFixed(2);
+    return {
+      "N° TICKET":t.numero||"","FACTURA":t.factura||"",
+      "EMISION":emiDe(t),"FECHA TICKET":fechaDMY(t.fechaTicket),
+      "FECHA NC":t.fechas&&t.fechas.nc?fechaDMY(t.fechas.nc):"",
+      "SUCURSAL":suc.nombre,"VENDEDOR":t.vendedor||"","MOTIVO ASESOR":t.motivo||"","REFACTURAR A":t.refactCliente||"","CLIENTE":t.razonSocial||"",
+      "COD PRODUCTO":i.codigo||"","DESCRIPCION":i.desc||"","MARCA":i.sub||"",
+      "CANT DEVUELTA":anul?0:cant,
+      "TOTAL DEVUELTO":anul?0:tot,
+      "TOTAL PRODUCTO (SHEET)":totProdReal!==undefined?+totProdReal.toFixed(2):"",
+      "COMENTARIO VENDEDOR":i.comVendedor||"",
+      "COMENTARIO MERCADERIA":(i.merc&&i.merc.com)||"",
+      "COMENTARIO REVISION":comRevision,
+      "GUIA":t.guiaNumero||"",
+      "FECHA LLEGADA PAQUETE":t.fechas&&t.fechas.paquete?fechaDMY(t.fechas.paquete):"",
+      "ANULADO":anul?"SI":"NO",
+      "CANT ANULADA (NO CUENTA)":anul?cant:"",
+      "TOTAL ANULADO (NO CUENTA)":anul?tot:"",
+      "MOTIVO ANULACION":anul?(t.eliminacion&&t.eliminacion.motivo||""):"",
+      "MOTIVO REVISADO":mrv?(mrv.correcto?"SI COINCIDE":"NO COINCIDE"):"",
+      "MOTIVO SEGUN REVISOR":mrv?(mrv.correcto?(mrv.motivoAsesor||t.motivo):(mrv.motivoCorregido||"")):"",
+      "OBSERVACION DEL REVISOR":mrv?(mrv.com||""):"",
+      "FACTURA NUEVA (REFACT)":t.refactValidado&&t.refactValidado.facturaNueva||""
+    };
+  }
   var dRows=[];
   datos.forEach(function(d){
     var t=d.t, suc=d.suc;
-    if(!d.esAceptado) return;
+    if(!d.esAceptado&&!d.anulado) return;
+    var anul=d.anulado;
     var its=itemsAceptados(t);
-    its.forEach(function(i){
-      var totProdReal=totalProdSheet[t.factura+"|"+i.codigo];
-      var comRevision = (i.dev&&i.dev.com) ? i.dev.com : ((t.gar&&t.gar.com)?t.gar.com:"");
-      var mrv=t.motivoRevision||null;
-      dRows.push({
-        "N° TICKET":t.numero,"FACTURA":t.factura,
-        "EMISION":emiDe(t),"FECHA TICKET":fechaDMY(t.fechaTicket),
-        "FECHA NC":t.fechas&&t.fechas.nc?fechaDMY(t.fechas.nc):"",
-        "SUCURSAL":suc.nombre,"VENDEDOR":t.vendedor,"MOTIVO ASESOR":t.motivo,"REFACTURAR A":t.refactCliente||"","CLIENTE":t.razonSocial,
-        "COD PRODUCTO":i.codigo,"DESCRIPCION":i.desc,"MARCA":i.sub,
-        "CANT DEVUELTA":+(+(i.cantNC||i.cantidad)).toFixed(2),
-        "TOTAL DEVUELTO":+(+i.total).toFixed(2),
-        "TOTAL PRODUCTO (SHEET)":totProdReal!==undefined?+totProdReal.toFixed(2):"",
-        "COMENTARIO VENDEDOR":i.comVendedor||"",
-        "COMENTARIO MERCADERIA":(i.merc&&i.merc.com)||"",
-        "COMENTARIO REVISION":comRevision,
-        /* --- columnas nuevas (siempre al final: el RESUMEN referencia A..S por letra) --- */
-        "MOTIVO REVISADO":mrv?(mrv.correcto?"SI COINCIDE":"NO COINCIDE"):"",
-        "MOTIVO SEGUN REVISOR":mrv?(mrv.correcto?(mrv.motivoAsesor||t.motivo):(mrv.motivoCorregido||"")):"",
-        "OBSERVACION DEL REVISOR":mrv?(mrv.com||""):"",
-        "FACTURA NUEVA (REFACT)":t.refactValidado&&t.refactValidado.facturaNueva||""
-      });
-    });
+    /* Un ticket anulado antes de ser revisado no tiene ítems aceptados: se listan los del ticket */
+    if(anul&&its.length===0) its=(t.items||[]).map(function(i){ return Object.assign({},i,{cantNC:i.cantidad}); });
+    its.forEach(function(i){ dRows.push(filaDev(t,suc,i,anul)); });
   });
-  /* A N°,B FACTURA,C EMISION,D FECHA TICKET,E FECHA NC,F SUCURSAL,G VENDEDOR,H MOTIVO,I REFACTURAR A,J CLIENTE,K COD,L DESC,M MARCA,N CANT DEVUELTA,O TOTAL DEVUELTO,P TOTAL PRODUCTO,Q COM VENDEDOR,R COM MERCADERIA,S COM REVISION */
-  var wsD=XLSX.utils.json_to_sheet(dRows.length?dRows:[{}]);
-  wsD["!cols"]=[{wch:12},{wch:16},{wch:12},{wch:12},{wch:12},{wch:18},{wch:18},{wch:14},{wch:20},{wch:30},{wch:14},{wch:34},{wch:14},{wch:13},{wch:14},{wch:18},{wch:26},{wch:26},{wch:26},
-                {wch:15},{wch:24},{wch:30},{wch:22}];
+  /* Fila plantilla solo para conservar las cabeceras cuando no hay datos en el rango */
+  var dVacia=filaDev({fechas:{},items:[]},{nombre:""},{},false);
+  var wsD=XLSX.utils.json_to_sheet(dRows.length?dRows:[dVacia]);
+  wsD["!cols"]=[{wch:12},{wch:16},{wch:12},{wch:12},{wch:12},{wch:18},{wch:18},{wch:26},{wch:20},{wch:30},{wch:14},{wch:34},{wch:14},{wch:13},{wch:14},{wch:18},{wch:26},{wch:26},{wch:26},
+                {wch:14},{wch:16},{wch:9},{wch:16},{wch:16},{wch:30},{wch:15},{wch:24},{wch:30},{wch:22}];
   XLSX.utils.book_append_sheet(wb,wsD,"Datos Devoluciones");
   var nD=dRows.length, dEnd=(nD||1)+1, SD="'Datos Devoluciones'";
-  var D_SUC="F", D_VEN="G", D_MOT="H", D_CLI="J", D_COD="K", D_CANT="N", D_TOT="O";
+  /* Letras reales de esta hoja: se calculan, no se escriben a mano */
+  var dRef=dRows.length?dRows:[dVacia];
+  var D_SUC=colDe(dRef,"SUCURSAL"), D_VEN=colDe(dRef,"VENDEDOR"), D_MOT=colDe(dRef,"MOTIVO ASESOR"),
+      D_CLI=colDe(dRef,"CLIENTE"), D_COD=colDe(dRef,"COD PRODUCTO"), D_CANT=colDe(dRef,"CANT DEVUELTA"), D_TOT=colDe(dRef,"TOTAL DEVUELTO");
 
   /* ===================== HOJA ÚNICA: RESUMEN (todo junto, con fórmulas) ===================== */
   var A=[], merges=[], post=[];
@@ -957,6 +1035,8 @@ function exportarExcel(){
   /* ---- Por vendedor (devuelto + % s/venta bruta + tiempos) ---- */
   R(["DEVOLUCIONES Y TIEMPOS POR VENDEDOR (días promedio)"]); bandera(A.length-1,7);
   R(["Vendedor","Devuelto","% s/venta bruta","Emi→Tkt (d)","Tkt→Merc (d)","Merc→Rev (d)","Rev→NC (d)","Ciclo (d)"]);
+  function promVen(col,fv){ return "IFERROR(AVERAGEIFS("+ST+"!"+col+"2:"+col+tEnd+","+ST+"!"+T_VEN+"2:"+T_VEN+tEnd+",A"+fv+"),\"\")"; }
+  function promTot(col){ return "IFERROR(AVERAGE("+ST+"!"+col+"2:"+col+tEnd+"),\"\")"; }
   var venKeys=Object.keys((function(){var o={};datos.forEach(function(d){o[d.t.vendedor]=1;});return o;})());
   var venStart=A.length;
   venKeys.forEach(function(k){ R([k,"","","","","","",""]); });
@@ -964,20 +1044,20 @@ function exportarExcel(){
   for(var rv=venStart;rv<=venEnd;rv++){ var fv=f1(rv);
     setF(rv,1,"SUMIF("+SD+"!"+D_VEN+"2:"+D_VEN+dEnd+",A"+fv+","+SD+"!"+D_TOT+"2:"+D_TOT+dEnd+")");
     setF(rv,2,"IFERROR(B"+fv+"/"+VB+"*100,0)");
-    setF(rv,3,"IFERROR(AVERAGEIFS("+ST+"!L2:L"+tEnd+","+ST+"!B2:B"+tEnd+",A"+fv+"),\"\")","0.0");
-    setF(rv,4,"IFERROR(AVERAGEIFS("+ST+"!M2:M"+tEnd+","+ST+"!B2:B"+tEnd+",A"+fv+"),\"\")","0.0");
-    setF(rv,5,"IFERROR(AVERAGEIFS("+ST+"!N2:N"+tEnd+","+ST+"!B2:B"+tEnd+",A"+fv+"),\"\")","0.0");
-    setF(rv,6,"IFERROR(AVERAGEIFS("+ST+"!O2:O"+tEnd+","+ST+"!B2:B"+tEnd+",A"+fv+"),\"\")","0.0");
-    setF(rv,7,"IFERROR(AVERAGEIFS("+ST+"!P2:P"+tEnd+","+ST+"!B2:B"+tEnd+",A"+fv+"),\"\")","0.0");
+    setF(rv,3,promVen(T_D_EMI,fv),"0.0");
+    setF(rv,4,promVen(T_D_TMERC,fv),"0.0");
+    setF(rv,5,promVen(T_D_MREV,fv),"0.0");
+    setF(rv,6,promVen(T_D_RNC,fv),"0.0");
+    setF(rv,7,promVen(T_D_CICLO,fv),"0.0");
   }
   var rVenTot=R(["TOTAL","","","","","","",""]);
   setF(rVenTot,1,"SUM(B"+f1(venStart)+":B"+f1(venEnd)+")");
   setF(rVenTot,2,"IFERROR(B"+f1(rVenTot)+"/"+VB+"*100,0)");
-  setF(rVenTot,3,"IFERROR(AVERAGE("+ST+"!L2:L"+tEnd+"),\"\")","0.0");
-  setF(rVenTot,4,"IFERROR(AVERAGE("+ST+"!M2:M"+tEnd+"),\"\")","0.0");
-  setF(rVenTot,5,"IFERROR(AVERAGE("+ST+"!N2:N"+tEnd+"),\"\")","0.0");
-  setF(rVenTot,6,"IFERROR(AVERAGE("+ST+"!O2:O"+tEnd+"),\"\")","0.0");
-  setF(rVenTot,7,"IFERROR(AVERAGE("+ST+"!P2:P"+tEnd+"),\"\")","0.0");
+  setF(rVenTot,3,promTot(T_D_EMI),"0.0");
+  setF(rVenTot,4,promTot(T_D_TMERC),"0.0");
+  setF(rVenTot,5,promTot(T_D_MREV),"0.0");
+  setF(rVenTot,6,promTot(T_D_RNC),"0.0");
+  setF(rVenTot,7,promTot(T_D_CICLO),"0.0");
   R([]);
 
   /* ---- Por motivo ---- */
@@ -1027,8 +1107,7 @@ function exportarExcel(){
   prodTop.forEach(function(k){ prodF(R([k,prodDesc[k]||"","","",""])); });
   if(prodBot.length){ R(["— 10 menos devueltos —"]); prodBot.forEach(function(k){ prodF(R([k,prodDesc[k]||"","","",""])); }); }
 
-  /* ---- TICKETS ANULADOS (al final del resumen) ----
-     Columnas de 'Datos Tickets': B vendedor · D motivo · R valor ticket · Z ANULADO(SI/NO) */
+  /* ---- TICKETS ANULADOS (al final del resumen) ---- */
   R([]);
   R(["TICKETS ANULADOS — cuántos y de qué asesor"]); bandera(A.length-1,3);
   R(["Concepto","Valor","",""]);
@@ -1036,10 +1115,10 @@ function exportarExcel(){
   var kAnN=R(["Tickets ANULADOS","","",""]);
   var kAnP=R(["% anulados sobre el total","","",""]);
   var kAnV=R(["Valor de lo anulado (no suma a NC)","","",""]);
-  setF(kAnT,1,"COUNTA("+ST+"!A2:A"+tEnd+")","0");
-  setF(kAnN,1,"COUNTIF("+ST+"!Z2:Z"+tEnd+",\"SI\")","0");
+  setF(kAnT,1,"COUNTA("+ST+"!"+T_NUM+"2:"+T_NUM+tEnd+")","0");
+  setF(kAnN,1,"COUNTIF("+ST+"!"+T_ANUL+"2:"+T_ANUL+tEnd+",\"SI\")","0");
   setF(kAnP,1,"IFERROR(B"+f1(kAnN)+"/B"+f1(kAnT)+"*100,0)","0.0");
-  setF(kAnV,1,"SUMIF("+ST+"!Z2:Z"+tEnd+",\"SI\","+ST+"!R2:R"+tEnd+")");
+  setF(kAnV,1,"SUMIF("+ST+"!"+T_ANUL+"2:"+T_ANUL+tEnd+",\"SI\","+ST+"!"+T_VAL+"2:"+T_VAL+tEnd+")");
   R([]);
   R(["Asesor","Tickets anulados","Valor anulado","% de las anulaciones"]);
   var anuKeys=Object.keys((function(){var o={};datos.forEach(function(d){ if(d.anulado) o[d.t.vendedor]=1; });return o;})());
@@ -1049,15 +1128,15 @@ function exportarExcel(){
     anuKeys.forEach(function(k){ R([k,"","",""]); });
     var anuEnd=A.length-1;
     for(var ra=anuStart;ra<=anuEnd;ra++){ var fa=f1(ra);
-      setF(ra,1,"COUNTIFS("+ST+"!B2:B"+tEnd+",A"+fa+","+ST+"!Z2:Z"+tEnd+",\"SI\")","0");
-      setF(ra,2,"SUMIFS("+ST+"!R2:R"+tEnd+","+ST+"!B2:B"+tEnd+",A"+fa+","+ST+"!Z2:Z"+tEnd+",\"SI\")");
+      setF(ra,1,"COUNTIFS("+ST+"!"+T_VEN+"2:"+T_VEN+tEnd+",A"+fa+","+ST+"!"+T_ANUL+"2:"+T_ANUL+tEnd+",\"SI\")","0");
+      setF(ra,2,"SUMIFS("+ST+"!"+T_VAL+"2:"+T_VAL+tEnd+","+ST+"!"+T_VEN+"2:"+T_VEN+tEnd+",A"+fa+","+ST+"!"+T_ANUL+"2:"+T_ANUL+tEnd+",\"SI\")");
       setF(ra,3,"IFERROR(B"+fa+"/$B$"+f1(kAnN)+"*100,0)","0.0");
     }
     var rAnuTot=R(["TOTAL","","",""]);
     setF(rAnuTot,1,"SUM(B"+f1(anuStart)+":B"+f1(anuEnd)+")","0");
     setF(rAnuTot,2,"SUM(C"+f1(anuStart)+":C"+f1(anuEnd)+")");
   }
-  R(["El detalle de cada anulación (motivo, quién la hizo y fecha) está en 'Datos Tickets', columnas AA-AC."]); bandera(A.length-1,3);
+  R(["El detalle de cada anulación (motivo, quién la hizo y fecha) está en la hoja 'Datos Tickets', al final de cada fila."]); bandera(A.length-1,3);
 
   var wsR=XLSX.utils.aoa_to_sheet(A);
   wsR["!merges"]=merges;

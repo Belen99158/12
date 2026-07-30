@@ -538,7 +538,7 @@ function guiasSeleccionables(asesor){ var hoy=hoyStr(); return (state.guias||[])
 function guiaUsadaEnTickets(id){ return state.tickets.some(function(t){ return t.estado!=="ELIMINADO"&&t.guiaId===id; }); }
 function tagFor(t){
   if(t.estado==="SIN_GUIA") return t.devueltoSinGuia?'<span class="tag tag-bad">↩ Devuelto · pendiente de guía</span>':'<span class="tag" style="background:var(--warn-bg);color:#8A6400">⏳ Pendiente de guía · sin enviar</span>';
-  if(t.estado==="MERCADERIA") return '<span class="tag tag-merc">En mercadería</span>';
+  if(t.estado==="MERCADERIA") return paqueteLlego(t)?'<span class="tag tag-merc">📦 Paquete llegó · por revisar</span>':'<span class="tag" style="background:var(--warn-bg);color:#8A6400">🚚 En tránsito · paquete no llega</span>';
   if(t.estado==="DEVOLUCION") return '<span class="tag tag-dev">En devolución</span>';
   if(t.estado==="GARANTIA") return '<span class="tag tag-gar">En garantía</span>';
   if(t.estado==="DACION_ADMIN") return '<span class="tag tag-merc">Dación: por autorizar</span>';
@@ -632,7 +632,9 @@ function logout(){ try{ firebase.auth().signOut(); }catch(e){} fbReady=false; fb
 /* ===== ROUTER ===== */
 function esSuperAdmin(){ return me&&SUPER_ADMINS.indexOf(me.name)>=0; }
 /* NC también puede navegar por todas las pestañas (como Administrativo), pero solo puede ACTUAR en la suya: ver puedeActuar() */
-function puedeCambiarVista(){ return me&&(esSuperAdmin()||me.role==="NC"); }
+/* Mismo permiso de consulta para estos usuarios nominales: miran todo, editan solo su propia pestaña */
+var VISTA_LIBRE=["WILLIAM ACHACHI"].map(normNombre);
+function puedeCambiarVista(){ return me&&(esSuperAdmin()||me.role==="NC"||VISTA_LIBRE.indexOf(normNombre(me.name))>=0); }
 function rolActivo(){ if(puedeCambiarVista()&&vistaActiva) return vistaActiva; return me.role; }
 /* true si el usuario puede hacer cambios en la pestaña que está viendo ahora mismo */
 function puedeActuar(){ return me&&(esSuperAdmin()||rolActivo()===me.role); }
@@ -711,7 +713,7 @@ function renderMisTicketsTabla(){
   var mios=ticketsAsesorFiltrados();
   var cont=$("mis-tickets-tabla"); if(!cont) return;
   if(mios.length===0){ cont.innerHTML=(filtroMisTickets||filtroMisDesde||filtroMisHasta)?'<div class="empty"><div class="big">Sin resultados</div></div>':'<div class="empty"><div class="big">Sin tickets todavía</div>Crea tu primer ticket.</div>'; return; }
-  cont.innerHTML='<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px"><span class="muted">'+mios.length+' ticket(s)</span><div style="flex:1"></div><button class="btn btn-g btn-sm" onclick="imprimirSeleccionados()" title="Marca las casillas y imprime varios en una hoja">🖨 Imprimir seleccionados</button> <button class="btn btn-p btn-sm" onclick="compartirSeleccionados()" title="Enviar varios juntos por WhatsApp">📲 Compartir seleccionados</button></div><div style="overflow-x:auto"><table><thead><tr><th></th><th>N° Ticket</th><th>Fecha</th><th>Guía</th><th>Cliente</th><th>Factura</th><th>Motivo</th><th>Estado</th><th></th></tr></thead><tbody>'+mios.map(function(t){ return '<tr><td><input type="checkbox" class="sel-tk" value="'+t.id+'" style="width:auto"></td><td><b>'+esc(t.numero)+'</b></td><td>'+fdate(t.fechaTicket)+'</td><td>'+esc(t.guiaNumero||"—")+'</td><td>'+esc(t.razonSocial)+'</td><td>'+esc(t.factura)+'</td><td>'+esc(t.motivo)+'</td><td>'+tagFor(t)+'</td><td style="white-space:nowrap">'+(t.estado==="SIN_GUIA"?'<button class="btn btn-a btn-sm" onclick="asignarGuiaTicket(\''+t.id+'\')">⭐ Seleccionar guía</button> ':'')+(t.estado==="GUIA_INCORRECTA"?'<button class="btn btn-a btn-sm" onclick="editarGuiaTicket(\''+t.id+'\')">✎ Corregir guía</button> ':'')+'<button class="btn btn-g btn-sm" onclick="verTicket(\''+t.id+'\')">Ver</button>'+btnsSalida(t)+'</td></tr>'; }).join("")+'</tbody></table></div>';
+  cont.innerHTML='<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px"><span class="muted">'+mios.length+' ticket(s)</span><div style="flex:1"></div><button class="btn btn-g btn-sm" onclick="imprimirSeleccionados()" title="Marca las casillas y imprime varios en una hoja">🖨 Imprimir seleccionados</button> <button class="btn btn-p btn-sm" onclick="compartirSeleccionados()" title="Enviar varios juntos por WhatsApp">📲 Compartir seleccionados</button></div><div style="overflow-x:auto"><table><thead><tr><th></th><th>N° Ticket</th><th>Fecha</th><th>Guía</th><th>Cliente</th><th>Factura</th><th>Motivo</th><th>Estado</th><th></th></tr></thead><tbody>'+mios.map(function(t){ return '<tr><td><input type="checkbox" class="sel-tk" value="'+t.id+'" style="width:auto"></td><td><b>'+esc(t.numero)+'</b></td><td>'+fdate(t.fechaTicket)+'</td><td>'+esc(t.guiaNumero||"—")+'</td><td>'+esc(t.razonSocial)+'</td><td>'+esc(t.factura)+'</td><td>'+esc(t.motivo)+'</td><td>'+tagFor(t)+tagNoAceptado(t)+'</td><td style="white-space:nowrap">'+(t.estado==="SIN_GUIA"?'<button class="btn btn-a btn-sm" onclick="asignarGuiaTicket(\''+t.id+'\')">⭐ Seleccionar guía</button> ':'')+(t.estado==="GUIA_INCORRECTA"?'<button class="btn btn-a btn-sm" onclick="editarGuiaTicket(\''+t.id+'\')">✎ Corregir guía</button> ':'')+'<button class="btn btn-g btn-sm" onclick="verTicket(\''+t.id+'\')">Ver</button>'+btnsSalida(t)+'</td></tr>'; }).join("")+'</tbody></table></div>';
 }
 async function recargarBase(){ toast("Cargando base…"); try{ await cargarBase(true,function(m){toast(m,2000);}); toast("✓ Base: "+baseLineas.toLocaleString("es-EC")+" líneas"); render(); }catch(e){ toast("Error: "+e.message,6000); } }
 function abrirNuevo(){
@@ -1518,6 +1520,16 @@ function verTicket(id){
   if(t.estado==="SIN_GUIA"&&t.devueltoSinGuia) h+='<div class="alert-del">↩ Devuelto por mercadería ('+esc(t.devueltoSinGuia.por||"")+', '+fdate(t.devueltoSinGuia.f)+'): llegó sin guía. Motivo: <b>'+esc(t.devueltoSinGuia.motivo||"")+'</b></div>';
   h+='<div class="kv" style="margin-bottom:12px"><b>Guía</b><span>'+esc(t.guiaNumero||"—")+sobreTag+'</span><b>Cliente</b><span>'+esc(t.razonSocial)+'</span><b>RUC</b><span>'+esc(t.ruc||"")+'</span><b>Factura(s)</b><span>'+esc(t.factura)+'</span><b>Sucursal</b><span>'+esc(sucursalDe(t.factura).nombre)+'</span><b>Emisión</b><span>'+fdate(t.emision)+'</span><b>Fecha ticket</b><span>'+fdate(t.fechaTicket)+'</span><b>Vendedor</b><span>'+esc(t.vendedor)+'</span><b>Motivo</b><span>'+esc(t.motivo)+'</span>'+(t.anioAnterior?'<b>Año factura</b><span><span class="tag tag-gar">📅 Año anterior '+esc(t.anioFactura)+'</span>'+(t.valorValidado?' <span class="tag tag-nc">total validado</span>':' <span class="tag tag-merc">total por validar</span>')+'</span>':'')+(t.refactCliente?'<b>Refacturar a</b><span><b>'+esc(t.refactCliente)+'</b>'+(t.refactValidado?' <span class="tag tag-nc">✅ refacturado'+(t.refactValidado.facturaNueva?(' · '+esc(t.refactValidado.facturaNueva)):'')+'</span>':' <span class="tag tag-merc">pendiente de validar</span>')+'</span>':'')+'</div>';
   h+='<div style="overflow-x:auto"><table><thead><tr><th>Código</th><th>Cant.</th><th>Tipo</th><th>Descripción</th><th>Comentario</th><th class="num">Total</th></tr></thead><tbody>'+t.items.map(function(i){ var tp=tipoDeItem(t,i); var tagTipo=tp==="GARANTIA"?'<span class="tag tag-gar">Garantía</span>':(tp==="DACION"?'<span class="tag tag-merc">Dación'+(i.esExterna?" externa":"")+'</span>':'<span class="tag tag-dev">Devolución</span>'); var origen=i.esExterna?('<div class="muted">Mercadería externa'+(i.facturaCliente?(' · Fact. cliente: '+esc(i.facturaCliente)):'')+(i.fechaCliente?(' · '+fdate(i.fechaCliente)):'')+'</div>'):''; return '<tr><td>'+esc(i.codigo)+'</td><td>'+i.cantidad+'</td><td>'+tagTipo+'</td><td style="max-width:260px">'+esc(i.desc)+'<div class="muted">'+esc(i.sub)+'</div>'+origen+'</td><td style="max-width:170px">'+esc(i.comVendedor||"")+'</td><td class="num">'+money(i.total)+'</td></tr>'; }).join("")+'</tbody></table></div>';
+  if(t.paquete&&t.paquete.llego) h+='<div class="card" style="margin-top:12px;background:var(--ok-bg);border-color:#A9D9BF"><h3 style="color:var(--navy)">📦 Llegada del paquete</h3><div class="kv" style="margin-top:6px"><b>Llegó el</b><span>'+fdatetime(t.paquete.f)+'</span><b>Recibido por</b><span>'+esc(t.paquete.por||"")+'</span>'+(t.paquete.cartones!=null?'<b>Bultos</b><span>'+t.paquete.cartones+'</span>':'')+(t.paquete.transportadora?'<b>Transportadora</b><span>'+esc(t.paquete.transportadora)+'</span>':'')+(t.paquete.com?'<b>Observación</b><span>'+esc(t.paquete.com)+'</span>':'')+'</div></div>';
+  else if(t.estado==="MERCADERIA") h+='<div class="card" style="margin-top:12px;background:var(--warn-bg);border-color:#E8C766">🚚 <b>En tránsito.</b> Mercadería todavía no registra la llegada del paquete.</div>';
+  /* Informativo para el vendedor: qué le rechazaron y cuánto */
+  var noAcep=itemsNoAceptados(t);
+  if(noAcep.length){
+    h+='<div class="card" style="margin-top:12px;background:var(--bad-bg);border-color:#E8B0AB"><h3 style="color:var(--bad)">❌ No aceptado en la devolución · '+money(totalNoAceptado(t))+'</h3>'+
+       '<div style="overflow-x:auto;margin-top:8px"><table><thead><tr><th>Código</th><th>Descripción</th><th class="num">Llegaron</th><th class="num">Aceptadas</th><th class="num">NO aceptadas</th><th class="num">Valor no aceptado</th><th>Motivo del revisor</th></tr></thead><tbody>'+
+       noAcep.map(function(n){ return '<tr><td><b>'+esc(n.codigo)+'</b></td><td style="max-width:220px;font-size:12px">'+esc(n.desc)+'</td><td class="num">'+n.cantLlegada+'</td><td class="num">'+n.cantAceptada+'</td><td class="num"><b style="color:var(--bad)">'+n.cantRechazada+'</b></td><td class="num">'+money(n.monto)+'</td><td style="max-width:200px;font-size:12px">'+esc(n.com||"—")+'</td></tr>'; }).join("")+
+       '</tbody></table></div><div class="muted" style="margin-top:6px">Revisado por '+esc(noAcep[0].por||"")+'. Esta mercadería no genera nota de crédito.</div></div>';
+  }
   if(t.motivoRevision){ var mr=t.motivoRevision; h+='<div class="card" style="margin-top:12px;background:'+(mr.correcto?"var(--ok-bg)":"var(--bad-bg)")+';border-color:'+(mr.correcto?"#A9D9BF":"#E8B0AB")+'"><h3 style="color:var(--navy)">🔎 Comprobación del motivo</h3><div class="kv" style="margin-top:6px"><b>Motivo del asesor</b><span>'+esc(mr.motivoAsesor||t.motivo)+'</span><b>Según el revisor</b><span>'+(mr.correcto?'<span class="tag tag-nc">Coincide</span>':'<span class="tag tag-bad">No coincide</span> → <b>'+esc(mr.motivoCorregido||"")+'</b>')+'</span>'+(mr.com?'<b>Observación</b><span>'+esc(mr.com)+'</span>':'')+'<b>Revisado por</b><span>'+esc(mr.por||"")+' · '+fdate(mr.f)+'</span></div></div>'; }
   if(t.items.some(function(i){return i.merc;})) h+='<div class="card" style="margin-top:12px"><h3 style="color:var(--navy)">Revisión de mercadería</h3>'+t.items.map(function(i){ return i.merc?'<div style="margin:6px 0">• <b>'+esc(i.codigo)+'</b>: llegaron <b>'+llegoQ(i)+'</b> de '+i.cantidad+' — '+esc(i.merc.com||"sin comentario")+'</div>':''; }).join("")+'</div>';
   if(t.gar){ var rechV=garItemsRechazados(t), hayR=rechV.length>0, totAcepV=totalAceptado(t); h+='<div class="card"><h3 style="color:var(--navy)">Revisión de garantía</h3>'; h+=t.items.map(function(i,x){ if(llegoQ(i)>0&&tipoDeItem(t,i)==="GARANTIA"){ var ca=garCantAcep(t,i,x), cr=garCantRech(t,i,x); return '<div style="margin:6px 0">• <b>'+esc(i.codigo)+'</b>: '+(ca>0?'<span style="color:var(--ok)">'+ca+' aceptada(s) → NC</span>':'')+(ca>0&&cr>0?' · ':'')+(cr>0?'<span style="color:var(--bad)">'+cr+' rechazada(s) → informe</span>':'')+' <span class="muted">(de '+llegoQ(i)+' que llegaron)</span></div>'; } return ""; }).join(""); if(totAcepV>0) h+='<div style="margin-top:6px;font-weight:600">Total aceptado (NC): '+money(totAcepV)+'</div>'; h+='<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">'; if(hayR) h+='<button class="btn btn-g btn-sm" onclick="pdfCartaGar(\''+t.id+'\')">Ver carta + informe</button>'; if(me&&puedeActuar()&&(rolActivo()==="GARANTIA"||rolActivo()==="ADMIN")) h+='<button class="btn btn-a btn-sm" onclick="editarGar(\''+t.id+'\')">✎ Editar</button>'; h+='</div></div>'; }
@@ -1554,7 +1566,7 @@ function renderBandejaTabla(role){
   if(q) lista=lista.filter(function(t){ return (t.vendedor+" "+t.numero+" "+t.razonSocial+" "+t.factura+" "+(t.guiaNumero||"")+" "+t.motivo).toUpperCase().indexOf(q)>=0; });
   var cont=$("band-tabla"); if(!cont) return;
   if(lista.length===0){ cont.innerHTML=q?'<div class="empty"><div class="big">Sin resultados</div></div>':'<div class="empty"><div class="big">Bandeja vacía</div>No hay tickets pendientes.</div>'; return; }
-  cont.innerHTML='<div style="display:flex;justify-content:flex-end;margin-bottom:8px"><button class="btn btn-g btn-sm" onclick="imprimirSeleccionados()" title="Marca las casillas y imprime varios en una hoja">🖨 Imprimir seleccionados</button> <button class="btn btn-p btn-sm" onclick="compartirSeleccionados()" title="Enviar varios juntos por WhatsApp">📲 Compartir seleccionados</button></div><table><thead><tr><th></th><th>N° Ticket</th><th>Fecha</th><th>Guía</th><th>Cliente</th><th>Factura</th><th>Motivo</th><th>Vendedor</th><th></th></tr></thead><tbody>'+lista.map(function(t){ return '<tr><td><input type="checkbox" class="sel-tk" value="'+t.id+'" style="width:auto"></td><td><b>'+esc(t.numero)+'</b>'+(t.estado==="MIXTO"?' <span class="tag tag-gar" style="font-size:9px">MIXTO</span>':'')+'</td><td>'+fdate(t.fechaTicket)+'</td><td>'+esc(t.guiaNumero||"—")+'</td><td>'+esc(t.razonSocial)+'</td><td>'+esc(t.factura)+'</td><td>'+esc(t.motivo)+'</td><td>'+esc(t.vendedor)+'</td><td style="white-space:nowrap"><button class="btn btn-g btn-sm" onclick="verTicket(\''+t.id+'\')">Ver</button> <button class="btn btn-a btn-sm" onclick="revisar(\''+role+'\',\''+t.id+'\')">Revisar</button> '+(faltaGuiaParaImprimir(t)?'<button class="btn btn-g btn-sm" disabled title="Sin guía no se puede imprimir">🖨</button>':'<button class="btn btn-g btn-sm" onclick="imprimirTicket(\''+t.id+'\')" title="Imprimir ticket">🖨</button>')+((role==="MERCADERIA"&&!t.guiaNumero&&requiereGuia(t.vendedor))?' <button class="btn btn-bad btn-sm" onclick="abrirDevolverTicket(\''+t.id+'\')" title="Devolver al asesor: llegó sin guía">↩ Devolver</button>':'')+'</td></tr>'; }).join("")+'</tbody></table>';
+  cont.innerHTML='<div style="display:flex;justify-content:flex-end;margin-bottom:8px"><button class="btn btn-g btn-sm" onclick="imprimirSeleccionados()" title="Marca las casillas y imprime varios en una hoja">🖨 Imprimir seleccionados</button> <button class="btn btn-p btn-sm" onclick="compartirSeleccionados()" title="Enviar varios juntos por WhatsApp">📲 Compartir seleccionados</button></div><table><thead><tr><th></th><th>N° Ticket</th><th>Fecha</th><th>Guía</th><th>Cliente</th><th>Factura</th><th>Motivo</th><th>Vendedor</th>'+(role==="MERCADERIA"?'<th>Paquete</th>':'')+'<th></th></tr></thead><tbody>'+lista.map(function(t){ var pqFalta=(role==="MERCADERIA")&&faltaRegistrarPaquete(t); return '<tr><td><input type="checkbox" class="sel-tk" value="'+t.id+'" style="width:auto"></td><td><b>'+esc(t.numero)+'</b>'+(t.estado==="MIXTO"?' <span class="tag tag-gar" style="font-size:9px">MIXTO</span>':'')+'</td><td>'+fdate(t.fechaTicket)+'</td><td>'+esc(t.guiaNumero||"—")+'</td><td>'+esc(t.razonSocial)+'</td><td>'+esc(t.factura)+'</td><td>'+esc(t.motivo)+'</td><td>'+esc(t.vendedor)+'</td>'+(role==="MERCADERIA"?('<td>'+(!requierePaquete(t)?'<span class="muted">—</span>':(paqueteLlego(t)?'<span class="tag tag-nc">📦 Llegó '+fdate(t.paquete.f)+'</span>'+(t.paquete.cartones!=null?'<div class="muted" style="font-size:11px">'+t.paquete.cartones+' bulto(s)</div>':''):'<span class="tag" style="background:var(--warn-bg);color:#8A6400">🚚 En tránsito</span>'))+'</td>'):'')+'<td style="white-space:nowrap"><button class="btn btn-g btn-sm" onclick="verTicket(\''+t.id+'\')">Ver</button> '+(pqFalta?'<button class="btn btn-ok btn-sm" onclick="abrirLlegadaPaquete(\''+t.id+'\')" title="Paso 1: registrar que llegó el paquete">📦 Llegó el paquete</button> <button class="btn btn-g btn-sm" disabled title="Primero registra la llegada del paquete">Revisar</button> ':'<button class="btn btn-a btn-sm" onclick="revisar(\''+role+'\',\''+t.id+'\')">Revisar</button> ')+(faltaGuiaParaImprimir(t)?'<button class="btn btn-g btn-sm" disabled title="Sin guía no se puede imprimir">🖨</button>':'<button class="btn btn-g btn-sm" onclick="imprimirTicket(\''+t.id+'\')" title="Imprimir ticket">🖨</button>')+((role==="MERCADERIA"&&!t.guiaNumero&&requiereGuia(t.vendedor))?' <button class="btn btn-bad btn-sm" onclick="abrirDevolverTicket(\''+t.id+'\')" title="Devolver al asesor: llegó sin guía">↩ Devolver</button>':'')+'</td></tr>'; }).join("")+'</tbody></table>';
 }
 function fechaRepRef(role,t){
   if(role==="MERCADERIA") return t.fechas&&t.fechas.mercaderia;
@@ -1585,7 +1597,15 @@ function histTable(role){
   if(l.length===0) return '<div class="muted">'+((repDesde||repHasta)?"Sin registros en este rango de fechas.":"Sin tickets procesados aún.")+'</div>';
   return '<div class="muted" style="margin-bottom:6px">'+l.length+' ticket(s)'+((repDesde||repHasta)?" en el rango filtrado":"")+'</div><table><thead><tr><th>N° Ticket</th><th>Cliente</th><th>Estado</th><th></th></tr></thead><tbody>'+l.map(function(t){ return '<tr><td><b>'+esc(t.numero)+'</b></td><td>'+esc(t.razonSocial)+'</td><td>'+tagFor(t)+'</td><td style="white-space:nowrap"><button class="btn btn-g btn-sm" onclick="verTicket(\''+t.id+'\')">Ver</button> '+(faltaGuiaParaImprimir(t)?'<button class="btn btn-g btn-sm" disabled title="Sin guía no se puede imprimir">🖨</button>':'<button class="btn btn-g btn-sm" onclick="imprimirTicket(\''+t.id+'\')" title="Imprimir ticket">🖨</button>')+(role==="GARANTIA"&&t.gar?' <button class="btn btn-a btn-sm" onclick="editarGar(\''+t.id+'\')">✎</button>':'')+((role==="MERCADERIA"&&esTicketRefact(t))?' <button class="btn btn-a btn-sm" onclick="revisarMercRefact(findT(\''+t.id+'\'))" title="Editar la factura nueva del cliente destino">✎ Factura nueva</button>':'')+'</td></tr>'; }).join("")+'</tbody></table>';
 }
-function revisar(role,id){ if(!puedeActuar()){ toast("👁 Modo solo lectura: no puedes revisar tickets fuera de tu propia pestaña.",4000); return; } var t=findT(id); if(role==="MERCADERIA") revisarMerc(t); else if(role==="DEVOLUCION"){ if(t.anioAnterior) revisarValidacionAnio(t); else revisarDev(t); } else revisarGar(t); }
+function revisar(role,id){
+  if(!puedeActuar()){ toast("👁 Modo solo lectura: no puedes revisar tickets fuera de tu propia pestaña.",4000); return; }
+  var t=findT(id);
+  /* Paso 1 obligatorio: sin registrar la llegada del paquete no se revisa la mercadería */
+  if(role==="MERCADERIA"&&faltaRegistrarPaquete(t)){ toast("📦 Primero registra que llegó el paquete. Ese es el paso 1.",5000); abrirLlegadaPaquete(id); return; }
+  if(role==="MERCADERIA") revisarMerc(t);
+  else if(role==="DEVOLUCION"){ if(t.anioAnterior) revisarValidacionAnio(t); else revisarDev(t); }
+  else revisarGar(t);
+}
 /* ===== VALIDACIÓN DE TOTAL (tickets 2200 de año anterior, por Devoluciones) ===== */
 function revisarValidacionAnio(t){
   var esGar=t.motivo==="GARANTIAS";
@@ -1636,7 +1656,9 @@ function exportarBandeja(role){
       t.items.forEach(function(i){
         if(!i.merc) return;
         rows.push({
-          "N° TICKET":t.numero,"FECHA TICKET":fdate(t.fechaTicket),"FECHA REVISION":t.fechas&&t.fechas.mercaderia?fdate(t.fechas.mercaderia):"",
+          "N° TICKET":t.numero,"FECHA TICKET":fdate(t.fechaTicket),
+          "FECHA LLEGADA PAQUETE":t.paquete&&t.paquete.f?fdate(t.paquete.f):"","BULTOS":t.paquete&&t.paquete.cartones!=null?t.paquete.cartones:"","RECIBIDO POR":t.paquete&&t.paquete.por||"",
+          "FECHA REVISION":t.fechas&&t.fechas.mercaderia?fdate(t.fechas.mercaderia):"",
           "GUIA":t.guiaNumero||"","SUCURSAL":sucursalDe(t.factura).nombre,"CLIENTE":t.razonSocial,"RUC":t.ruc||"","FACTURA":t.factura,"EMISION":fdate(t.emision),
           "VENDEDOR":t.vendedor,"MOTIVO":t.motivo,"ESTADO TICKET":ESTADO_LABEL[t.estado]||t.estado,
           "CODIGO":i.codigo,"DESCRIPCION":i.desc,"MARCA":i.sub,"CANT TICKET":i.cantidad,"CANT LLEGADA":llegoQ(i),
@@ -1645,7 +1667,7 @@ function exportarBandeja(role){
       });
     });
     var ws=XLSX.utils.json_to_sheet(rows.length?rows:[{}]);
-    ws["!cols"]=[{wch:12},{wch:12},{wch:12},{wch:14},{wch:20},{wch:30},{wch:14},{wch:14},{wch:12},{wch:18},{wch:30},{wch:20},{wch:14},{wch:30},{wch:14},{wch:11},{wch:13},{wch:24},{wch:24},{wch:18}];
+    ws["!cols"]=[{wch:12},{wch:12},{wch:16},{wch:9},{wch:18},{wch:12},{wch:14},{wch:20},{wch:30},{wch:14},{wch:14},{wch:12},{wch:18},{wch:30},{wch:20},{wch:14},{wch:30},{wch:14},{wch:11},{wch:13},{wch:24},{wch:24},{wch:18}];
     XLSX.utils.book_append_sheet(wb,ws,"Revisión mercadería");
     XLSX.writeFile(wb,"Reporte_Mercaderia"+suf+".xlsx");
     return;
@@ -1770,7 +1792,40 @@ async function guardarMercRefact(id){
   await saveState(); cerrarModal(); toast("✓ Ticket "+t.numero+" cerrado · NC "+(t.nc.numero||"")+" y factura nueva "+factNueva+" a "+(t.refactCliente||"cliente destino")+".",6000); render();
 }
 
-/* ===== REV MERCADERÍA ===== */
+/* ===== PASO 1 DE MERCADERÍA · LLEGADA DEL PAQUETE =====
+   La revisión de mercadería son dos momentos distintos:
+   1) llega el paquete de la transportadora (se cuentan los bultos) — se registra aquí,
+   2) se revisa si dentro venía la mercadería de la guía — es la revisión de siempre.
+   Entre uno y otro pueden pasar días; sin este paso esa fecha de llegada se perdía.
+   El flujo 8800 no aplica: esa mercadería no pasa por bodega. */
+function requierePaquete(t){ return !!(t&&t.estado==="MERCADERIA"); }
+function paqueteLlego(t){ return !!(t&&t.paquete&&t.paquete.llego); }
+function faltaRegistrarPaquete(t){ return requierePaquete(t)&&!paqueteLlego(t); }
+function abrirLlegadaPaquete(id){
+  if(!puedeActuar()){ toast("👁 Modo solo lectura.",4000); return; }
+  var t=findT(id); if(!t) return;
+  var dias=diasDesde(t.fechaTicket);
+  $("modal-root").innerHTML='<div class="modal-bg"><div class="modal" style="max-width:620px"><h2 style="font-size:22px;color:var(--navy);margin-bottom:6px">📦 Llegada del paquete · '+esc(t.numero)+'</h2>'+
+    '<div class="muted" style="margin-bottom:12px">'+esc(t.razonSocial)+' · Factura '+esc(t.factura)+' · Guía <b>'+esc(t.guiaNumero||"—")+'</b> · Asesor '+esc(t.vendedor)+'</div>'+
+    '<div class="card" style="background:#E3ECF7;border-color:#B9CBE3">Registra <b>hoy mismo</b> que el paquete llegó de la transportadora, aunque todavía no puedas revisar el contenido. La revisión de la mercadería es el paso siguiente.<div class="muted" style="margin-top:6px">El ticket se creó hace <b style="color:'+colorDias(dias)+'">'+diasTexto(dias)+'</b>.</div></div>'+
+    '<div class="grid2"><div class="field"><label>📦 Bultos / cartones recibidos (opcional)</label><input type="number" min="0" id="pq-cartones" placeholder="Ej.: 2"></div>'+
+    '<div class="field"><label>Transportadora (opcional)</label><input id="pq-transp" placeholder="Ej.: Servientrega"></div></div>'+
+    '<div class="field"><label>Observación (opcional)</label><input id="pq-com" placeholder="Ej.: caja golpeada, falta un bulto…"></div>'+
+    '<div style="display:flex;gap:10px;justify-content:flex-end"><button class="btn btn-g" onclick="cerrarModal()">Cancelar</button><button class="btn btn-ok" onclick="guardarLlegadaPaquete(\''+t.id+'\')">📦 Registrar llegada</button></div></div></div>';
+}
+async function guardarLlegadaPaquete(id){
+  if(!puedeActuar()){ toast("👁 Modo solo lectura.",4000); return; }
+  var t=findT(id); if(!t) return;
+  if(t.estado!=="MERCADERIA"){ toast("Este ticket ya no está en la bandeja de mercadería."); cerrarModal(); render(); return; }
+  var ahora=new Date().toISOString();
+  var cart=($("pq-cartones")?$("pq-cartones").value:"").trim();
+  t.paquete={llego:true,cartones:cart===""?null:Math.max(0,+cart||0),transportadora:($("pq-transp")?$("pq-transp").value:"").trim(),com:($("pq-com")?$("pq-com").value:"").trim(),por:me.name,f:ahora};
+  t.fechas=t.fechas||{}; t.fechas.paquete=ahora;
+  t.historial.push({f:ahora,e:"Paquete recibido en mercadería ("+me.name+")"+(t.paquete.cartones!=null?" · "+t.paquete.cartones+" bulto(s)":"")+(t.paquete.transportadora?" · "+t.paquete.transportadora:"")+(t.paquete.com?" · "+t.paquete.com:"")});
+  await saveState(); cerrarModal(); toast("✓ Llegada registrada. Ya puedes revisar la mercadería del ticket "+t.numero+".",5000); render();
+}
+
+/* ===== PASO 2 DE MERCADERÍA · REVISIÓN DE LA MERCADERÍA ===== */
 function revisarMerc(t){
   if(t.motivo==="DEVOLUCION Y REFACTURACION"){ revisarMercRefact(t); return; }
   var soloGuia=!!t.mercRevisada;   /* REQ 3: ya revisada y aprobada, solo falta validar la guía corregida */
@@ -2215,6 +2270,30 @@ function itemsAceptados(t){
   return out;
 }
 function totalAceptado(t){ return itemsAceptados(t).reduce(function(s,i){return s+i.total;},0); }
+/* ===== LO QUE NO SE ACEPTÓ EN LA DEVOLUCIÓN =====
+   Por cada ítem revisado: lo que llegó menos lo que el revisor aceptó. Sirve para
+   informarle al vendedor cuánto le rechazaron y por qué. No incluye el flujo 8800
+   (i.dev.auto), que se acepta completo por definición. */
+function itemsNoAceptados(t){
+  var out=[];
+  (t.items||[]).forEach(function(i){
+    if(!i.dev||i.dev.auto) return;
+    if(tipoDeItem(t,i)!=="DEVOLUCION") return;
+    var lleg=llegoQ(i); if(lleg<=0) return;
+    var acep=i.dev.acepta?(i.dev.cantAcep||0):0;
+    var rech=Math.max(0,lleg-acep); if(rech<=0) return;
+    var f=i.cantidad?rech/i.cantidad:0;
+    out.push({codigo:i.codigo,desc:i.desc,cantLlegada:lleg,cantAceptada:acep,cantRechazada:rech,monto:i.total*f,com:i.dev.com||"",por:i.dev.por||""});
+  });
+  return out;
+}
+function totalNoAceptado(t){ return itemsNoAceptados(t).reduce(function(s,i){return s+i.monto;},0); }
+/* Etiqueta informativa para el vendedor: cuánto le rechazaron (abre el detalle en "Ver") */
+function tagNoAceptado(t){
+  var tot=totalNoAceptado(t);
+  if(tot<=0) return "";
+  return ' <span class="tag tag-bad" title="Abre Ver para el detalle de lo no aceptado">❌ No aceptado: '+money(tot)+'</span>';
+}
 function finalizarMixto(t,ahora){
   var tot=itemsAceptados(t).reduce(function(s,i){return s+i.total;},0);
   if(tot>0){ t.estado="NC"; t.nc=t.nc||{hecha:false}; t.historial.push({f:ahora,e:"Ticket mixto finalizado → NC ("+me.name+")"}); }
