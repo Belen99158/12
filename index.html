@@ -1254,7 +1254,7 @@ async function guardarGuiaTicket(id){
     var ult=t.guiaIncidencias[t.guiaIncidencias.length-1];
     if(ult&&!ult.resueltoF){ ult.resueltoF=ahora; ult.resueltoPor=me.name; }
   }
-  t.guiaId=guia.id; t.guiaNumero=guia.numero; t.guiaModificada=true; t.guiaIncorrecta=null; t.estado="MERCADERIA";
+  t.guiaId=guia.id; t.guiaNumero=guia.numero; t.guiaModificada=true; t.guiaIncorrecta=null; t.guiaValidada=null; t.estado="MERCADERIA";
   t.historial.push({f:ahora,e:"Vendedor corrigió guía a "+guia.numero+" y reenvió ("+me.name+")"});
   /* Un 8800 devuelto por guía vuelve a su flujo paralelo, no a la ruta normal de mercadería */
   if(esTicketRefact(t)) iniciarFlujoRefact(t,ahora,me.name);
@@ -1520,7 +1520,8 @@ function verTicket(id){
   if(t.estado==="SIN_GUIA"&&t.devueltoSinGuia) h+='<div class="alert-del">↩ Devuelto por mercadería ('+esc(t.devueltoSinGuia.por||"")+', '+fdate(t.devueltoSinGuia.f)+'): llegó sin guía. Motivo: <b>'+esc(t.devueltoSinGuia.motivo||"")+'</b></div>';
   h+='<div class="kv" style="margin-bottom:12px"><b>Guía</b><span>'+esc(t.guiaNumero||"—")+sobreTag+'</span><b>Cliente</b><span>'+esc(t.razonSocial)+'</span><b>RUC</b><span>'+esc(t.ruc||"")+'</span><b>Factura(s)</b><span>'+esc(t.factura)+'</span><b>Sucursal</b><span>'+esc(sucursalDe(t.factura).nombre)+'</span><b>Emisión</b><span>'+fdate(t.emision)+'</span><b>Fecha ticket</b><span>'+fdate(t.fechaTicket)+'</span><b>Vendedor</b><span>'+esc(t.vendedor)+'</span><b>Motivo</b><span>'+esc(t.motivo)+'</span>'+(t.anioAnterior?'<b>Año factura</b><span><span class="tag tag-gar">📅 Año anterior '+esc(t.anioFactura)+'</span>'+(t.valorValidado?' <span class="tag tag-nc">total validado</span>':' <span class="tag tag-merc">total por validar</span>')+'</span>':'')+(t.refactCliente?'<b>Refacturar a</b><span><b>'+esc(t.refactCliente)+'</b>'+(t.refactValidado?' <span class="tag tag-nc">✅ refacturado'+(t.refactValidado.facturaNueva?(' · '+esc(t.refactValidado.facturaNueva)):'')+'</span>':' <span class="tag tag-merc">pendiente de validar</span>')+'</span>':'')+'</div>';
   h+='<div style="overflow-x:auto"><table><thead><tr><th>Código</th><th>Cant.</th><th>Tipo</th><th>Descripción</th><th>Comentario</th><th class="num">Total</th></tr></thead><tbody>'+t.items.map(function(i){ var tp=tipoDeItem(t,i); var tagTipo=tp==="GARANTIA"?'<span class="tag tag-gar">Garantía</span>':(tp==="DACION"?'<span class="tag tag-merc">Dación'+(i.esExterna?" externa":"")+'</span>':'<span class="tag tag-dev">Devolución</span>'); var origen=i.esExterna?('<div class="muted">Mercadería externa'+(i.facturaCliente?(' · Fact. cliente: '+esc(i.facturaCliente)):'')+(i.fechaCliente?(' · '+fdate(i.fechaCliente)):'')+'</div>'):''; return '<tr><td>'+esc(i.codigo)+'</td><td>'+i.cantidad+'</td><td>'+tagTipo+'</td><td style="max-width:260px">'+esc(i.desc)+'<div class="muted">'+esc(i.sub)+'</div>'+origen+'</td><td style="max-width:170px">'+esc(i.comVendedor||"")+'</td><td class="num">'+money(i.total)+'</td></tr>'; }).join("")+'</tbody></table></div>';
-  if(t.paquete&&t.paquete.llego) h+='<div class="card" style="margin-top:12px;background:var(--ok-bg);border-color:#A9D9BF"><h3 style="color:var(--navy)">📦 Llegada del paquete</h3><div class="kv" style="margin-top:6px"><b>Llegó el</b><span>'+fdatetime(t.paquete.f)+'</span><b>Recibido por</b><span>'+esc(t.paquete.por||"")+'</span>'+(t.paquete.cartones!=null?'<b>Bultos</b><span>'+t.paquete.cartones+'</span>':'')+(t.paquete.transportadora?'<b>Transportadora</b><span>'+esc(t.paquete.transportadora)+'</span>':'')+(t.paquete.com?'<b>Observación</b><span>'+esc(t.paquete.com)+'</span>':'')+'</div></div>';
+  var pqV=paqueteDeGuia(t);
+  if(pqV) h+='<div class="card" style="margin-top:12px;background:var(--ok-bg);border-color:#A9D9BF"><h3 style="color:var(--navy)">📦 Llegada del paquete</h3><div class="kv" style="margin-top:6px"><b>Llegó el</b><span>'+fdatetime(pqV.f)+'</span><b>Recibido por</b><span>'+esc(pqV.por||"")+'</span>'+(pqV.cartones!=null?'<b>Bultos</b><span>'+pqV.cartones+'</span>':'')+(pqV.transportadora?'<b>Transportadora</b><span>'+esc(pqV.transportadora)+'</span>':'')+(pqV.com?'<b>Observación</b><span>'+esc(pqV.com)+'</span>':'')+(ticketsDeGuia(t)>1?'<b>Guía compartida</b><span>'+ticketsDeGuia(t)+' tickets viajaron en la guía '+esc(t.guiaNumero||"")+'</span>':'')+'</div></div>';
   else if(t.estado==="MERCADERIA") h+='<div class="card" style="margin-top:12px;background:var(--warn-bg);border-color:#E8C766">🚚 <b>En tránsito.</b> Mercadería todavía no registra la llegada del paquete.</div>';
   /* Informativo para el vendedor: qué le rechazaron y cuánto */
   var noAcep=itemsNoAceptados(t);
@@ -1566,7 +1567,7 @@ function renderBandejaTabla(role){
   if(q) lista=lista.filter(function(t){ return (t.vendedor+" "+t.numero+" "+t.razonSocial+" "+t.factura+" "+(t.guiaNumero||"")+" "+t.motivo).toUpperCase().indexOf(q)>=0; });
   var cont=$("band-tabla"); if(!cont) return;
   if(lista.length===0){ cont.innerHTML=q?'<div class="empty"><div class="big">Sin resultados</div></div>':'<div class="empty"><div class="big">Bandeja vacía</div>No hay tickets pendientes.</div>'; return; }
-  cont.innerHTML='<div style="display:flex;justify-content:flex-end;margin-bottom:8px"><button class="btn btn-g btn-sm" onclick="imprimirSeleccionados()" title="Marca las casillas y imprime varios en una hoja">🖨 Imprimir seleccionados</button> <button class="btn btn-p btn-sm" onclick="compartirSeleccionados()" title="Enviar varios juntos por WhatsApp">📲 Compartir seleccionados</button></div><table><thead><tr><th></th><th>N° Ticket</th><th>Fecha</th><th>Guía</th><th>Cliente</th><th>Factura</th><th>Motivo</th><th>Vendedor</th>'+(role==="MERCADERIA"?'<th>Paquete</th>':'')+'<th></th></tr></thead><tbody>'+lista.map(function(t){ var pqFalta=(role==="MERCADERIA")&&faltaRegistrarPaquete(t); return '<tr><td><input type="checkbox" class="sel-tk" value="'+t.id+'" style="width:auto"></td><td><b>'+esc(t.numero)+'</b>'+(t.estado==="MIXTO"?' <span class="tag tag-gar" style="font-size:9px">MIXTO</span>':'')+'</td><td>'+fdate(t.fechaTicket)+'</td><td>'+esc(t.guiaNumero||"—")+'</td><td>'+esc(t.razonSocial)+'</td><td>'+esc(t.factura)+'</td><td>'+esc(t.motivo)+'</td><td>'+esc(t.vendedor)+'</td>'+(role==="MERCADERIA"?('<td>'+(!requierePaquete(t)?'<span class="muted">—</span>':(paqueteLlego(t)?'<span class="tag tag-nc">📦 Llegó '+fdate(t.paquete.f)+'</span>'+(t.paquete.cartones!=null?'<div class="muted" style="font-size:11px">'+t.paquete.cartones+' bulto(s)</div>':''):'<span class="tag" style="background:var(--warn-bg);color:#8A6400">🚚 En tránsito</span>'))+'</td>'):'')+'<td style="white-space:nowrap"><button class="btn btn-g btn-sm" onclick="verTicket(\''+t.id+'\')">Ver</button> '+(pqFalta?'<button class="btn btn-ok btn-sm" onclick="abrirLlegadaPaquete(\''+t.id+'\')" title="Paso 1: registrar que llegó el paquete">📦 Llegó el paquete</button> <button class="btn btn-g btn-sm" disabled title="Primero registra la llegada del paquete">Revisar</button> ':'<button class="btn btn-a btn-sm" onclick="revisar(\''+role+'\',\''+t.id+'\')">Revisar</button> ')+(faltaGuiaParaImprimir(t)?'<button class="btn btn-g btn-sm" disabled title="Sin guía no se puede imprimir">🖨</button>':'<button class="btn btn-g btn-sm" onclick="imprimirTicket(\''+t.id+'\')" title="Imprimir ticket">🖨</button>')+((role==="MERCADERIA"&&!t.guiaNumero&&requiereGuia(t.vendedor))?' <button class="btn btn-bad btn-sm" onclick="abrirDevolverTicket(\''+t.id+'\')" title="Devolver al asesor: llegó sin guía">↩ Devolver</button>':'')+'</td></tr>'; }).join("")+'</tbody></table>';
+  cont.innerHTML='<div style="display:flex;justify-content:flex-end;margin-bottom:8px"><button class="btn btn-g btn-sm" onclick="imprimirSeleccionados()" title="Marca las casillas y imprime varios en una hoja">🖨 Imprimir seleccionados</button> <button class="btn btn-p btn-sm" onclick="compartirSeleccionados()" title="Enviar varios juntos por WhatsApp">📲 Compartir seleccionados</button></div><table><thead><tr><th></th><th>N° Ticket</th><th>Fecha</th><th>Guía</th><th>Cliente</th><th>Factura</th><th>Motivo</th><th>Vendedor</th>'+(role==="MERCADERIA"?'<th>Paquete</th>':'')+'<th></th></tr></thead><tbody>'+lista.map(function(t){ var pqFalta=(role==="MERCADERIA")&&faltaRegistrarPaquete(t); return '<tr><td><input type="checkbox" class="sel-tk" value="'+t.id+'" style="width:auto"></td><td><b>'+esc(t.numero)+'</b>'+(t.estado==="MIXTO"?' <span class="tag tag-gar" style="font-size:9px">MIXTO</span>':'')+'</td><td>'+fdate(t.fechaTicket)+'</td><td>'+esc(t.guiaNumero||"—")+'</td><td>'+esc(t.razonSocial)+'</td><td>'+esc(t.factura)+'</td><td>'+esc(t.motivo)+'</td><td>'+esc(t.vendedor)+'</td>'+(role==="MERCADERIA"?('<td>'+(!requierePaquete(t)?'<span class="muted">—</span>':(function(){ var pq=paqueteDeGuia(t); var n=ticketsDeGuia(t); return pq?('<span class="tag tag-nc">📦 Llegó '+fdate(pq.f)+'</span>'+(pq.cartones!=null?'<div class="muted" style="font-size:11px">'+pq.cartones+' bulto(s)'+(n>1?' · guía de '+n+' tickets':'')+'</div>':'')):('<span class="tag" style="background:var(--warn-bg);color:#8A6400">🚚 En tránsito</span>'+(n>1?'<div class="muted" style="font-size:11px">guía de '+n+' tickets</div>':'')); })())+'</td>'):'')+'<td style="white-space:nowrap"><button class="btn btn-g btn-sm" onclick="verTicket(\''+t.id+'\')">Ver</button> '+(pqFalta?'<button class="btn btn-ok btn-sm" onclick="abrirLlegadaPaquete(\''+t.id+'\')" title="Paso 1: registrar que llegó el paquete">📦 Llegó el paquete</button> <button class="btn btn-g btn-sm" disabled title="Primero registra la llegada del paquete">Revisar</button> ':'<button class="btn btn-a btn-sm" onclick="revisar(\''+role+'\',\''+t.id+'\')">Revisar</button> ')+(faltaGuiaParaImprimir(t)?'<button class="btn btn-g btn-sm" disabled title="Sin guía no se puede imprimir">🖨</button>':'<button class="btn btn-g btn-sm" onclick="imprimirTicket(\''+t.id+'\')" title="Imprimir ticket">🖨</button>')+((role==="MERCADERIA"&&!t.guiaNumero&&requiereGuia(t.vendedor))?' <button class="btn btn-bad btn-sm" onclick="abrirDevolverTicket(\''+t.id+'\')" title="Devolver al asesor: llegó sin guía">↩ Devolver</button>':'')+'</td></tr>'; }).join("")+'</tbody></table>';
 }
 function fechaRepRef(role,t){
   if(role==="MERCADERIA") return t.fechas&&t.fechas.mercaderia;
@@ -1738,7 +1739,7 @@ function revisarMercRefact(t){
   var h='<div class="modal-bg"><div class="modal"><h2 style="font-size:24px;color:var(--navy)">Validar refacturación · '+esc(t.numero)+'</h2><div class="muted" style="margin-bottom:10px">'+esc(t.razonSocial)+' · Factura '+esc(t.factura)+'</div>';
   h+='<div class="card" style="background:#E3ECF7;border-color:#B9CBE3"><span class="tag tag-dev">🔁 DEVOLUCIÓN Y REFACTURACIÓN · SERIE 8800</span><div style="margin-top:8px">Este ticket <b>no pasa por revisión de devolución</b>: entró a la vez a <b>Notas de crédito</b> y a esta bandeja. Aquí debes <b>validar la guía</b> y, cuando la NC esté subida, <b>registrar la factura nueva</b> del cliente destino.</div><div class="kv" style="margin-top:10px"><b>Se retira de</b><span>'+esc(t.razonSocial)+' (a este cliente se hará la NC)</span><b>Refacturar a</b><span><b>'+esc(t.refactCliente||"—")+'</b></span></div></div>';
   h+='<div class="card" style="background:#FFF1F1;border-color:#E8B0AB"><div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><div><span class="muted">Guía:</span> <b style="font-size:16px">'+esc(t.guiaNumero||"(sin guía)")+'</b></div>'+(t.sobre?'<span class="tag tag-dev">📨 Incluye sobre</span>':'')+'</div>'+
-    (t.guiaNumero?'<div class="field" style="margin-top:10px;margin-bottom:0"><label>¿La guía es correcta?</label><select id="mr-guia" onchange="var e=document.getElementById(\'mr-guia-motivo\');if(e)e.style.display=this.value===\'0\'?\'block\':\'none\'"><option value="">— Seleccionar —</option><option value="1">SÍ, la guía es correcta</option><option value="0">NO, guía incorrecta (devolver)</option></select></div><div id="mr-guia-motivo" style="display:none;margin-top:8px"><label>Motivo (el vendedor lo verá)</label><input id="mr-guia-com" placeholder="Ej.: número de guía no coincide…"></div>'
+    (t.guiaNumero?bloqueGuiaMerc(t,"mr")
     :(requiereGuia(t.vendedor)?'<div style="margin-top:10px;background:var(--bad-bg);border:1px solid #E8B0AB;border-radius:8px;padding:10px 12px">⚠ <b>Este ticket llegó SIN guía.</b> La guía es obligatoria aunque sea refacturación.<div style="margin-top:8px"><button class="btn btn-bad btn-sm" onclick="abrirDevolverTicket(\''+t.id+'\')">↩ Devolver ticket al asesor</button></div></div>'
     :'<div class="muted" style="margin-top:10px">Este ticket se creó sin guía (asesor autorizado a enviar sin guía), no requiere validación de guía.</div>'))+'</div>';
   h+='<div style="overflow-x:auto;margin-bottom:12px"><table><thead><tr><th>Código</th><th>Descripción</th><th class="num">Cantidad</th><th>Com. vendedor</th><th class="num">Total</th></tr></thead><tbody>'+t.items.map(function(i){ return '<tr><td><b>'+esc(i.codigo)+'</b></td><td style="max-width:260px;font-size:12px">'+esc(i.desc)+'</td><td class="num">'+i.cantidad+'</td><td style="max-width:150px;font-size:12px" class="muted">'+esc(i.comVendedor||"")+'</td><td class="num">'+money(i.total)+'</td></tr>'; }).join("")+'</tbody></table></div>';
@@ -1763,13 +1764,13 @@ async function guardarMercRefact(id){
     if(guiaSel.value==="0"){
       var motG=($("mr-guia-com")?$("mr-guia-com").value:"").trim()||"Guía incorrecta";
       t.fechas=t.fechas||{};
-      t.guiaIncorrecta={motivo:motG,por:me.name,f:ahora}; t.guiaId=null; t.guiaNumero=""; t.estado="GUIA_INCORRECTA";
-      t.mercPendiente=false;   /* sale del flujo paralelo hasta que el asesor corrija la guía */
-      t.guiaIncidencias=t.guiaIncidencias||[]; t.guiaIncidencias.push({motivo:motG,por:me.name,f:ahora});
+      marcarGuiaIncorrecta(t,motG,ahora);   /* también saca el 8800 del flujo paralelo */
       t.historial.push({f:ahora,e:"Guía incorrecta ("+me.name+"). Devuelto al asesor para corregir la guía. Motivo: "+motG});
       await saveState(); cerrarModal(); toast("Guía incorrecta. Ticket devuelto al asesor para corregir la guía."); render(); return;
     }
-    t.guiaValidada={por:me.name,f:ahora}; t.guiaModificada=false;
+    sellarGuiaValidada(t,ahora); t.guiaModificada=false;
+  }else if(t.guiaNumero&&guiaValidadaDeGuia(t)){
+    sellarGuiaValidada(t,ahora);   /* la guía ya se verificó en otro ticket: se hereda */
   }
   var comV=($("mr-com")?$("mr-com").value:"").trim();
   /* La mercadería del 8800 no pasa por bodega: se deja constancia de la recepción validada */
@@ -1798,16 +1799,96 @@ async function guardarMercRefact(id){
    2) se revisa si dentro venía la mercadería de la guía — es la revisión de siempre.
    Entre uno y otro pueden pasar días; sin este paso esa fecha de llegada se perdía.
    El flujo 8800 no aplica: esa mercadería no pasa por bodega. */
+/* ===== COSAS QUE SON DE LA GUÍA, NO DEL TICKET =====
+   Un asesor puede mandar varios tickets en la misma guía. La guía y su paquete son
+   uno solo: se validan y se registran UNA vez, y vale para todos esos tickets.
+   Lo que sí se revisa ticket por ticket es si llegó la mercadería de cada uno. */
+function mismaGuia(t){
+  if(!t) return [];
+  var gid=t.guiaId, gnum=t.guiaNumero;
+  if(!gid&&!gnum) return [t];
+  return (state.tickets||[]).filter(function(o){
+    if(o.estado==="ELIMINADO") return false;
+    return gid?(o.guiaId===gid):(!!gnum&&o.guiaNumero===gnum);
+  });
+}
+/* Paquete ya registrado en cualquier ticket de la misma guía */
+function paqueteDeGuia(t){
+  if(t&&t.paquete&&t.paquete.llego) return t.paquete;
+  var h=mismaGuia(t).filter(function(o){ return o.paquete&&o.paquete.llego; });
+  return h.length?h[0].paquete:null;
+}
+/* Validación de guía ya hecha en cualquier ticket de la misma guía */
+function guiaValidadaDeGuia(t){
+  if(t&&t.guiaValidada) return t.guiaValidada;
+  var h=mismaGuia(t).filter(function(o){ return o.guiaValidada&&o.guiaNumero===t.guiaNumero; });
+  return h.length?h[0].guiaValidada:null;
+}
+/* Cuántos tickets comparten esta guía (para avisarlo en pantalla) */
+function ticketsDeGuia(t){ return t&&t.guiaNumero?mismaGuia(t).length:1; }
+/* Bloque de la pregunta "¿la guía es correcta?" para los modales de mercadería.
+   Si esa guía ya se validó en otro ticket no se vuelve a preguntar: se muestra quién la
+   validó y queda un botón por si en ESTE ticket la guía está mal. `pref` es el prefijo de
+   los ids ("m" en revisión normal, "mr" en refacturación). */
+function bloqueGuiaMerc(t,pref){
+  var ya=guiaValidadaDeGuia(t), n=ticketsDeGuia(t);
+  if(ya){
+    return '<div style="margin-top:10px;background:var(--ok-bg);border:1px solid #A9D9BF;border-radius:8px;padding:10px 12px">'+
+      '✅ <b>Guía '+esc(t.guiaNumero)+' ya verificada</b> por '+esc(ya.por||"")+' el '+fdate(ya.f)+'.'+
+      (n>1?'<div class="muted" style="margin-top:4px">Esta guía trae '+n+' tickets; la verificación se hace una sola vez y ya está hecha.</div>':'')+
+      '<div style="margin-top:8px"><button class="btn btn-g btn-sm" onclick="abrirGuiaIncorrecta(\''+t.id+'\')">⚠ En este ticket la guía está mal</button></div></div>';
+  }
+  return '<div class="field" style="margin-top:10px;margin-bottom:0"><label>¿La guía es correcta?'+(n>1?' <span style="text-transform:none;font-weight:400">· se pregunta una sola vez para los '+n+' tickets de esta guía</span>':'')+'</label>'+
+    '<select id="'+pref+'-guia" onchange="var e=document.getElementById(\''+pref+'-guia-motivo\');if(e)e.style.display=this.value===\'0\'?\'block\':\'none\'"><option value="">— Seleccionar —</option><option value="1">SÍ, la guía es correcta</option><option value="0">NO, guía incorrecta (devolver)</option></select></div>'+
+    '<div id="'+pref+'-guia-motivo" style="display:none;margin-top:8px"><label>Motivo (el vendedor lo verá)</label><input id="'+pref+'-guia-com" placeholder="Ej.: número de guía no coincide…"></div>';
+}
+/* Reportar que la guía está mal en ESTE ticket, aunque ya se hubiera validado en otro.
+   Solo devuelve este ticket al asesor; los demás de la guía siguen su curso. */
+function abrirGuiaIncorrecta(id){
+  if(!puedeActuar()){ toast("👁 Modo solo lectura.",4000); return; }
+  var t=findT(id); if(!t) return;
+  $("modal-root").innerHTML='<div class="modal-bg"><div class="modal" style="max-width:560px"><h2 style="font-size:22px;color:var(--navy);margin-bottom:6px">⚠ Guía incorrecta · '+esc(t.numero)+'</h2>'+
+    '<div class="muted" style="margin-bottom:10px">'+esc(t.razonSocial)+' · Factura '+esc(t.factura)+' · Guía '+esc(t.guiaNumero||"—")+'</div>'+
+    '<div class="card" style="background:var(--warn-bg);border-color:#E8C766">Se devuelve <b>solo este ticket</b> al asesor para que corrija la guía. Los demás tickets de la guía '+esc(t.guiaNumero||"")+' no se tocan.</div>'+
+    '<div class="field"><label>Motivo · obligatorio (el vendedor lo verá)</label><input id="gi-motivo" placeholder="Ej.: este ticket no viajó en esta guía…"></div>'+
+    '<div style="display:flex;gap:10px;justify-content:flex-end"><button class="btn btn-g" onclick="cerrarModal()">Cancelar</button><button class="btn btn-bad" onclick="guardarGuiaIncorrecta(\''+t.id+'\')">↩ Devolver al asesor</button></div></div></div>';
+}
+async function guardarGuiaIncorrecta(id){
+  if(!puedeActuar()){ toast("👁 Modo solo lectura.",4000); return; }
+  var t=findT(id); if(!t) return;
+  var motivo=($("gi-motivo")?$("gi-motivo").value:"").trim();
+  if(!motivo){ toast("⚠ Escribe el motivo. Es obligatorio."); var el=$("gi-motivo"); if(el) el.focus(); return; }
+  var ahora=new Date().toISOString();
+  marcarGuiaIncorrecta(t,motivo,ahora);
+  t.historial.push({f:ahora,e:"Guía incorrecta en este ticket ("+me.name+"). Devuelto al asesor. Motivo: "+motivo});
+  await saveState(); cerrarModal(); toast("↩ Ticket "+t.numero+" devuelto al asesor para corregir la guía."); render();
+}
+/* Deja el ticket devuelto por guía incorrecta. Limpia la validación previa para que la
+   guía nueva se vuelva a verificar. */
+/* Deja constancia de la validación de la guía. Si ya la validó otro ticket de la misma
+   guía se conserva ese registro: la verificación fue una sola y fue de esa persona. */
+function sellarGuiaValidada(t,ahora){
+  var ya=guiaValidadaDeGuia(t);
+  t.guiaValidada=ya?Object.assign({},ya):{por:me.name,f:ahora};
+}
+function marcarGuiaIncorrecta(t,motivo,ahora){
+  t.guiaIncorrecta={motivo:motivo,por:me.name,f:ahora};
+  t.guiaId=null; t.guiaNumero=""; t.guiaValidada=null; t.estado="GUIA_INCORRECTA";
+  t.mercPendiente=false;
+  t.guiaIncidencias=t.guiaIncidencias||[]; t.guiaIncidencias.push({motivo:motivo,por:me.name,f:ahora});
+}
 function requierePaquete(t){ return !!(t&&t.estado==="MERCADERIA"); }
-function paqueteLlego(t){ return !!(t&&t.paquete&&t.paquete.llego); }
+function paqueteLlego(t){ return !!paqueteDeGuia(t); }
 function faltaRegistrarPaquete(t){ return requierePaquete(t)&&!paqueteLlego(t); }
 function abrirLlegadaPaquete(id){
   if(!puedeActuar()){ toast("👁 Modo solo lectura.",4000); return; }
   var t=findT(id); if(!t) return;
   var dias=diasDesde(t.fechaTicket);
-  $("modal-root").innerHTML='<div class="modal-bg"><div class="modal" style="max-width:620px"><h2 style="font-size:22px;color:var(--navy);margin-bottom:6px">📦 Llegada del paquete · '+esc(t.numero)+'</h2>'+
-    '<div class="muted" style="margin-bottom:12px">'+esc(t.razonSocial)+' · Factura '+esc(t.factura)+' · Guía <b>'+esc(t.guiaNumero||"—")+'</b> · Asesor '+esc(t.vendedor)+'</div>'+
-    '<div class="card" style="background:#E3ECF7;border-color:#B9CBE3">Registra <b>hoy mismo</b> que el paquete llegó de la transportadora, aunque todavía no puedas revisar el contenido. La revisión de la mercadería es el paso siguiente.<div class="muted" style="margin-top:6px">El ticket se creó hace <b style="color:'+colorDias(dias)+'">'+diasTexto(dias)+'</b>.</div></div>'+
+  var hermanos=mismaGuia(t).filter(function(o){ return o.id!==t.id&&o.estado==="MERCADERIA"; });
+  $("modal-root").innerHTML='<div class="modal-bg"><div class="modal" style="max-width:620px"><h2 style="font-size:22px;color:var(--navy);margin-bottom:6px">📦 Llegada del paquete · Guía '+esc(t.guiaNumero||"—")+'</h2>'+
+    '<div class="muted" style="margin-bottom:12px">Ticket '+esc(t.numero)+' · '+esc(t.razonSocial)+' · Factura '+esc(t.factura)+' · Asesor '+esc(t.vendedor)+'</div>'+
+    '<div class="card" style="background:#E3ECF7;border-color:#B9CBE3">Registra <b>hoy mismo</b> que el paquete llegó de la transportadora, aunque todavía no puedas revisar el contenido. La revisión de la mercadería es el paso siguiente y esa sí es ticket por ticket.<div class="muted" style="margin-top:6px">El ticket se creó hace <b style="color:'+colorDias(dias)+'">'+diasTexto(dias)+'</b>.</div>'+
+    (hermanos.length?'<div style="margin-top:8px;background:#fff;border:1px solid #B9CBE3;border-radius:6px;padding:8px 10px">📋 Esta guía trae <b>'+(hermanos.length+1)+' tickets</b>. La llegada se registra <b>una sola vez</b> y queda marcada en todos: '+esc(mismaGuia(t).filter(function(o){return o.estado==="MERCADERIA";}).map(function(o){return o.numero;}).join(", "))+'</div>':'')+'</div>'+
     '<div class="grid2"><div class="field"><label>📦 Bultos / cartones recibidos (opcional)</label><input type="number" min="0" id="pq-cartones" placeholder="Ej.: 2"></div>'+
     '<div class="field"><label>Transportadora (opcional)</label><input id="pq-transp" placeholder="Ej.: Servientrega"></div></div>'+
     '<div class="field"><label>Observación (opcional)</label><input id="pq-com" placeholder="Ej.: caja golpeada, falta un bulto…"></div>'+
@@ -1819,10 +1900,19 @@ async function guardarLlegadaPaquete(id){
   if(t.estado!=="MERCADERIA"){ toast("Este ticket ya no está en la bandeja de mercadería."); cerrarModal(); render(); return; }
   var ahora=new Date().toISOString();
   var cart=($("pq-cartones")?$("pq-cartones").value:"").trim();
-  t.paquete={llego:true,cartones:cart===""?null:Math.max(0,+cart||0),transportadora:($("pq-transp")?$("pq-transp").value:"").trim(),com:($("pq-com")?$("pq-com").value:"").trim(),por:me.name,f:ahora};
-  t.fechas=t.fechas||{}; t.fechas.paquete=ahora;
-  t.historial.push({f:ahora,e:"Paquete recibido en mercadería ("+me.name+")"+(t.paquete.cartones!=null?" · "+t.paquete.cartones+" bulto(s)":"")+(t.paquete.transportadora?" · "+t.paquete.transportadora:"")+(t.paquete.com?" · "+t.paquete.com:"")});
-  await saveState(); cerrarModal(); toast("✓ Llegada registrada. Ya puedes revisar la mercadería del ticket "+t.numero+".",5000); render();
+  var pq={llego:true,cartones:cart===""?null:Math.max(0,+cart||0),transportadora:($("pq-transp")?$("pq-transp").value:"").trim(),com:($("pq-com")?$("pq-com").value:"").trim(),por:me.name,f:ahora};
+  var detalle=(pq.cartones!=null?" · "+pq.cartones+" bulto(s)":"")+(pq.transportadora?" · "+pq.transportadora:"")+(pq.com?" · "+pq.com:"");
+  /* El paquete es de la guía: se marca en todos los tickets que viajaron en ella */
+  var afectados=mismaGuia(t).filter(function(o){ return o.estado==="MERCADERIA"&&!(o.paquete&&o.paquete.llego); });
+  if(afectados.indexOf(t)<0) afectados.push(t);
+  afectados.forEach(function(o){
+    o.paquete=Object.assign({},pq);
+    o.fechas=o.fechas||{}; o.fechas.paquete=ahora;
+    o.historial.push({f:ahora,e:"Paquete de la guía "+(t.guiaNumero||"—")+" recibido en mercadería ("+me.name+")"+detalle+(afectados.length>1?" · registro único para "+afectados.length+" tickets de la guía":"")});
+  });
+  await saveState(); cerrarModal();
+  toast(afectados.length>1?("✓ Llegada registrada para los "+afectados.length+" tickets de la guía "+(t.guiaNumero||"")+"."):("✓ Llegada registrada. Ya puedes revisar la mercadería del ticket "+t.numero+"."),5000);
+  render();
 }
 
 /* ===== PASO 2 DE MERCADERÍA · REVISIÓN DE LA MERCADERÍA ===== */
@@ -1832,7 +1922,7 @@ function revisarMerc(t){
   var tieneGuia=!!t.guiaNumero;
   var h='<div class="modal-bg"><div class="modal"><h2 style="font-size:24px;color:var(--navy)">'+(soloGuia?"Validar guía corregida · ":"Revisión de mercadería · ")+esc(t.numero)+'</h2><div class="muted" style="margin-bottom:10px">'+esc(t.razonSocial)+' · Factura '+esc(t.factura)+'</div>';
   h+='<div class="card" style="background:#FFF1F1;border-color:#E8B0AB">'+(t.guiaModificada?'<div style="background:var(--amber);color:#fff;padding:6px 10px;border-radius:6px;font-weight:700;margin-bottom:10px;font-size:13px">✎ GUÍA MODIFICADA — el vendedor corrigió la guía.'+(soloGuia?' La mercadería ya fue revisada: solo valida la guía.':' Verifica de nuevo.')+'</div>':'')+'<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><div><span class="muted">Guía:</span> <b style="font-size:16px">'+esc(t.guiaNumero||"(sin guía)")+'</b></div>'+(t.sobre?'<span class="tag tag-dev">📨 Incluye sobre</span>':'<span class="muted">Sin sobre</span>')+'</div>';
-  if(tieneGuia) h+='<div class="field" style="margin-top:10px;margin-bottom:0"><label>¿La guía es correcta?</label><select id="m-guia" onchange="var e=document.getElementById(\'m-guia-motivo\');if(e)e.style.display=this.value===\'0\'?\'block\':\'none\'"><option value="">— Seleccionar —</option><option value="1">SÍ, la guía es correcta</option><option value="0">NO, guía incorrecta (devolver)</option></select></div><div id="m-guia-motivo" style="display:none;margin-top:8px"><label>Motivo (el vendedor lo verá)</label><input id="m-guia-com" placeholder="Ej.: número de guía no coincide…"></div>';
+  if(tieneGuia) h+=bloqueGuiaMerc(t,"m");
   else if(requiereGuia(t.vendedor)) h+='<div style="margin-top:10px;background:var(--bad-bg);border:1px solid #E8B0AB;border-radius:8px;padding:10px 12px">⚠ <b>Este ticket llegó SIN guía.</b> Todo envío debe tener guía obligatoriamente.<div style="margin-top:8px"><button class="btn btn-bad btn-sm" onclick="abrirDevolverTicket(\''+t.id+'\')">↩ Devolver ticket al asesor</button></div></div>';
   else h+='<div class="muted" style="margin-top:10px">Este ticket se creó sin guía (asesor autorizado a enviar sin guía), no requiere validación de guía.</div>';
   if(t.sobre&&!soloGuia) h+='<div class="field" style="margin-top:10px;margin-bottom:0"><label>📨 ¿Llegó el sobre?</label><select id="m-sobre"><option value="">— Seleccionar —</option><option value="1">SÍ, el sobre llegó</option><option value="0">NO llegó</option></select></div>';
@@ -1906,18 +1996,20 @@ async function guardarMerc(id){
   var t=findT(id), guiaOk=$("m-guia")?$("m-guia").value:"1";
   if($("m-guia")&&guiaOk===""){ toast("Indica si la guía es correcta."); return; }
   var ahora=new Date().toISOString();
+  /* Si la llegada se registró desde otro ticket de la misma guía, se copia aquí
+     para que este ticket también tenga su fecha en el reporte. */
+  if(!t.paquete){ var pqG=paqueteDeGuia(t); if(pqG){ t.paquete=Object.assign({},pqG); t.fechas=t.fechas||{}; t.fechas.paquete=pqG.f; } }
   var soloGuia=!document.getElementById("m-q-0")&&(t.mercRevisada||t.items.some(function(i){return i.merc;}));
 
   /* ---- REQ 3: solo se valida la corrección de la guía; la mercadería ya revisada se conserva ---- */
   if(soloGuia){
     if(guiaOk==="0"){
       var mot=($("m-guia-com")?$("m-guia-com").value:"").trim()||"Guía incorrecta";
-      t.guiaIncorrecta={motivo:mot,por:me.name,f:ahora}; t.guiaId=null; t.estado="GUIA_INCORRECTA";
-      t.guiaIncidencias=t.guiaIncidencias||[]; t.guiaIncidencias.push({motivo:mot,por:me.name,f:ahora});
+      marcarGuiaIncorrecta(t,mot,ahora);
       t.historial.push({f:ahora,e:"Guía nuevamente incorrecta ("+me.name+"). Mercadería revisada conservada. Motivo: "+mot});
       await saveState(); cerrarModal(); toast("Guía incorrecta. La mercadería revisada se conserva."); render(); return;
     }
-    t.guiaValidada={por:me.name,f:ahora}; t.guiaModificada=false;
+    sellarGuiaValidada(t,ahora); t.guiaModificada=false;
     routeTrasMerc(t,ahora,"Guía corregida validada (mercadería conservada) → ");
     await saveState(); cerrarModal(); toast("✓ Guía validada. No se repitió la revisión de mercadería."); render(); return;
   }
@@ -1933,8 +2025,7 @@ async function guardarMerc(id){
       t.mercRevisada=true;
       if(t.sobre){ var sl0=$("m-sobre")?$("m-sobre").value:""; if(sl0!=="") t.sobreLlego=(sl0==="1"); }
     }
-    t.guiaIncorrecta={motivo:motivo,por:me.name,f:ahora}; t.guiaId=null; t.estado="GUIA_INCORRECTA";
-    t.guiaIncidencias=t.guiaIncidencias||[]; t.guiaIncidencias.push({motivo:motivo,por:me.name,f:ahora});
+    marcarGuiaIncorrecta(t,motivo,ahora);
     t.historial.push({f:ahora,e:"Devuelto por guía incorrecta ("+me.name+")."+(completa?" Mercadería revisada conservada.":"")+" Motivo: "+motivo});
     if(completa) registrarAvisoExtra(t);
     await saveState(); cerrarModal(); toast(completa?"Devuelto por guía. La mercadería revisada se conservó.":"Ticket devuelto. La guía volvió a estar activa."); render(); return;
@@ -1943,7 +2034,7 @@ async function guardarMerc(id){
   /* ---- Revisión de mercadería completa, guía correcta (o ticket sin guía) ---- */
   for(var x=0;x<t.items.length;x++){ if(!$("m-q-"+x)||$("m-q-"+x).value===""){ toast("Digita la cantidad llegada en todos los productos."); return; } }
   if(t.sobre){ var sl=$("m-sobre")?$("m-sobre").value:""; if(sl===""){ toast("Indica si el sobre llegó."); return; } t.sobreLlego=(sl==="1"); }
-  t.guiaValidada={por:me.name,f:ahora}; if(t.guiaModificada) t.guiaModificada=false;
+  sellarGuiaValidada(t,ahora); if(t.guiaModificada) t.guiaModificada=false;
   t.items.forEach(function(i,x){ var q=Math.max(0,Math.min(i.cantidad,+($("m-q-"+x).value||0))); i.merc={cantLlegada:q,com:$("m-co-"+x).value,por:me.name,f:ahora}; });
   t.mercRevisada=true;
   t.fechas=t.fechas||{}; t.fechas.mercaderia=ahora;
