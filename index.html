@@ -212,7 +212,10 @@ function initFirebaseApp(){
    tiempo cuando el problema era otro (por ejemplo abrir el archivo con doble clic). */
 function mensajeErrorLogin(e){
   var c=(e&&e.code)||"";
-  if(c==="auth/wrong-password"||c==="auth/invalid-credential"||c==="auth/invalid-login-credentials") return "Contraseña incorrecta.";
+  /* Firebase protege contra enumeración de cuentas: devuelve el mismo código si la clave
+     está mal y si el usuario no existe. Por eso el mensaje nombra las dos posibilidades. */
+  if(c==="auth/wrong-password"||c==="auth/invalid-credential"||c==="auth/invalid-login-credentials")
+    return "Contraseña incorrecta. Si eres usuario nuevo, puede que tu cuenta aún no esté creada; avisa a sistemas.";
   if(c==="auth/user-not-found") return "Ese usuario no está registrado en el sistema.";
   if(c==="auth/too-many-requests") return "Demasiados intentos fallidos. Espera unos minutos e intenta de nuevo.";
   if(c==="auth/network-request-failed") return "Sin conexión a internet. Revisa tu red e intenta de nuevo.";
