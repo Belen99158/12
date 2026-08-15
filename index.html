@@ -173,7 +173,11 @@ var ncSinMatchList=[], ncNegativasList=[];   /* para exportar a Excel desde Admi
 var state={seq3200:0,seq5200:0,seq2200:0,seq8800:0,tickets:[],guias:[],avisos:[],sobres:[]};
 var baseLoaded=false, baseLineas=0, baseFechaStr="";
 var vistaActiva=null;
-var nuevo=null, filtroItems="", filtroMisTickets="", filtroBandeja="", filtroAdmin="", guiaFiltroTexto="", ncTab="pend", ncVista="tickets", guiaFiltroAsesor="", garFotos=[], garFotos2=[], ncPdfData=null, logoDataUrl=null, pdfUrl=null;
+var nuevo=null, filtroItems="", filtroMisTickets="", filtroBandeja="", filtroAdmin="", guiaFiltroTexto="", ncTab="pend", ncVista="tickets", guiaFiltroAsesor="", ncPdfData=null, logoDataUrl=null, pdfUrl=null;
+/* Borrador del formulario de garantía: un bloque por ítem rechazado (carta + informe + fotos
+   propios de ese producto). Se mantiene en memoria mientras el revisor cambia cantidades,
+   para no perder lo escrito al re-dibujar los bloques. */
+var garBorrador={}, garTicketId=null;
 var ncFiltroFactura="", ncFiltroDesde="", ncFiltroHasta="";
 var filtroMisDesde="", filtroMisHasta="";   /* reportes del asesor: rango de fechas */
 var repDesde="", repHasta="";               /* reportes de bandejas mercadería/devolución/garantía */
@@ -202,15 +206,28 @@ function initFirebaseApp(){
   if(typeof firebase==="undefined") throw new Error("SDK no cargó");
   if(!fbApp){ fbApp=firebase.initializeApp(firebaseConfig); fbDB=firebase.database(); }
 }
+/* Traduce el código de error de Firebase a un mensaje que diga la causa REAL.
+   Antes cualquier fallo se mostraba como "Contraseña incorrecta", lo que hacía perder
+   tiempo cuando el problema era otro (por ejemplo abrir el archivo con doble clic). */
+function mensajeErrorLogin(e){
+  var c=(e&&e.code)||"";
+  if(c==="auth/wrong-password"||c==="auth/invalid-credential"||c==="auth/invalid-login-credentials") return "Contraseña incorrecta.";
+  if(c==="auth/user-not-found") return "Ese usuario no está registrado en el sistema.";
+  if(c==="auth/too-many-requests") return "Demasiados intentos fallidos. Espera unos minutos e intenta de nuevo.";
+  if(c==="auth/network-request-failed") return "Sin conexión a internet. Revisa tu red e intenta de nuevo.";
+  if(c==="auth/unauthorized-domain") return "Esta página se abrió como archivo local y el sistema no funciona así. Ábrela desde la dirección web del sistema.";
+  if(e&&e.message==="SDK no cargó") return "No se pudieron cargar los componentes del sistema. Revisa tu conexión y recarga la página.";
+  return "No se pudo iniciar sesión"+(c?(" ("+c+")"):"")+". Si se repite, avisa a sistemas.";
+}
 /* Login real contra Firebase Authentication: sin sesión válida, las reglas de la base
-   niegan lectura y escritura. Devuelve true/false; no lanza errores hacia arriba. */
+   niegan lectura y escritura. Devuelve true, o el mensaje de error a mostrar. */
 async function iniciarSesionFirebase(nombre,pin){
   try{
     initFirebaseApp();
     await firebase.auth().signInWithEmailAndPassword(emailAuthDe(nombre),AUTH_PASS_PREFIJO+pin);
     fbReady=true;
     return true;
-  }catch(e){ console.error(e); fbReady=false; return false; }
+  }catch(e){ console.error(e); fbReady=false; return mensajeErrorLogin(e); }
 }
 function suscribirEstado(onPrimera){
   if(!fbReady){ if(onPrimera) onPrimera(); return; }
@@ -392,7 +409,7 @@ function parsearCSV(text){
   function norm(k){ return String(k||"").trim().toUpperCase().replace(/\s+/g," "); }
   var headers=splitCSVLine(lines[0],sep).map(norm);
   function idx(h){ return headers.indexOf(h); }
-  var iEmi=idx("EMISION"),iFact=idx("FACTURA"),iRuc=idx("IDENTIFICACION"),iRazon=idx("RAZON SOCIAL"),iCod=idx("CODIGO PRODUCTO"),iDesc=idx("DESCRIPCION PRODUCTO"),iSub=idx("SUBGRUPO"),iCant=idx("CANTIDAD"),iNeto=idx("PRECIO TOTAL NETO"),iIva=idx("IVA TOTAL"),iTot=idx("TOTAL PRODUCTO"),iF2=idx("FACTURADOR"),iFacNC=idx("FAC DE LA NC");
+  var iEmi=idx("EMISION"),iFact=idx("FACTURA"),iRuc=idx("IDENTIFICACION"),iRazon=idx("RAZON SOCIAL"),iCod=idx("CODIGO PRODUCTO"),iDesc=idx("DESCRIPCION PRODUCTO"),iSub=idx("SUBGRUPO"),iCant=idx("CANTIDAD"),iNeto=idx("PRECIO TOTAL NETO"),iIva=idx("IVA TOTAL"),iTot=idx("TOTAL PRODUCTO"),iF2=idx("FACTURADOR"),iFacNC=idx("FAC DE LA NC"),iValorNC=idx("VALOR NC");
   for(var i=1;i<lines.length;i++){
     if(!lines[i].trim()) continue;
     var c=splitCSVLine(lines[i],sep);
@@ -403,9 +420,14 @@ function parsearCSV(text){
     var facNCraw=iFacNC>=0?String(c[iFacNC]||"").trim():"";
     var esNC=!!(facNCraw&&facNCraw.toUpperCase()!=="FALSO"&&facNCraw.toUpperCase()!=="FALSE");
     if(esNC){
-      /* Esta fila es una NOTA DE CRÉDITO (no un producto vendible): se concilia contra
-         su factura ORIGINAL (FAC DE LA NC) más abajo, y esta línea no entra a la base. */
-      ncList.push({facOrigen:facNCraw,codigo:codigo,cant:cant,neto:neto,iva:iva,total:tot});
+      /* Esta fila es un AJUSTE/NOTA DE CRÉDITO de Perseo (no un producto vendible): se concilia
+         contra su factura ORIGINAL más abajo, y esta línea no entra a la base.
+         La columna "FAC DE LA NC" solo indica SI la fila es un ajuste (trae "@" o un monto, no
+         una factura); la factura de origen real viene en la columna "VALOR NC" — se confirmó
+         contra la base completa (995 de 1706 ajustes concilian correctamente usando esta columna;
+         antes, usando "FAC DE LA NC" como origen, ninguno conciliaba). */
+      var facOrigen=iValorNC>=0?String(c[iValorNC]||"").trim():"";
+      ncList.push({facOrigen:facOrigen,codigo:codigo,cant:cant,neto:neto,iva:iva,total:tot});
       continue;
     }
     rows.push({emision:String(c[iEmi]||"").trim(),factura:fact,ruc:String(c[iRuc]||"").trim(),razon:razon,codigo:codigo,desc:String(c[iDesc]||"").trim(),sub:String(c[iSub]||"").trim(),facturador:String(c[iF2]||"").trim(),cant:cant,neto:neto,iva:iva,total:tot,creditoAplicado:0});
@@ -610,7 +632,7 @@ async function doLogin(){
   if(btn){ btn.disabled=true; btn.textContent="Entrando…"; }
   var ok=await iniciarSesionFirebase(u.name,pin);
   if(btn){ btn.disabled=false; btn.textContent="Entrar"; }
-  if(!ok){ errEl.textContent="Contraseña incorrecta."; errEl.style.display="block"; return; }
+  if(ok!==true){ errEl.textContent=(typeof ok==="string"?ok:"Contraseña incorrecta."); errEl.style.display="block"; return; }
   me=u;
   $("login-view").style.display="none"; $("app-view").style.display="block";
   $("chip-role").textContent=ROLE_LABEL[u.role]; $("chip-user").textContent=u.name;
@@ -1444,8 +1466,10 @@ function dibujarAnexosPDF(d,fotos,titulo,y2){
     d.setFont("helvetica","bold"); d.setFontSize(10); d.text(titulo,14,y2); y2+=5;
     fotos.forEach(function(f){
       var foto=typeof f==="string"?{data:f,w:800,h:600}:f;
-      var w=170, h=foto.w&&foto.h?170*foto.h/foto.w:120;
-      if(h>150){ h=150; w=foto.w&&foto.h?150*foto.w/foto.h:170; }
+      /* escala = % del ancho útil de la página que ocupa la foto (lo elige el revisor) */
+      var pct=Math.max(20,Math.min(100,foto.escala||100))/100;
+      var w=170*pct, h=(foto.w&&foto.h)?w*foto.h/foto.w:120*pct;
+      if(h>150){ var k=150/h; h=150; w=w*k; }
       if(y2+h>285){ d.addPage(); y2=20; }
       try{ d.addImage(foto.data,"JPEG",(210-w)/2,y2,w,h); }catch(e){}
       y2+=h+8;
@@ -1453,13 +1477,55 @@ function dibujarAnexosPDF(d,fotos,titulo,y2){
   }
   return y2;
 }
+/* Devuelve los datos de carta/informe de UN ítem rechazado. Si el ticket se revisó antes de
+   que existieran las cartas por producto, cae al informe compartido que tenía el ticket. */
+function garDatosItem(g,x,item){
+  var p=(g.porItem&&g.porItem[x])||null;
+  if(p) return p;
+  return {
+    marca:g.marca||item.sub||"", cartaCom:g.cartaCom||"", parrafo2:g.parrafo2||"",
+    condicion:(g.informe||{}).condicion||"", aplicacion:(g.informe||{}).aplicacion||"", modelo:(g.informe||{}).modelo||"",
+    antecedentes:g.antecedentes||"", revTecnica:g.revTecnica||"", analisisTec:g.analisisTec||"",
+    conclusiones:g.conclusiones||"", recomendaciones:g.recomendaciones||"",
+    fotos:g.fotos||[], fotos2:g.fotos2||[]
+  };
+}
+/* Lista de ítems rechazados para los que hay que emitir carta */
+function garItemsParaCarta(t){
+  var rech=garItemsRechazados(t);
+  if(rech.length===0){
+    /* Compat: tickets viejos marcados como rechazo total sin detalle por ítem */
+    rech=t.items.filter(function(x){return llegoQ(x)>0&&tipoDeItem(t,x)==="GARANTIA";})
+                .map(function(it){ return {item:it,idx:t.items.indexOf(it),cantRech:llegoQ(it)}; });
+  }
+  return rech;
+}
+/* Una carta + informe por producto rechazado. Con varios, deja elegir cuál generar. */
 function pdfCartaGar(id){
   if(!pdfReady()) return;
+  var t=findT(id);
+  var rech=garItemsParaCarta(t);
+  if(rech.length===0){ toast("Este ticket no tiene productos rechazados."); return; }
+  if(rech.length===1){ pdfCartaGarItem(id,rech[0].idx); return; }
+  $("modal-root").innerHTML='<div class="modal-bg"><div class="modal" style="max-width:620px">'+
+    '<h2 style="font-size:22px;color:var(--navy);margin-bottom:6px">Cartas de garantía no aceptada · '+esc(t.numero)+'</h2>'+
+    '<div class="muted" style="margin-bottom:12px">'+esc(t.razonSocial)+' · Se emite <b>una carta e informe técnico por cada producto rechazado</b>. Elige cuál generar.</div>'+
+    rech.map(function(r){
+      return '<div class="itm" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">'+
+        '<div style="flex:1;min-width:220px"><b>'+esc(r.item.codigo)+'</b> <span class="muted">('+r.cantRech+' rechazada'+(r.cantRech>1?"s":"")+')</span>'+
+        '<div class="muted" style="font-size:12px">'+esc(r.item.desc)+'</div></div>'+
+        '<button class="btn btn-a btn-sm" onclick="pdfCartaGarItem(\''+t.id+'\','+r.idx+')">📄 Ver carta + informe</button></div>';
+    }).join("")+
+    '<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px"><button class="btn btn-g" onclick="cerrarModal()">Cerrar</button></div></div></div>';
+}
+function pdfCartaGarItem(id,idx){
+  if(!pdfReady()) return;
   var t=findT(id), g=t.gar;
-  var rech=garItemsRechazados(t);
-  if(rech.length===0){ var arrG=t.items.filter(function(x){return llegoQ(x)>0&&tipoDeItem(t,x)==="GARANTIA";}); rech=arrG.map(function(it,ix){ return {item:it,idx:t.items.indexOf(it),cantRech:llegoQ(it)}; }); }
-  var i=rech[0]?rech[0].item:t.items[0];
-  var codigosRech=rech.map(function(r){ return r.item.codigo+(r.cantRech>1?(" (x"+r.cantRech+")"):""); }).join(", ");
+  var rech=garItemsParaCarta(t).filter(function(r){ return r.idx===idx; });
+  if(rech.length===0){ toast("Ese producto no está rechazado en este ticket."); return; }
+  var i=rech[0].item;
+  var datos=garDatosItem(g,idx,i);
+  var codigosRech=i.codigo+(rech[0].cantRech>1?(" (x"+rech[0].cantRech+")"):"");
   var J=window.jspdf.jsPDF, d=new J();
   if(typeof MEMBRETE_CARTA!=="undefined"&&MEMBRETE_CARTA){ try{ d.addImage(MEMBRETE_CARTA,"JPEG",0,0,210,297); }catch(e){ membrete(d); } } else { membrete(d); }
   var y=32; d.setFontSize(10);
@@ -1470,16 +1536,16 @@ function pdfCartaGar(id){
   if(g.email){ d.setTextColor(5,99,193); d.text(g.email,14,y); d.setTextColor(0,0,0); y+=5; }
   y+=5; d.setFont("helvetica","bold"); d.text("Fecha: ",14,y); d.setFont("helvetica","normal"); d.text(fechaLarga(g.f),28,y); y+=10;
   d.setFont("helvetica","bold"); d.text("Asunto: ",14,y); d.setFont("helvetica","normal"); var asu=d.splitTextToSize("Respuesta a Solicitud de Garantía – "+codigosRech,180-16); d.text(asu,30,y); y+=asu.length*4.8+5;
-  var plural=rech.length>1, p1="Por medio de la presente, en relación con la solicitud de garantía "+(plural?"de los repuestos ":"del repuesto ")+codigosRech+(plural?"":(" "+i.desc))+", marca "+(g.marca||i.sub)+", adquirido"+(plural?"s":"")+" el "+fdate(t.emision)+", factura N° "+t.factura+".";
-  var p2="Luego de la evaluación técnica correspondiente, se determinó que la falla no corresponde a un defecto de fábrica, por tanto no aplica la garantía"+(g.cartaCom?", "+g.cartaCom:".");
+  var p1="Por medio de la presente, en relación con la solicitud de garantía del repuesto "+codigosRech+" "+i.desc+", marca "+(datos.marca||i.sub)+", adquirido el "+fdate(t.emision)+", factura N° "+t.factura+".";
+  var p2="Luego de la evaluación técnica correspondiente, se determinó que la falla no corresponde a un defecto de fábrica, por tanto no aplica la garantía"+(datos.cartaCom?", "+datos.cartaCom:".");
   var p4="Agradecemos su comprensión y quedamos atentos a cualquier asistencia que requiera.";
-  [p1,p2,g.parrafo2||"",p4].forEach(function(p){ if(!p) return; var ls=d.splitTextToSize(p,180); d.text(ls,14,y,{maxWidth:180,align:"justify"}); y+=ls.length*4.8+5; });
+  [p1,p2,datos.parrafo2||"",p4].forEach(function(p){ if(!p) return; var ls=d.splitTextToSize(p,180); d.text(ls,14,y,{maxWidth:180,align:"justify"}); y+=ls.length*4.8+5; });
   y+=8; d.setFont("helvetica","normal"); d.text("Cordialmente,",14,y); y+=4;
   if(typeof FIRMA_SOPORTE!=="undefined"&&FIRMA_SOPORTE){ var fw=44, fh=fw*FIRMA_SOPORTE.h/FIRMA_SOPORTE.w; try{ d.addImage(FIRMA_SOPORTE.d,"PNG",105-fw/2,y,fw,fh); }catch(e){} y+=fh+1; } else { y+=16; }
   d.setFont("helvetica","bold"); d.text("Soporte Técnico",105,y,{align:"center"}); y+=5; d.text("LUBAMAQUI",105,y,{align:"center"});
   d.addPage();
   var it=g.informe||{};
-  var topY=12, bl=logoMarca(g.marca||i.sub), lw=0, lh=0;
+  var topY=12, bl=logoMarca(datos.marca||i.sub), lw=0, lh=0;
   if(bl){ lw=38; lh=lw*bl.h/bl.w; if(lh>20){ lh=20; lw=lh*bl.w/bl.h; } try{ d.addImage(bl.data,"JPEG",196-lw,topY,lw,lh); }catch(e){} }
   d.setFont("helvetica","bold"); d.setFontSize(15); d.setTextColor(26,26,26); d.text("INFORME TÉCNICO",14,topY+9);
   d.setFont("helvetica","normal"); d.setFontSize(9); d.setTextColor(0,0,0); d.text("Fecha: "+fdate(g.f),14,topY+15);
@@ -1487,28 +1553,29 @@ function pdfCartaGar(id){
   d.setDrawColor(214,31,38); d.setLineWidth(0.6); d.line(14,lineY,196,lineY);
   var startInf=lineY+4;
   function sec(titulo,rows,sy){ d.autoTable({startY:(sy!==undefined?sy:(d.lastAutoTable?d.lastAutoTable.finalY+3:startInf)),head:[[{content:titulo,colSpan:2,styles:{fillColor:[230,234,239],textColor:[0,0,0],fontStyle:"bold"}}]],body:rows,theme:"grid",styles:{fontSize:8.5,cellPadding:1.6}}); }
-  var totRech=rech.reduce(function(s,r){return s+r.cantRech;},0);
-  sec("1. DATOS GENERALES",[["CLIENTE: "+t.razonSocial,"FACTURA: "+t.factura],["CONTACTO: "+(it.contacto||""),"DIRECCIÓN: "+(it.direccion||"")],["CONDICIÓN: "+(it.condicion||""),"GARANTÍA: NO APLICA (rechazadas: "+totRech+")"]],startInf);
-  var prodRows=rech.map(function(r){ return ["CÓD: "+r.item.codigo+"  ·  Cant. rechazada: "+r.cantRech,"DESCRIPCIÓN: "+r.item.desc]; });
-  prodRows.push([{content:"APLICACIÓN: "+(it.aplicacion||""),colSpan:2}]);
-  prodRows.push(["MODELO: "+(it.modelo||""),"DISTRIBUIDOR: "+(it.distribuidor||"AUTOREPUESTOS UNIVERSAL")]);
+  var totRech=rech[0].cantRech;
+  sec("1. DATOS GENERALES",[["CLIENTE: "+t.razonSocial,"FACTURA: "+t.factura],["CONTACTO: "+(it.contacto||""),"DIRECCIÓN: "+(it.direccion||"")],["CONDICIÓN: "+(datos.condicion||""),"GARANTÍA: NO APLICA (rechazadas: "+totRech+")"]],startInf);
+  var prodRows=[["CÓD: "+i.codigo+"  ·  Cant. rechazada: "+totRech,"DESCRIPCIÓN: "+i.desc]];
+  prodRows.push([{content:"APLICACIÓN: "+(datos.aplicacion||""),colSpan:2}]);
+  prodRows.push(["MODELO: "+(datos.modelo||""),"DISTRIBUIDOR: "+(it.distribuidor||"AUTOREPUESTOS UNIVERSAL")]);
   sec("2. DATOS DEL PRODUCTO",prodRows);
-  sec("3. ANTECEDENTES",[[{content:g.antecedentes||" ",colSpan:2}]]);
-  sec("4. REVISIÓN TÉCNICA",[[{content:g.revTecnica||" ",colSpan:2}]]);
+  sec("3. ANTECEDENTES",[[{content:datos.antecedentes||" ",colSpan:2}]]);
+  sec("4. REVISIÓN TÉCNICA",[[{content:datos.revTecnica||" ",colSpan:2}]]);
   var y2=d.lastAutoTable.finalY+8;
-  y2=dibujarAnexosPDF(d,g.fotos,"5. ANEXOS",y2);
+  y2=dibujarAnexosPDF(d,datos.fotos,"5. ANEXOS",y2);
   if(y2>250){ d.addPage(); y2=20; }
-  d.autoTable({startY:y2,head:[[{content:"6. ANÁLISIS TÉCNICO",styles:{fillColor:[230,234,239],textColor:[0,0,0],fontStyle:"bold"}}]],body:[[g.analisisTec||" "]],theme:"grid",styles:{fontSize:8.5,cellPadding:2,minCellHeight:18}});
+  d.autoTable({startY:y2,head:[[{content:"6. ANÁLISIS TÉCNICO",styles:{fillColor:[230,234,239],textColor:[0,0,0],fontStyle:"bold"}}]],body:[[datos.analisisTec||" "]],theme:"grid",styles:{fontSize:8.5,cellPadding:2,minCellHeight:18}});
   y2=d.lastAutoTable.finalY+8;
-  y2=dibujarAnexosPDF(d,g.fotos2,"7. MÁS ANEXOS",y2);
+  y2=dibujarAnexosPDF(d,datos.fotos2,"7. MÁS ANEXOS",y2);
   if(y2>250){ d.addPage(); y2=20; }
-  d.autoTable({startY:y2,head:[[{content:"8. CONCLUSIONES",styles:{fillColor:[230,234,239],textColor:[0,0,0],fontStyle:"bold"}}]],body:[[g.conclusiones||" "]],theme:"grid",styles:{fontSize:8.5,cellPadding:2,minCellHeight:18}});
+  d.autoTable({startY:y2,head:[[{content:"8. CONCLUSIONES",styles:{fillColor:[230,234,239],textColor:[0,0,0],fontStyle:"bold"}}]],body:[[datos.conclusiones||" "]],theme:"grid",styles:{fontSize:8.5,cellPadding:2,minCellHeight:18}});
   y2=d.lastAutoTable.finalY+6;
   if(y2>250){ d.addPage(); y2=20; }
-  d.autoTable({startY:y2,head:[[{content:"9. RECOMENDACIONES",styles:{fillColor:[230,234,239],textColor:[0,0,0],fontStyle:"bold"}}]],body:[[g.recomendaciones||" "]],theme:"grid",styles:{fontSize:8.5,cellPadding:2,minCellHeight:18}});
+  d.autoTable({startY:y2,head:[[{content:"9. RECOMENDACIONES",styles:{fillColor:[230,234,239],textColor:[0,0,0],fontStyle:"bold"}}]],body:[[datos.recomendaciones||" "]],theme:"grid",styles:{fontSize:8.5,cellPadding:2,minCellHeight:18}});
   var sFy=d.lastAutoTable.finalY+12;
   if(typeof FIRMA_SOPORTE!=="undefined"&&FIRMA_SOPORTE){ var fw2=46, fh2=fw2*FIRMA_SOPORTE.h/FIRMA_SOPORTE.w; if(sFy+fh2+12>290){ d.addPage(); sFy=24; } try{ d.addImage(FIRMA_SOPORTE.d,"PNG",105-fw2/2,sFy,fw2,fh2); }catch(e){} sFy+=fh2+2; d.setFont("helvetica","bold"); d.setFontSize(10); d.setTextColor(0,0,0); d.text("Soporte Técnico",105,sFy,{align:"center"}); sFy+=5; d.text("LUBAMAQUI",105,sFy,{align:"center"}); }
-  mostrarPDF(d,"Garantia_NoAceptada_"+t.numero+".pdf");
+  var cod=String(i.codigo||"").replace(/[^0-9A-Za-z_-]/g,"");
+  mostrarPDF(d,"Garantia_NoAceptada_"+t.numero+"_"+cod+".pdf");
 }
 
 /* ===== VER TICKET ===== */
@@ -1552,6 +1619,7 @@ function renderBandeja(role,titulo,sub){
     '<div class="card"><h3 style="font-size:18px;color:var(--navy);margin-bottom:8px">Reporte / Historial procesado</h3>'+
     '<div class="muted" style="margin-bottom:10px">Filtra por la fecha en que se revisó cada ticket en esta bandeja y descarga el Excel consolidado con factura, ítems, cliente, asesor y todo lo necesario para gestionar.</div>'+
     '<div class="grid3" style="margin-bottom:10px"><div class="field" style="margin-bottom:0"><label>Desde</label><input type="date" id="rep-b-desde" value="'+repDesde+'" onchange="repDesde=this.value;render()"></div><div class="field" style="margin-bottom:0"><label>Hasta</label><input type="date" id="rep-b-hasta" value="'+repHasta+'" onchange="repHasta=this.value;render()"></div><div style="display:flex;gap:8px;align-items:end"><button class="btn btn-ok" style="flex:1;justify-content:center" onclick="exportarBandeja(\''+role+'\')">⬇ Excel consolidado</button><button class="btn btn-g" onclick="repDesde=\'\';repHasta=\'\';render()">✕</button></div></div>'+
+    (role==="MERCADERIA"?'<button class="btn btn-a" style="margin-bottom:10px" onclick="exportarLlegadaPaquetes()">⬇ Excel: guías, bultos y comentario</button>':'')+
     histTable(role)+'</div>';
   renderBandejaTabla(role);
 }
@@ -1645,6 +1713,39 @@ async function guardarValidacionAnio(id){
 }
 
 /* ===== EXCEL CONSOLIDADO POR BANDEJA (mercadería / devolución / garantía) ===== */
+/* ===== EXPORTAR EXCEL: llegada de guías/paquetes (bultos, comentario, quién recibió) =====
+   Disponible desde la bandeja de Mercadería para que el revisor lo entregue directo, sin
+   depender del dashboard. Un ticket por fila; incluye guías con y sin paquete registrado
+   dentro del rango de fechas del ticket. */
+function exportarLlegadaPaquetes(){
+  var tks=state.tickets.filter(function(t){
+    if(t.estado==="ELIMINADO") return false;
+    if(!t.guiaNumero) return false;
+    if(repDesde||repHasta){ var f=hoyStr(t.fechaTicket); if(repDesde&&f<repDesde) return false; if(repHasta&&f>repHasta) return false; }
+    return true;
+  });
+  if(tks.length===0){ toast("No hay tickets con guía en este rango de fechas."); return; }
+  var rows=tks.slice().sort(function(a,b){ return String(a.guiaNumero).localeCompare(String(b.guiaNumero))||String(a.fechaTicket).localeCompare(String(b.fechaTicket)); }).map(function(t){
+    var pq=t.paquete||null;
+    return {
+      "GUÍA":t.guiaNumero||"","N° TICKET":t.numero,"ASESOR":t.vendedor,"CLIENTE":t.razonSocial,
+      "FECHA TICKET":fdate(t.fechaTicket),
+      "LLEGÓ EL PAQUETE":pq&&pq.llego?"SÍ":"NO",
+      "FECHA LLEGADA":pq&&pq.f?fdate(pq.f):"",
+      "BULTOS":pq&&pq.cartones!=null?pq.cartones:"",
+      "TRANSPORTADORA":pq&&pq.transportadora||"",
+      "COMENTARIO DE LA LLEGADA":pq&&pq.com||"",
+      "RECIBIDO POR":pq&&pq.por||"",
+      "ESTADO DEL TICKET":ESTADO_LABEL[t.estado]||t.estado
+    };
+  });
+  var ws=XLSX.utils.json_to_sheet(rows);
+  ws["!cols"]=[{wch:14},{wch:12},{wch:18},{wch:26},{wch:12},{wch:9},{wch:12},{wch:8},{wch:16},{wch:34},{wch:18},{wch:22}];
+  var wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,"Llegada de paquetes");
+  var suf=(repDesde||repHasta)?("_"+(repDesde||"inicio")+"_a_"+(repHasta||"hoy")):"";
+  XLSX.writeFile(wb,"Llegada_de_paquetes"+suf+".xlsx");
+}
 function exportarBandeja(role){
   var lista=histFiltrado(role);
   if(lista.length===0){ toast("No hay registros para exportar en este rango."); return; }
@@ -2141,10 +2242,35 @@ function dacionPendientesAutorizar(){ return state.tickets.filter(function(t){re
 /* ===== REV GARANTÍA ===== */
 function revisarGar(t){ formGar(t,null); }
 function editarGar(id){ var t=findT(id); formGar(t,t.gar); }
+/* Normaliza una foto guardada (antes se guardaban como string suelto) */
+function garNormFoto(f){ return typeof f==="string"?{data:f,w:800,h:600}:f; }
+/* Arma el borrador por ítem. Si el ticket se revisó ANTES de que existieran las cartas por
+   producto, copia el informe compartido a cada ítem rechazado para no perder nada. */
+function garInicializarBorrador(t,g){
+  var b={}, porItem=g.porItem||null, viejo=!porItem&&!!t.gar;
+  t.items.forEach(function(i,x){
+    if(llegoQ(i)<=0||tipoDeItem(t,i)!=="GARANTIA") return;
+    var s=(porItem&&porItem[x])||{};
+    function v(campo){ return s[campo]!==undefined?s[campo]:(viejo?(g[campo]||""):""); }
+    var inf=g.informe||{};
+    b[x]={
+      marca: s.marca||(viejo?g.marca:"")||i.sub||"",
+      cartaCom: v("cartaCom"), parrafo2: v("parrafo2"),
+      condicion: s.condicion!==undefined?s.condicion:(viejo?(inf.condicion||""):""),
+      aplicacion: s.aplicacion!==undefined?s.aplicacion:(viejo?(inf.aplicacion||""):""),
+      modelo: s.modelo!==undefined?s.modelo:(viejo?(inf.modelo||""):""),
+      antecedentes: v("antecedentes"), revTecnica: v("revTecnica"), analisisTec: v("analisisTec"),
+      conclusiones: v("conclusiones"), recomendaciones: v("recomendaciones"),
+      fotos: (s.fotos||(viejo?g.fotos:null)||[]).map(garNormFoto),
+      fotos2: (s.fotos2||(viejo?g.fotos2:null)||[]).map(garNormFoto)
+    };
+  });
+  return b;
+}
 function formGar(t,g){
   g=g||{}; var it=g.informe||{};
-  garFotos=(g.fotos||[]).map(function(f){ return typeof f==="string"?{data:f,w:800,h:600}:f; });
-  garFotos2=(g.fotos2||[]).map(function(f){ return typeof f==="string"?{data:f,w:800,h:600}:f; });
+  garTicketId=t.id;
+  garBorrador=garInicializarBorrador(t,g);
   var items=t.items.filter(function(i){return llegoQ(i)>0&&tipoDeItem(t,i)==="GARANTIA";}), editando=!!t.gar;
   var h='<div class="modal-bg"><div class="modal"><h2 style="font-size:24px;color:var(--navy)">'+(editando?"Editar":"Revisión de")+' garantía · '+esc(t.numero)+'</h2><div class="muted" style="margin-bottom:14px">'+esc(t.razonSocial)+' · Factura '+esc(t.factura)+'</div>';
   if(t.estado==="MIXTO") h+='<div class="card" style="background:#E3ECF7;border-color:#B9CBE3"><span class="tag tag-dev">MIXTO</span> Este ticket también tiene ítems de <b>devolución</b> que se revisan por separado en la bandeja de devolución.</div>';
@@ -2154,37 +2280,259 @@ function formGar(t,g){
     var rech=q-acep;
     return '<div class="itm"><div style="margin-bottom:8px"><b>'+esc(i.codigo)+'</b> <span class="muted">Llegaron: '+q+' de '+i.cantidad+'</span><div style="font-size:12px">'+esc(i.desc)+'</div>'+(i.comVendedor?'<div class="muted">'+esc(i.comVendedor)+'</div>':'')+'</div><div class="grid2"><div><label>Cantidad aceptada (→ NC)</label><input type="number" min="0" max="'+q+'" value="'+acep+'" id="g-ca-'+x+'" data-max="'+q+'" oninput="garRecalcForm()" style="text-align:right;max-width:160px"></div><div><label>&nbsp;</label><div id="g-rl-'+x+'" class="muted" style="padding-top:8px;color:'+(rech>0?"var(--bad)":"var(--mut)")+'">Rechazadas (→ informe): <b>'+rech+'</b></div></div></div></div>'; }).join("");
   h+='<div class="field"><label>Comentario general</label><input id="g-com" value="'+esc(g.com||"")+'"></div>';
-  h+='<div id="g-rech" style="display:none;border-top:2px solid var(--line);padding-top:6px"><div class="card" style="background:var(--bad-bg);border-color:#E8B0AB;margin-bottom:12px"><b>Hay unidades rechazadas.</b> Completa la carta de respuesta y el informe técnico que se generará para esos ítems.</div><div class="sec-title">Carta de respuesta</div><div class="grid3"><div class="field"><label>Marca</label><select id="g-marca">'+MARCAS.map(function(m){ return '<option'+(g.marca===m?" selected":"")+'>'+esc(m)+'</option>'; }).join("")+'</select></div><div class="field"><label>Ciudad</label><input id="g-ciudad" value="'+esc(g.ciudad||"Quito")+'"></div><div class="field"><label>Teléfono</label><input id="g-tel" value="'+esc(g.telefono||"")+'"></div></div>';
-  h+='<div class="field"><label>Correo</label><input id="g-email" value="'+esc(g.email||"")+'"></div><div class="field"><label>Detalle técnico</label><textarea id="g-carta" rows="2">'+esc(g.cartaCom||"")+'</textarea></div><div class="field"><label>Párrafo adicional</label><textarea id="g-p2" rows="2">'+esc(g.parrafo2||"")+'</textarea></div>';
-  h+='<div class="sec-title">Informe técnico</div><div class="grid3"><div class="field"><label>Contacto</label><input id="i-contacto" value="'+esc(it.contacto||"")+'"></div><div class="field"><label>Dirección</label><input id="i-dir" value="'+esc(it.direccion||"")+'"></div><div class="field"><label>Condición</label><input id="i-cond" value="'+esc(it.condicion||"")+'"></div></div>';
-  h+='<div class="field"><label>Aplicación</label><input id="i-apl" value="'+esc(it.aplicacion||"")+'"></div><div class="grid2"><div class="field"><label>Modelo</label><input id="i-mod" value="'+esc(it.modelo||"")+'"></div><div class="field"><label>Distribuidor</label><input id="i-dist" value="'+esc(it.distribuidor||"AUTOREPUESTOS UNIVERSAL")+'"></div></div>';
-  h+='<div class="field"><label>Antecedentes</label><textarea id="g-ant" rows="3">'+esc(g.antecedentes||"")+'</textarea></div><div class="field"><label>Revisión técnica</label><textarea id="g-rev" rows="3">'+esc(g.revTecnica||"")+'</textarea></div>';
-  h+='<div class="field"><label>Fotos (anexos)</label><input type="file" accept="image/*" multiple onchange="cargarFotos(this)"><div id="g-fotos" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">'+garFotos.map(function(f,ix){ return fotoThumb(f,ix); }).join("")+'</div></div><div class="field"><label>Análisis técnico</label><textarea id="g-analisis" rows="4">'+esc(g.analisisTec||"")+'</textarea></div><div class="field"><label>Más anexos</label><input type="file" accept="image/*" multiple onchange="cargarFotos2(this)"><div id="g-fotos2" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">'+garFotos2.map(function(f,ix){ return fotoThumb2(f,ix); }).join("")+'</div></div><div class="field"><label>Conclusiones</label><textarea id="g-conclu" rows="3">'+esc(g.conclusiones||"")+'</textarea></div><div class="field"><label>Recomendaciones</label><textarea id="g-recom" rows="3">'+esc(g.recomendaciones||"")+'</textarea></div></div>';
+  h+='<div id="g-rech" style="display:none;border-top:2px solid var(--line);padding-top:6px">'+
+     '<div class="card" style="background:var(--bad-bg);border-color:#E8B0AB;margin-bottom:12px"><b>Hay unidades rechazadas.</b> Cada producto rechazado genera <b>su propia carta y su propio informe técnico</b>, en un PDF aparte. Completa los datos de cada uno abajo.</div>'+
+     '<div class="sec-title">Datos del cliente <span class="muted" style="font-weight:400">(iguales en todas las cartas)</span></div>'+
+     '<div class="grid3"><div class="field"><label>Ciudad</label><input id="g-ciudad" value="'+esc(g.ciudad||"Quito")+'"></div><div class="field"><label>Teléfono</label><input id="g-tel" value="'+esc(g.telefono||"")+'"></div><div class="field"><label>Correo</label><input id="g-email" value="'+esc(g.email||"")+'"></div></div>'+
+     '<div class="grid3"><div class="field"><label>Contacto</label><input id="i-contacto" value="'+esc(it.contacto||"")+'"></div><div class="field"><label>Dirección</label><input id="i-dir" value="'+esc(it.direccion||"")+'"></div><div class="field"><label>Distribuidor</label><input id="i-dist" value="'+esc(it.distribuidor||"AUTOREPUESTOS UNIVERSAL")+'"></div></div>'+
+     '<div id="g-rech-items"></div></div>';
   h+='<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:10px"><button class="btn btn-g" onclick="cerrarModal()">Cancelar</button><button class="btn btn-p" onclick="guardarGar(\''+t.id+'\')">'+(editando?"Guardar cambios":"Guardar revisión")+'</button></div></div></div>';
   $("modal-root").innerHTML=h;
   garRecalcForm();
 }
+/* Campos de texto que cada ítem rechazado tiene por separado */
+var GAR_CAMPOS_ITEM=["marca","cartaCom","parrafo2","condicion","aplicacion","modelo","antecedentes","revTecnica","analisisTec","conclusiones","recomendaciones"];
+/* Guarda en el borrador lo que el revisor tenga escrito, antes de re-dibujar los bloques */
+function garCapturarBorrador(){
+  Object.keys(garBorrador).forEach(function(x){
+    GAR_CAMPOS_ITEM.forEach(function(c){
+      var el=document.getElementById("gi-"+c+"-"+x);
+      if(el) garBorrador[x][c]=el.value;
+    });
+  });
+}
 function garRecalcForm(){
+  garCapturarBorrador();
   var inputs=document.querySelectorAll('[id^="g-ca-"]'); var totalRech=0;
   for(var k=0;k<inputs.length;k++){ var inp=inputs[k]; var max=+inp.getAttribute("data-max")||0; var v=Math.max(0,Math.min(max,+(inp.value||0))); var rech=max-v; totalRech+=rech; var x=inp.id.replace("g-ca-",""); var lbl=document.getElementById("g-rl-"+x); if(lbl){ lbl.innerHTML="Rechazadas (→ informe): <b>"+rech+"</b>"; lbl.style.color=rech>0?"var(--bad)":"var(--mut)"; } }
   var sec=document.getElementById("g-rech"); if(sec) sec.style.display=totalRech>0?"block":"none";
+  garRenderRechazados();
 }
-function fotoThumb(f,ix){ return '<div style="position:relative"><img class="thumb" src="'+f.data+'"><button onclick="quitarFoto('+ix+')" style="position:absolute;top:-6px;right:-6px;background:var(--bad);color:#fff;border:none;border-radius:99px;width:20px;height:20px;font-size:11px">✕</button></div>'; }
-function quitarFoto(ix){ garFotos.splice(ix,1); $("g-fotos").innerHTML=garFotos.map(function(f,i){ return fotoThumb(f,i); }).join(""); }
-function cargarFotos(inp){
-  Array.prototype.forEach.call(inp.files,function(f){
-    var img=new Image(), rd=new FileReader();
-    rd.onload=function(){ img.onload=function(){ var c=document.createElement("canvas"); var s=Math.min(1,1000/Math.max(img.width,img.height)); c.width=img.width*s; c.height=img.height*s; c.getContext("2d").drawImage(img,0,0,c.width,c.height); garFotos.push({data:c.toDataURL("image/jpeg",.72),w:c.width,h:c.height}); $("g-fotos").innerHTML=garFotos.map(function(ff,i){ return fotoThumb(ff,i); }).join(""); }; img.src=rd.result; };
-    rd.readAsDataURL(f);
+/* Dibuja un bloque completo (carta + informe + fotos) por cada ítem con unidades rechazadas */
+function garRenderRechazados(){
+  var cont=document.getElementById("g-rech-items"); if(!cont) return;
+  var t=findT(garTicketId); if(!t) return;
+  var rech=[];
+  t.items.forEach(function(i,x){
+    if(llegoQ(i)<=0||tipoDeItem(t,i)!=="GARANTIA") return;
+    var inp=document.getElementById("g-ca-"+x); if(!inp) return;
+    var max=llegoQ(i), acep=Math.max(0,Math.min(max,+(inp.value||0)));
+    if(max-acep>0) rech.push({item:i,x:x,cantRech:max-acep});
   });
-  inp.value="";
+  if(rech.length===0){ cont.innerHTML=""; return; }
+  cont.innerHTML=rech.map(function(r,n){
+    var x=r.x, b=garBorrador[x]||{}, i=r.item;
+    var marcas=MARCAS.slice();
+    if(i.sub&&marcas.indexOf(i.sub)<0) marcas.unshift(i.sub);
+    return '<div class="card" style="border-left:4px solid var(--bad);margin-top:14px">'+
+      '<div class="sec-title" style="margin-top:0">Carta '+(n+1)+' de '+rech.length+' · <b>'+esc(i.codigo)+'</b> <span class="muted" style="font-weight:400">('+r.cantRech+' rechazada'+(r.cantRech>1?"s":"")+')</span></div>'+
+      '<div class="muted" style="margin-bottom:10px;font-size:12px">'+esc(i.desc)+'</div>'+
+      '<div class="grid3"><div class="field"><label>Marca</label><select id="gi-marca-'+x+'">'+marcas.map(function(m){ return '<option'+(b.marca===m?" selected":"")+'>'+esc(m)+'</option>'; }).join("")+'</select></div>'+
+      '<div class="field"><label>Condición</label><input id="gi-condicion-'+x+'" value="'+esc(b.condicion||"")+'"></div>'+
+      '<div class="field"><label>Modelo</label><input id="gi-modelo-'+x+'" value="'+esc(b.modelo||"")+'"></div></div>'+
+      '<div class="field"><label>Aplicación</label><input id="gi-aplicacion-'+x+'" value="'+esc(b.aplicacion||"")+'"></div>'+
+      '<div class="field"><label>Detalle técnico (va en la carta)</label><textarea id="gi-cartaCom-'+x+'" rows="2">'+esc(b.cartaCom||"")+'</textarea></div>'+
+      '<div class="field"><label>Párrafo adicional (carta)</label><textarea id="gi-parrafo2-'+x+'" rows="2">'+esc(b.parrafo2||"")+'</textarea></div>'+
+      '<div class="field"><label>Antecedentes</label><textarea id="gi-antecedentes-'+x+'" rows="3">'+esc(b.antecedentes||"")+'</textarea></div>'+
+      '<div class="field"><label>Revisión técnica</label><textarea id="gi-revTecnica-'+x+'" rows="3">'+esc(b.revTecnica||"")+'</textarea></div>'+
+      '<div class="field"><label>Fotos (anexos)</label><input type="file" accept="image/*" multiple onchange="garCargarFotos(this,'+x+',1)"><div id="gi-fotos-'+x+'" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">'+garFotosHTML(x,1)+'</div></div>'+
+      '<div class="field"><label>Análisis técnico</label><textarea id="gi-analisisTec-'+x+'" rows="4">'+esc(b.analisisTec||"")+'</textarea></div>'+
+      '<div class="field"><label>Más anexos</label><input type="file" accept="image/*" multiple onchange="garCargarFotos(this,'+x+',2)"><div id="gi-fotos2-'+x+'" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">'+garFotosHTML(x,2)+'</div></div>'+
+      '<div class="field"><label>Conclusiones</label><textarea id="gi-conclusiones-'+x+'" rows="3">'+esc(b.conclusiones||"")+'</textarea></div>'+
+      '<div class="field" style="margin-bottom:0"><label>Recomendaciones</label><textarea id="gi-recomendaciones-'+x+'" rows="3">'+esc(b.recomendaciones||"")+'</textarea></div>'+
+      '</div>';
+  }).join("");
 }
-function fotoThumb2(f,ix){ return '<div style="position:relative"><img class="thumb" src="'+f.data+'"><button onclick="quitarFoto2('+ix+')" style="position:absolute;top:-6px;right:-6px;background:var(--bad);color:#fff;border:none;border-radius:99px;width:20px;height:20px;font-size:11px">✕</button></div>'; }
-function quitarFoto2(ix){ garFotos2.splice(ix,1); $("g-fotos2").innerHTML=garFotos2.map(function(f,i){ return fotoThumb2(f,i); }).join(""); }
-function cargarFotos2(inp){
+/* ===== Fotos por ítem (tipo 1 = anexos, tipo 2 = más anexos) ===== */
+function garFotosArr(x,tipo){
+  garBorrador[x]=garBorrador[x]||{};
+  var k=tipo===2?"fotos2":"fotos";
+  garBorrador[x][k]=garBorrador[x][k]||[];
+  return garBorrador[x][k];
+}
+function garFotosHTML(x,tipo){
+  return garFotosArr(x,tipo).map(function(f,ix){
+    return '<div style="position:relative">'+
+      '<img class="thumb" src="'+f.data+'">'+
+      '<button onclick="garEditarFoto('+x+','+tipo+','+ix+')" title="Editar: flechas, figuras, comentarios y tamaño" style="position:absolute;bottom:-6px;left:-6px;background:var(--navy);color:#fff;border:none;border-radius:99px;width:22px;height:22px;font-size:11px">✎</button>'+
+      '<button onclick="garQuitarFoto('+x+','+tipo+','+ix+')" style="position:absolute;top:-6px;right:-6px;background:var(--bad);color:#fff;border:none;border-radius:99px;width:20px;height:20px;font-size:11px">✕</button>'+
+      '</div>';
+  }).join("");
+}
+function garRefrescarFotos(x,tipo){
+  var el=document.getElementById((tipo===2?"gi-fotos2-":"gi-fotos-")+x);
+  if(el) el.innerHTML=garFotosHTML(x,tipo);
+}
+function garQuitarFoto(x,tipo,ix){ garFotosArr(x,tipo).splice(ix,1); garRefrescarFotos(x,tipo); }
+
+/* ===== EDITOR DE FOTOS DEL INFORME =====
+   Permite marcar la foto con flechas, rectángulos, círculos y comentarios, y elegir de qué
+   tamaño sale en el PDF. Se guarda la imagen original aparte (foto.orig) junto con la lista
+   de marcas (foto.anot), para poder volver a editarla después sin perder calidad. */
+var garEdit=null, garCantSnapshot=null;
+/* Cantidades aceptadas que el revisor tiene digitadas ahora mismo (aún sin guardar) */
+function garSnapshotCantidades(){
+  var m={}, inputs=document.querySelectorAll('[id^="g-ca-"]');
+  Array.prototype.forEach.call(inputs,function(inp){ m[inp.id.replace("g-ca-","")]=inp.value; });
+  return m;
+}
+function garEditarFoto(x,tipo,ix){
+  var f=garFotosArr(x,tipo)[ix]; if(!f) return;
+  garCapturarBorrador();                    /* no perder los textos ya escritos */
+  garCantSnapshot=garSnapshotCantidades();  /* ni las cantidades digitadas */
+  garEdit={x:x,tipo:tipo,ix:ix,anot:(f.anot||[]).map(function(a){ return Object.assign({},a); }),
+           tool:"flecha",color:"#D61F26",grosor:4,escala:f.escala||100,preview:null,img:null};
+  var img=new Image();
+  img.onload=function(){
+    garEdit.img=img;
+    $("modal-root").innerHTML='<div class="modal-bg"><div class="modal" style="max-width:900px">'+
+      '<h2 style="font-size:20px;color:var(--navy);margin-bottom:4px">✎ Editar foto del informe</h2>'+
+      '<div class="muted" style="margin-bottom:10px">Elige una herramienta y arrastra sobre la foto. Para un comentario, escribe el texto y luego haz clic donde quieras ponerlo.</div>'+
+      '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px">'+
+        '<button class="btn btn-sm" id="ge-t-flecha" onclick="garEditTool(\'flecha\')">➘ Flecha</button>'+
+        '<button class="btn btn-sm" id="ge-t-rect" onclick="garEditTool(\'rect\')">▭ Rectángulo</button>'+
+        '<button class="btn btn-sm" id="ge-t-circulo" onclick="garEditTool(\'circulo\')">◯ Círculo</button>'+
+        '<button class="btn btn-sm" id="ge-t-texto" onclick="garEditTool(\'texto\')">🗨 Comentario</button>'+
+        '<input id="ge-texto" placeholder="Texto del comentario…" style="width:220px">'+
+      '</div>'+
+      '<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:10px">'+
+        '<label style="text-transform:none;margin:0">Color <input type="color" id="ge-color" value="#D61F26" onchange="garEdit.color=this.value" style="width:44px;padding:2px;vertical-align:middle"></label>'+
+        '<label style="text-transform:none;margin:0">Grosor <input type="range" id="ge-grosor" min="2" max="12" value="4" oninput="garEdit.grosor=+this.value" style="vertical-align:middle;width:110px"></label>'+
+        '<button class="btn btn-g btn-sm" onclick="garEditDeshacer()">↶ Deshacer</button>'+
+        '<button class="btn btn-g btn-sm" onclick="garEditLimpiar()">Borrar marcas</button>'+
+      '</div>'+
+      '<div style="overflow:auto;background:#EDF0F3;padding:8px;border-radius:8px;text-align:center">'+
+        '<canvas id="ge-canvas" style="max-width:100%;cursor:crosshair;background:#fff;touch-action:none"></canvas></div>'+
+      '<div class="field" style="margin-top:12px;margin-bottom:6px"><label>Tamaño en el informe: <b id="ge-esc-lbl">'+garEdit.escala+'%</b> del ancho de la página</label>'+
+        '<input type="range" min="20" max="100" step="5" value="'+garEdit.escala+'" oninput="garEdit.escala=+this.value;document.getElementById(\'ge-esc-lbl\').textContent=this.value+\'%\'"></div>'+
+      '<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:10px"><button class="btn btn-g" onclick="garEditCancelar()">Cancelar</button><button class="btn btn-p" onclick="garEditGuardar()">Guardar foto</button></div>'+
+      '</div></div>';
+    var c=$("ge-canvas");
+    c.width=img.naturalWidth; c.height=img.naturalHeight;
+    garEditTool("flecha");
+    c.addEventListener("mousedown",garEditDown); c.addEventListener("mousemove",garEditMove); window.addEventListener("mouseup",garEditUp);
+    c.addEventListener("touchstart",garEditDown,{passive:false}); c.addEventListener("touchmove",garEditMove,{passive:false}); window.addEventListener("touchend",garEditUp);
+    garEditRedraw();
+  };
+  img.src=f.orig||f.data;
+}
+function garEditTool(tool){
+  if(!garEdit) return;
+  garEdit.tool=tool;
+  ["flecha","rect","circulo","texto"].forEach(function(k){
+    var b=document.getElementById("ge-t-"+k); if(b) b.className="btn btn-sm "+(k===tool?"btn-a":"btn-g");
+  });
+}
+function garEditPos(ev){
+  var c=$("ge-canvas"), r=c.getBoundingClientRect();
+  var p=ev.touches&&ev.touches[0]?ev.touches[0]:ev;
+  return {x:(p.clientX-r.left)*c.width/r.width, y:(p.clientY-r.top)*c.height/r.height};
+}
+function garEditDown(ev){
+  if(!garEdit||!garEdit.img) return;
+  ev.preventDefault();
+  var p=garEditPos(ev);
+  if(garEdit.tool==="texto"){
+    var txt=($("ge-texto")&&$("ge-texto").value||"").trim();
+    if(!txt){ toast("Escribe primero el texto del comentario."); return; }
+    garEdit.anot.push({t:"texto",x:p.x,y:p.y,txt:txt,color:garEdit.color,g:garEdit.grosor});
+    garEditRedraw(); return;
+  }
+  garEdit.preview={t:garEdit.tool,x1:p.x,y1:p.y,x2:p.x,y2:p.y,color:garEdit.color,g:garEdit.grosor};
+}
+function garEditMove(ev){
+  if(!garEdit||!garEdit.preview) return;
+  ev.preventDefault();
+  var p=garEditPos(ev);
+  garEdit.preview.x2=p.x; garEdit.preview.y2=p.y;
+  garEditRedraw();
+}
+function garEditUp(){
+  if(!garEdit||!garEdit.preview) return;
+  var a=garEdit.preview; garEdit.preview=null;
+  if(Math.abs(a.x2-a.x1)>3||Math.abs(a.y2-a.y1)>3) garEdit.anot.push(a);
+  garEditRedraw();
+}
+function garEditDibujar(ctx,a){
+  ctx.save();
+  ctx.strokeStyle=a.color; ctx.fillStyle=a.color; ctx.lineWidth=a.g; ctx.lineCap="round"; ctx.lineJoin="round";
+  if(a.t==="flecha"){
+    ctx.beginPath(); ctx.moveTo(a.x1,a.y1); ctx.lineTo(a.x2,a.y2); ctx.stroke();
+    var ang=Math.atan2(a.y2-a.y1,a.x2-a.x1), L=Math.max(12,a.g*4);
+    ctx.beginPath(); ctx.moveTo(a.x2,a.y2);
+    ctx.lineTo(a.x2-L*Math.cos(ang-Math.PI/7),a.y2-L*Math.sin(ang-Math.PI/7));
+    ctx.lineTo(a.x2-L*Math.cos(ang+Math.PI/7),a.y2-L*Math.sin(ang+Math.PI/7));
+    ctx.closePath(); ctx.fill();
+  }else if(a.t==="rect"){
+    ctx.strokeRect(Math.min(a.x1,a.x2),Math.min(a.y1,a.y2),Math.abs(a.x2-a.x1),Math.abs(a.y2-a.y1));
+  }else if(a.t==="circulo"){
+    ctx.beginPath();
+    ctx.ellipse((a.x1+a.x2)/2,(a.y1+a.y2)/2,Math.abs(a.x2-a.x1)/2,Math.abs(a.y2-a.y1)/2,0,0,Math.PI*2);
+    ctx.stroke();
+  }else if(a.t==="texto"){
+    var fs=Math.max(14,a.g*6);
+    ctx.font="bold "+fs+"px Arial";
+    ctx.lineWidth=Math.max(3,fs/6); ctx.strokeStyle="#fff"; ctx.lineJoin="round";
+    ctx.strokeText(a.txt,a.x,a.y); ctx.fillText(a.txt,a.x,a.y);
+  }
+  ctx.restore();
+}
+function garEditRedraw(){
+  var c=$("ge-canvas"); if(!c||!garEdit||!garEdit.img) return;
+  var ctx=c.getContext("2d");
+  ctx.clearRect(0,0,c.width,c.height);
+  ctx.drawImage(garEdit.img,0,0,c.width,c.height);
+  garEdit.anot.forEach(function(a){ garEditDibujar(ctx,a); });
+  if(garEdit.preview) garEditDibujar(ctx,garEdit.preview);
+}
+function garEditDeshacer(){ if(!garEdit) return; garEdit.anot.pop(); garEditRedraw(); }
+function garEditLimpiar(){ if(!garEdit) return; garEdit.anot=[]; garEditRedraw(); }
+function garEditLimpiarEventos(){
+  window.removeEventListener("mouseup",garEditUp);
+  window.removeEventListener("touchend",garEditUp);
+}
+function garEditCancelar(){ garEditLimpiarEventos(); garEdit=null; cerrarModal(); formGarReabrir(); }
+function garEditGuardar(){
+  if(!garEdit) return;
+  var c=$("ge-canvas");
+  var f=garFotosArr(garEdit.x,garEdit.tipo)[garEdit.ix];
+  if(f){
+    if(!f.orig) f.orig=f.data;          /* conserva el original para poder re-editar */
+    f.anot=garEdit.anot;
+    f.escala=garEdit.escala;
+    f.data=c.toDataURL("image/jpeg",.85);
+    f.w=c.width; f.h=c.height;
+  }
+  garEditLimpiarEventos(); garEdit=null;
+  cerrarModal(); formGarReabrir();
+  toast("✓ Foto actualizada.");
+}
+/* Vuelve al formulario de garantía conservando lo que el revisor ya había escrito y digitado */
+function formGarReabrir(){
+  var t=findT(garTicketId); if(!t) return;
+  var borrador=garBorrador, cant=garCantSnapshot;
+  formGar(t,t.gar);
+  garBorrador=borrador;      /* el borrador en memoria manda sobre lo guardado */
+  if(cant){
+    Object.keys(cant).forEach(function(x){ var inp=document.getElementById("g-ca-"+x); if(inp) inp.value=cant[x]; });
+  }
+  garCantSnapshot=null;
+  garRecalcForm();
+}
+function garCargarFotos(inp,x,tipo){
   Array.prototype.forEach.call(inp.files,function(f){
     var img=new Image(), rd=new FileReader();
-    rd.onload=function(){ img.onload=function(){ var c=document.createElement("canvas"); var sc=Math.min(1,1000/Math.max(img.width,img.height)); c.width=img.width*sc; c.height=img.height*sc; c.getContext("2d").drawImage(img,0,0,c.width,c.height); garFotos2.push({data:c.toDataURL("image/jpeg",.72),w:c.width,h:c.height}); $("g-fotos2").innerHTML=garFotos2.map(function(ff,i){ return fotoThumb2(ff,i); }).join(""); }; img.src=rd.result; };
+    rd.onload=function(){
+      img.onload=function(){
+        var c=document.createElement("canvas");
+        var s=Math.min(1,1000/Math.max(img.width,img.height));
+        c.width=img.width*s; c.height=img.height*s;
+        c.getContext("2d").drawImage(img,0,0,c.width,c.height);
+        garFotosArr(x,tipo).push({data:c.toDataURL("image/jpeg",.72),w:c.width,h:c.height});
+        garRefrescarFotos(x,tipo);
+      };
+      img.src=rd.result;
+    };
     rd.readAsDataURL(f);
   });
   inp.value="";
@@ -2206,11 +2554,24 @@ async function guardarGar(id){
   var hayRechazo=totalRech>0;
   var gar={acepta:totalAcep>0,itemsAcep:itemsAcep,hayRechazo:hayRechazo,com:$("g-com").value,por:me.name,f:t.gar?t.gar.f:ahora};
   if(hayRechazo){
-    gar.marca=$("g-marca").value; gar.ciudad=$("g-ciudad").value; gar.telefono=$("g-tel").value; gar.email=$("g-email").value;
-    gar.cartaCom=$("g-carta").value; gar.parrafo2=$("g-p2").value; gar.antecedentes=$("g-ant").value; gar.revTecnica=$("g-rev").value;
-    gar.analisisTec=$("g-analisis").value; gar.conclusiones=$("g-conclu").value; gar.recomendaciones=$("g-recom").value;
-    gar.fotos=garFotos; gar.fotos2=garFotos2;
-    gar.informe={contacto:$("i-contacto").value,direccion:$("i-dir").value,condicion:$("i-cond").value,aplicacion:$("i-apl").value,modelo:$("i-mod").value,distribuidor:$("i-dist").value};
+    garCapturarBorrador();
+    /* Datos del cliente: iguales para todas las cartas del ticket */
+    gar.ciudad=$("g-ciudad").value; gar.telefono=$("g-tel").value; gar.email=$("g-email").value;
+    gar.informe={contacto:$("i-contacto").value,direccion:$("i-dir").value,distribuidor:$("i-dist").value};
+    /* Carta e informe propios de cada producto rechazado */
+    gar.porItem={};
+    t.items.forEach(function(i,x){
+      if(llegoQ(i)<=0||tipoDeItem(t,i)!=="GARANTIA") return;
+      if((llegoQ(i)-(itemsAcep[x]||0))<=0) return;   /* sin rechazo: no lleva carta */
+      var b=garBorrador[x]||{};
+      gar.porItem[x]={
+        marca:b.marca||i.sub||"", cartaCom:b.cartaCom||"", parrafo2:b.parrafo2||"",
+        condicion:b.condicion||"", aplicacion:b.aplicacion||"", modelo:b.modelo||"",
+        antecedentes:b.antecedentes||"", revTecnica:b.revTecnica||"", analisisTec:b.analisisTec||"",
+        conclusiones:b.conclusiones||"", recomendaciones:b.recomendaciones||"",
+        fotos:b.fotos||[], fotos2:b.fotos2||[]
+      };
+    });
   }
   t.gar=gar;
   var resumen=(totalAcep>0?totalAcep+" acept.":"")+(totalAcep>0&&totalRech>0?" / ":"")+(totalRech>0?totalRech+" rech.":"");
@@ -2523,7 +2884,7 @@ function renderAdmin(){
   if(total===0) h+='<div class="empty"><div class="big">Sin tickets</div></div>';
   else h+='<div class="srch-bar"><span>🔍</span><input type="text" id="adm-srch" placeholder="Buscar por asesor, cliente, N° ticket, factura o guía…" value="'+esc(filtroAdmin)+'" oninput="filtroAdmin=this.value;renderAdminTabla()">'+(filtroAdmin?'<button class="btn btn-sm btn-g" onclick="filtroAdmin=\'\';render()">✕</button>':'')+'</div><div id="adm-tabla"></div>';
   h+='</div>';
-  h+='<div class="card" style="border-left:5px solid var(--ok)"><h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">💾 Respaldo de seguridad</h3><div class="muted" style="margin-bottom:12px">Descarga TODO (tickets, guías, avisos y sobres) en un archivo. Guárdalo cada cierto tiempo; si algún día pasara algo, se puede restaurar desde aquí.</div><button class="btn btn-ok" onclick="descargarRespaldo()">⬇ Descargar respaldo completo</button></div>';
+  h+='<div class="card" style="border-left:5px solid var(--ok)"><h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">💾 Respaldo de seguridad</h3><div class="muted" style="margin-bottom:12px">Descarga TODO (tickets, guías, avisos y sobres) en un archivo. Guárdalo cada quince días, sin pasar de un mes; si algún día pasara algo, se restaura desde aquí.</div><button class="btn btn-ok" onclick="descargarRespaldo()">⬇ Descargar respaldo completo</button> <button class="btn btn-g" onclick="$(\'resp-file\').click()">⬆ Restaurar respaldo</button><input type="file" id="resp-file" accept="application/json" style="display:none" onchange="leerArchivoRespaldo(this)"></div>';
   h+='<div class="card" style="border-left:5px solid var(--bad)"><h3 style="font-size:19px;color:var(--bad);margin-bottom:6px">⚠ Limpiar datos de prueba</h3><div class="muted" style="margin-bottom:12px">Borra todos los tickets y guías. La base de facturas NO se toca.</div><button class="btn btn-bad" onclick="abrirLimpiarTodo()">🗑 Borrar tickets y guías</button></div>';
   $("main").innerHTML=h;
   renderAdminTabla();
@@ -2621,7 +2982,7 @@ async function actualizarBaseFirebase(){
 }
 function descargarRespaldo(){
   try{
-    var data=JSON.stringify({_app:"devoluciones-lubamaqui",_fecha:new Date().toISOString(),seq3200:state.seq3200||0,seq5200:state.seq5200||0,seq2200:state.seq2200||0,tickets:state.tickets||[],guias:state.guias||[],avisos:state.avisos||[],sobres:state.sobres||[]},null,2);
+    var data=JSON.stringify({_app:"devoluciones-lubamaqui",_fecha:new Date().toISOString(),seq3200:state.seq3200||0,seq5200:state.seq5200||0,seq2200:state.seq2200||0,seq8800:state.seq8800||0,tickets:state.tickets||[],guias:state.guias||[],avisos:state.avisos||[],sobres:state.sobres||[]},null,2);
     var blob=new Blob([data],{type:"application/json"});
     var url=URL.createObjectURL(blob);
     var a=document.createElement("a"); a.href=url; a.download="respaldo_devoluciones_"+hoyStr()+".json"; document.body.appendChild(a); a.click(); a.remove();
@@ -2680,10 +3041,49 @@ function abrirLimpiarTodo(){
 async function ejecutarLimpiarTodo(){
   if(!puedeActuar()){ toast("👁 Modo solo lectura.",4000); return; }
   if(($("conf-borrar").value||"").trim().toUpperCase()!=="BORRAR"){ toast("Escribe BORRAR para confirmar."); return; }
-  state.tickets=[]; state.guias=[]; state.sobres=[]; state.seq3200=0; state.seq5200=0; state.seq2200=0;
+  state.tickets=[]; state.guias=[]; state.sobres=[]; state.seq3200=0; state.seq5200=0; state.seq2200=0; state.seq8800=0;
   await saveState();
   try{ if(fbReady){ await fbDB.ref("ncpdf").remove(); await fbDB.ref("contadores").remove(); } }catch(e){}
   cerrarModal(); toast("✓ Datos de prueba borrados."); render();
+}
+
+/* ===== RESTAURAR RESPALDO =====
+   Reemplaza tickets, guías, avisos, sobres y contadores por lo que traiga el archivo.
+   Es destructivo (pisa lo que haya en este momento), por eso pide confirmación escrita,
+   igual que "Limpiar datos de prueba". */
+var respaldoPendiente=null;
+function leerArchivoRespaldo(inp){
+  if(!puedeActuar()){ toast("👁 Modo solo lectura: no puedes restaurar fuera de tu propia pestaña.",4000); inp.value=""; return; }
+  var f=inp.files[0]; if(!f) return;
+  var rd=new FileReader();
+  rd.onload=function(){
+    var obj;
+    try{ obj=JSON.parse(rd.result); }catch(e){ toast("⚠ El archivo no es un respaldo JSON válido."); inp.value=""; return; }
+    if(!obj||obj._app!=="devoluciones-lubamaqui"){ toast("⚠ Este archivo no es un respaldo de este sistema."); inp.value=""; return; }
+    respaldoPendiente=obj;
+    abrirConfirmarRestaurar(obj);
+    inp.value="";
+  };
+  rd.onerror=function(){ toast("No se pudo leer el archivo."); inp.value=""; };
+  rd.readAsText(f);
+}
+function abrirConfirmarRestaurar(obj){
+  var nT=(obj.tickets||[]).length, nG=(obj.guias||[]).length, nA=(obj.avisos||[]).length, nS=(obj.sobres||[]).length;
+  var actualT=(state.tickets||[]).length, actualG=(state.guias||[]).length;
+  $("modal-root").innerHTML='<div class="modal-bg"><div class="modal" style="max-width:560px"><h2 style="font-size:22px;color:var(--bad);margin-bottom:6px">⚠ Restaurar respaldo</h2>'+
+    '<div class="card" style="background:var(--bad-bg);border-color:#E8B0AB">Esto <b>reemplaza TODO</b> lo que hay ahora mismo (<b>'+actualT+' tickets, '+actualG+' guías</b>) por el contenido del archivo. No se puede deshacer.</div>'+
+    '<div class="kv" style="margin:12px 0"><b>Respaldo del</b><span>'+esc(obj._fecha?fdatetime(obj._fecha):"(sin fecha)")+'</span><b>Contiene</b><span>'+nT+' tickets · '+nG+' guías · '+nA+' avisos · '+nS+' sobres</span></div>'+
+    '<div class="field"><label>Escribe <b>RESTAURAR</b> para confirmar</label><input id="conf-restaurar" placeholder="RESTAURAR"></div>'+
+    '<div style="display:flex;gap:10px;justify-content:flex-end"><button class="btn btn-g" onclick="respaldoPendiente=null;cerrarModal()">Cancelar</button><button class="btn btn-bad" onclick="ejecutarRestaurar()">⚠ Restaurar y reemplazar todo</button></div></div></div>';
+}
+async function ejecutarRestaurar(){
+  if(!puedeActuar()){ toast("👁 Modo solo lectura.",4000); return; }
+  if(($("conf-restaurar").value||"").trim().toUpperCase()!=="RESTAURAR"){ toast("Escribe RESTAURAR para confirmar."); return; }
+  if(!respaldoPendiente){ toast("No hay respaldo cargado."); cerrarModal(); return; }
+  var obj=respaldoPendiente;
+  state={seq3200:obj.seq3200||0,seq5200:obj.seq5200||0,seq2200:obj.seq2200||0,seq8800:obj.seq8800||0,tickets:arr(obj.tickets),guias:arr(obj.guias),avisos:arr(obj.avisos),sobres:arr(obj.sobres)};
+  await saveState();
+  respaldoPendiente=null; cerrarModal(); toast("✓ Respaldo restaurado ("+state.tickets.length+" tickets, "+state.guias.length+" guías).",5000); render();
 }
 
 /* ===== INIT ===== */
