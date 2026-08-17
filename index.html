@@ -2384,26 +2384,37 @@ function garEditarFoto(x,tipo,ix){
   var f=garFotosArr(x,tipo)[ix]; if(!f) return;
   garCapturarBorrador();                    /* no perder los textos ya escritos */
   garCantSnapshot=garSnapshotCantidades();  /* ni las cantidades digitadas */
+  /* fsPct y bwPct van en % del ancho de la foto, no en píxeles: así el comentario
+     se ve igual de grande venga la foto de un celular de 4000px o de uno de 800px */
   garEdit={x:x,tipo:tipo,ix:ix,anot:(f.anot||[]).map(function(a){ return Object.assign({},a); }),
-           tool:"flecha",color:"#D61F26",grosor:4,escala:f.escala||100,preview:null,img:null};
+           tool:"flecha",color:"#D61F26",grosor:4,fsPct:3.5,bwPct:60,
+           escala:f.escala||100,preview:null,img:null};
   var img=new Image();
   img.onload=function(){
     garEdit.img=img;
     $("modal-root").innerHTML='<div class="modal-bg"><div class="modal" style="max-width:900px">'+
       '<h2 style="font-size:20px;color:var(--navy);margin-bottom:4px">✎ Editar foto del informe</h2>'+
-      '<div class="muted" style="margin-bottom:10px">Elige una herramienta y arrastra sobre la foto. Para un comentario, escribe el texto y luego haz clic donde quieras ponerlo.</div>'+
+      '<div class="muted" style="margin-bottom:10px">Elige una herramienta y arrastra sobre la foto. Para un comentario, escribe el texto y luego haz clic donde quieras ponerlo: se dibuja dentro de un recuadro blanco y el texto se acomoda solo para no salirse de la foto.</div>'+
       '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px">'+
         '<button class="btn btn-sm" id="ge-t-flecha" onclick="garEditTool(\'flecha\')">➘ Flecha</button>'+
         '<button class="btn btn-sm" id="ge-t-rect" onclick="garEditTool(\'rect\')">▭ Rectángulo</button>'+
         '<button class="btn btn-sm" id="ge-t-circulo" onclick="garEditTool(\'circulo\')">◯ Círculo</button>'+
         '<button class="btn btn-sm" id="ge-t-texto" onclick="garEditTool(\'texto\')">🗨 Comentario</button>'+
-        '<input id="ge-texto" placeholder="Texto del comentario…" style="width:220px">'+
+        '<textarea id="ge-texto" rows="2" placeholder="Texto del comentario… (puedes escribir varias líneas)" style="width:280px;resize:vertical"></textarea>'+
       '</div>'+
-      '<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:10px">'+
+      '<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:8px">'+
         '<label style="text-transform:none;margin:0">Color <input type="color" id="ge-color" value="#D61F26" onchange="garEdit.color=this.value" style="width:44px;padding:2px;vertical-align:middle"></label>'+
         '<label style="text-transform:none;margin:0">Grosor <input type="range" id="ge-grosor" min="2" max="12" value="4" oninput="garEdit.grosor=+this.value" style="vertical-align:middle;width:110px"></label>'+
         '<button class="btn btn-g btn-sm" onclick="garEditDeshacer()">↶ Deshacer</button>'+
         '<button class="btn btn-g btn-sm" onclick="garEditLimpiar()">Borrar marcas</button>'+
+      '</div>'+
+      '<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:10px;padding:6px 8px;background:#F4F6F8;border-radius:8px">'+
+        '<span class="muted" style="font-size:12px">Comentario:</span>'+
+        '<label style="text-transform:none;margin:0">Tamaño del texto <b id="ge-fs-lbl">3.5%</b>'+
+          '<input type="range" min="1.5" max="9" step="0.5" value="3.5" oninput="garEditTexto(\'fsPct\',+this.value);document.getElementById(\'ge-fs-lbl\').textContent=this.value+\'%\'" style="vertical-align:middle;width:110px"></label>'+
+        '<label style="text-transform:none;margin:0">Ancho del párrafo <b id="ge-bw-lbl">60%</b>'+
+          '<input type="range" min="20" max="95" step="5" value="60" oninput="garEditTexto(\'bwPct\',+this.value);document.getElementById(\'ge-bw-lbl\').textContent=this.value+\'%\'" style="vertical-align:middle;width:110px"></label>'+
+        '<span class="muted" style="font-size:11.5px">ajustan el último comentario que colocaste</span>'+
       '</div>'+
       '<div style="overflow:auto;background:#EDF0F3;padding:8px;border-radius:8px;text-align:center">'+
         '<canvas id="ge-canvas" style="max-width:100%;cursor:crosshair;background:#fff;touch-action:none"></canvas></div>'+
@@ -2437,9 +2448,11 @@ function garEditDown(ev){
   ev.preventDefault();
   var p=garEditPos(ev);
   if(garEdit.tool==="texto"){
-    var txt=($("ge-texto")&&$("ge-texto").value||"").trim();
+    var txt=($("ge-texto")&&$("ge-texto").value||"").replace(/\s+$/,"").replace(/^\s+/,"");
     if(!txt){ toast("Escribe primero el texto del comentario."); return; }
-    garEdit.anot.push({t:"texto",x:p.x,y:p.y,txt:txt,color:garEdit.color,g:garEdit.grosor});
+    var W=$("ge-canvas").width;
+    garEdit.anot.push({t:"texto",x:p.x,y:p.y,txt:txt,color:garEdit.color,g:garEdit.grosor,
+                       fs:Math.round(W*garEdit.fsPct/100), bw:Math.round(W*garEdit.bwPct/100)});
     garEditRedraw(); return;
   }
   garEdit.preview={t:garEdit.tool,x1:p.x,y1:p.y,x2:p.x,y2:p.y,color:garEdit.color,g:garEdit.grosor};
@@ -2474,12 +2487,92 @@ function garEditDibujar(ctx,a){
     ctx.ellipse((a.x1+a.x2)/2,(a.y1+a.y2)/2,Math.abs(a.x2-a.x1)/2,Math.abs(a.y2-a.y1)/2,0,0,Math.PI*2);
     ctx.stroke();
   }else if(a.t==="texto"){
-    var fs=Math.max(14,a.g*6);
-    ctx.font="bold "+fs+"px Arial";
-    ctx.lineWidth=Math.max(3,fs/6); ctx.strokeStyle="#fff"; ctx.lineJoin="round";
-    ctx.strokeText(a.txt,a.x,a.y); ctx.fillText(a.txt,a.x,a.y);
+    garEditDibujarTexto(ctx,a);
   }
   ctx.restore();
+}
+/* Parte el comentario en líneas que quepan en maxW, respetando los saltos de
+   línea que el revisor escribió. Marca la última línea de cada párrafo para no
+   justificarla (si no, una línea de dos palabras quedaría estirada de lado a lado). */
+function garEditLineas(ctx,txt,maxW){
+  var out=[];
+  String(txt||"").split(/\r?\n/).forEach(function(par){
+    var pal=par.split(/\s+/).filter(Boolean);
+    if(!pal.length){ out.push({pal:[],ult:true}); return; }
+    var linea=[];
+    pal.forEach(function(p){
+      /* Una palabra sola más ancha que el recuadro (un código de parte largo, por
+         ejemplo) se parte por letras; si no, se saldría de la caja blanca. */
+      while(ctx.measureText(p).width>maxW && p.length>1){
+        var n=1;
+        while(n<p.length && ctx.measureText(p.slice(0,n+1)).width<=maxW) n++;
+        if(linea.length){ out.push({pal:linea,ult:false}); linea=[]; }
+        out.push({pal:[p.slice(0,n)],ult:false});
+        p=p.slice(n);
+      }
+      if(linea.length && ctx.measureText(linea.concat([p]).join(" ")).width>maxW){
+        out.push({pal:linea,ult:false}); linea=[p];
+      }else linea.push(p);
+    });
+    out.push({pal:linea,ult:true});
+  });
+  return out;
+}
+function garEditLineaJust(ctx,pal,x,y,maxW,just){
+  if(!pal.length) return;
+  if(!just||pal.length<2){ ctx.fillText(pal.join(" "),x,y); return; }
+  var suma=pal.reduce(function(s,p){ return s+ctx.measureText(p).width; },0);
+  var hueco=(maxW-suma)/(pal.length-1), cx=x;
+  pal.forEach(function(p){ ctx.fillText(p,cx,y); cx+=ctx.measureText(p).width+hueco; });
+}
+function garEditCajaRedonda(ctx,x,y,w,h,r){
+  r=Math.min(r,w/2,h/2);
+  ctx.beginPath();
+  ctx.moveTo(x+r,y); ctx.lineTo(x+w-r,y); ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+  ctx.lineTo(x+w,y+h-r); ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+  ctx.lineTo(x+r,y+h); ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+  ctx.lineTo(x,y+r); ctx.quadraticCurveTo(x,y,x+r,y);
+  ctx.closePath();
+}
+/* El comentario va en un recuadro blanco: el texto se acomoda solo al ancho del
+   recuadro y el recuadro se reubica para no salirse de la foto. */
+function garEditDibujarTexto(ctx,a){
+  var W=ctx.canvas.width, H=ctx.canvas.height;
+  var fs=a.fs||Math.max(14,(a.g||4)*6);
+  var pad,lh,bw,ls,cw,ch;
+  ctx.textBaseline="top"; ctx.textAlign="left";
+  for(var intento=0;intento<12;intento++){
+    pad=Math.round(fs*.45); lh=Math.round(fs*1.3);
+    bw=Math.max(fs*3, Math.min(a.bw||Math.round(W*.6), W-pad*2-6));
+    ctx.font="bold "+fs+"px Arial";
+    ls=garEditLineas(ctx,a.txt,bw);
+    cw=bw+pad*2; ch=ls.length*lh+pad*2;
+    if(ch<=H-6||fs<=8) break;
+    /* El párrafo no cabe a lo alto de la foto: se achica la letra hasta que entre,
+       porque desbordar por abajo dejaría texto cortado y sin leer. */
+    fs=Math.max(8,Math.floor(fs*Math.sqrt((H-6)/ch)));
+  }
+  var bx=Math.max(3,Math.min(a.x,W-cw-3)), by=Math.max(3,Math.min(a.y,H-ch-3));
+  ctx.fillStyle="#fff"; ctx.strokeStyle=a.color; ctx.lineWidth=Math.max(2,fs/12);
+  garEditCajaRedonda(ctx,bx,by,cw,ch,fs*.3);
+  ctx.fill(); ctx.stroke();
+  ctx.fillStyle=a.color;
+  ls.forEach(function(l,i){ garEditLineaJust(ctx,l.pal,bx+pad,by+pad+i*lh,bw,!l.ult); });
+}
+/* Los deslizadores reajustan el último comentario colocado, para que el revisor
+   vea cómo se reacomoda el párrafo mientras mueve la barra. */
+function garEditTexto(prop,val){
+  if(!garEdit) return;
+  garEdit[prop]=val;
+  var c=$("ge-canvas"); if(!c) return;
+  for(var i=garEdit.anot.length-1;i>=0;i--){
+    if(garEdit.anot[i].t==="texto"){
+      garEdit.anot[i].fs=Math.round(c.width*garEdit.fsPct/100);
+      garEdit.anot[i].bw=Math.round(c.width*garEdit.bwPct/100);
+      break;
+    }
+  }
+  garEditRedraw();
 }
 function garEditRedraw(){
   var c=$("ge-canvas"); if(!c||!garEdit||!garEdit.img) return;
