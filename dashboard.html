@@ -83,11 +83,9 @@ var ventasBase=[], ventasCargadas=false, totalProdSheet={};
 var comprasCliente={};      /* compras (TOTAL DOCUMENTO) por cliente, desde el Sheet */
 var columnasCSV={};         /* qué columnas se detectaron en el Sheet (diagnóstico) */
 var filtroSucursal="", filtroVendedor="", filtroMotivo="";
-var CSV_URLS=[
-  "https://docs.google.com/spreadsheets/d/e/2PACX-1vTpOv2PFreipcoBc7ry-bD3QSRbqD49nQicajrI86pDAuUuQkbPoiszwxmt2HQbodo4zAlHI2rvknPk/pub?gid=1814361639&single=true&output=csv",
-  "https://docs.google.com/spreadsheets/d/19WwKz-OjCCylK-crbwRu61d3A2q4ophHbRNAguyUtl8/gviz/tq?tqx=out:csv&gid=1814361639",
-  "https://docs.google.com/spreadsheets/d/19WwKz-OjCCylK-crbwRu61d3A2q4ophHbRNAguyUtl8/export?format=csv&gid=1814361639"
-];
+/* La base de ventas ya NO se descarga de un Google Sheet publicado en la web ni a
+   traves de proxies de terceros: se lee de Firebase, que exige sesion y reglas.
+   La sube Administrativo desde el panel Administrativo del sistema. */
 
 /* ===== UTIL ===== */
 function $(id){ return document.getElementById(id); }
@@ -300,71 +298,53 @@ function numEC(s){
   var n=parseFloat(s);
   return isNaN(n)?0:n;
 }
-function parsearVentas(text){
-  var lines=text.split(/\r?\n/);
-  if(lines.length<2) return [];
-  var sep=lines[0].indexOf(";")>=0?";":",";
-  function norm(k){ return String(k||"").trim().toUpperCase().replace(/\s+/g," "); }
-  var H=splitCSVLine(lines[0],sep).map(norm);
-  function idxAny(names){ for(var j=0;j<names.length;j++){ var p=H.indexOf(names[j]); if(p>=0) return p; } return -1; }
-  var iFact=idxAny(["FACTURA"]), iEmi=idxAny(["EMISION","EMISIÓN","FECHA EMISION","FECHA EMISIÓN"]);
-  var iRazon=idxAny(["RAZON SOCIAL","RAZÓN SOCIAL","CLIENTE"]), iRuc=idxAny(["IDENTIFICACION","IDENTIFICACIÓN","RUC"]);
-  var iTotDoc=idxAny(["TOTAL DOCUMENTO"]), iNeto=idxAny(["PRECIO TOTAL NETO","NETO"]);
-  var iCod=idxAny(["CODIGO PRODUCTO","CÓDIGO PRODUCTO","CODIGO","CÓDIGO"]), iTotProd=idxAny(["TOTAL PRODUCTO"]);
-  var iMes=idxAny(["MES"]), iCant=idxAny(["CANTIDAD","CANT","UNIDADES"]);
-  columnasCSV={mes:iMes>=0,cantidad:iCant>=0,totalDoc:iTotDoc>=0,neto:iNeto>=0,cliente:iRazon>=0};
+function descomprimirBase(o){
+  if(!o||!o.r) return [];
+  var p=o.p;
+  return o.r.map(function(a){ return {emision:p[a[0]],factura:p[a[1]],ruc:p[a[2]],razon:p[a[3]],codigo:p[a[4]],desc:p[a[5]],sub:p[a[6]],facturador:p[a[7]],cant:a[8],neto:a[9],iva:a[10],total:a[11],creditoAplicado:a[12]||0,totalDoc:a.length>13?(a[13]||0):0,mes:a.length>14?(p[a[14]]||""):""}; });
+}
+/* Reconstruye la vista por factura a partir de las filas guardadas en Firebase.
+   Hace exactamente lo mismo que hacia parsearVentas con el CSV del Sheet. */
+function construirVentasDesdeFilas(filas){
   var vistas={}, orden=[];
   totalProdSheet={}; comprasCliente={};
-  for(var i=1;i<lines.length;i++){
-    if(!lines[i].trim()) continue;
-    var c=splitCSVLine(lines[i],sep);
-    var fact=String(c[iFact]||"").trim();
-    if(!fact) continue;
-    var cantLinea=iCant>=0?numEC(c[iCant]):0;
-    var netoLinea=iNeto>=0?numEC(c[iNeto]):0;
-    var totDocLinea=iTotDoc>=0?numEC(c[iTotDoc]):0;
-    if(iTotProd>=0&&iCod>=0){ var cod=String(c[iCod]||"").trim(); totalProdSheet[fact+"|"+cod]=numEC(c[iTotProd]); }
+  var conTotalDoc=false, conMes=false;
+  filas.forEach(function(x){
+    var fact=String(x.factura||"").trim();
+    if(!fact) return;
+    if(x.totalDoc) conTotalDoc=true;
+    if(x.mes) conMes=true;
+    if(x.codigo) totalProdSheet[fact+"|"+String(x.codigo).trim()]=x.total||0;
     if(!vistas[fact]){
-      vistas[fact]={factura:fact,emision:String(c[iEmi]||"").trim(),razon:String(c[iRazon]||"").trim(),ruc:String(c[iRuc]||"").trim(),totalDoc:0,neto:0,cant:0,mes:(iMes>=0?String(c[iMes]||"").trim():"")};
+      vistas[fact]={factura:fact,emision:String(x.emision||"").trim(),razon:String(x.razon||"").trim(),ruc:String(x.ruc||"").trim(),totalDoc:0,neto:0,cant:0,mes:String(x.mes||"").trim()};
       orden.push(fact);
     }
     var rec=vistas[fact];
-    /* NETO y CANTIDAD: se SUMAN todas las líneas de la factura */
-    rec.neto+=netoLinea;
-    rec.cant+=cantLinea;
-    /* TOTAL DOCUMENTO: es el total del documento (se repite por línea). Tomamos el mayor,
-       así ignoramos líneas en blanco/0 y no lo sumamos dos veces. */
-    if(totDocLinea>rec.totalDoc) rec.totalDoc=totDocLinea;
-    if(!rec.emision&&c[iEmi]) rec.emision=String(c[iEmi]).trim();
-    if(!rec.razon&&c[iRazon]) rec.razon=String(c[iRazon]).trim();
-  }
+    rec.neto+=(x.neto||0);
+    rec.cant+=(x.cant||0);
+    if((x.totalDoc||0)>rec.totalDoc) rec.totalDoc=(x.totalDoc||0);
+    if(!rec.emision&&x.emision) rec.emision=String(x.emision).trim();
+    if(!rec.razon&&x.razon) rec.razon=String(x.razon).trim();
+    if(!rec.mes&&x.mes) rec.mes=String(x.mes).trim();
+  });
+  columnasCSV={mes:conMes,cantidad:true,totalDoc:conTotalDoc,neto:true,cliente:true};
   var listaV=orden.map(function(f){ return vistas[f]; });
-  /* compras por cliente = suma del TOTAL DOCUMENTO (ya a nivel documento) por razón social */
   listaV.forEach(function(r){ comprasCliente[r.razon]=(comprasCliente[r.razon]||0)+r.totalDoc; });
   return listaV;
 }
 async function cargarVentas(){
-  var cb="&_="+Date.now();
-  function conBuster(u){ return u+(u.indexOf("?")>=0?cb:"?"+cb.slice(1)); }
-  async function fetchTexto(m,url){
-    var u=conBuster(url), opts={cache:"no-store"};
-    if(m===0){ var r=await fetch(u,opts); if(!r.ok) throw new Error("HTTP "+r.status); return await r.text(); }
-    if(m===1){ var r2=await fetch("https://api.allorigins.win/raw?url="+encodeURIComponent(u),opts); if(!r2.ok) throw new Error("HTTP "+r2.status); return await r2.text(); }
-    if(m===2){ var r3=await fetch("https://corsproxy.io/?url="+encodeURIComponent(u),opts); if(!r3.ok) throw new Error("HTTP "+r3.status); return await r3.text(); }
-    if(m===3){ var r4=await fetch("https://api.allorigins.win/get?url="+encodeURIComponent(u)+"&_="+Date.now(),opts); if(!r4.ok) throw new Error("HTTP "+r4.status); var j=await r4.json(); return j.contents; }
-    return null;
+  var db=firebase.database();
+  var ms=await db.ref("baseFacturas/meta").get();
+  var meta=ms.val();
+  if(!meta||!meta.n) throw new Error("La base de facturas no esta cargada en Firebase. Pidele a Administrativo que la suba desde el panel Administrativo del sistema.");
+  var json="";
+  for(var i=0;i<meta.n;i++){
+    var c=await db.ref("baseFacturas/chunks/"+i).get();
+    json+=c.val()||"";
   }
-  var csv=null;
-  for(var ui=0;ui<CSV_URLS.length&&!csv;ui++){
-    for(var mi=0;mi<4&&!csv;mi++){
-      try{
-        var txt=await fetchTexto(mi,CSV_URLS[ui]);
-        if(txt&&txt.length>50&&txt.indexOf(",")>=0&&txt.trim().toLowerCase().indexOf("<html")!==0){ csv=txt; }
-      }catch(e){}
-    }
-  }
-  if(!csv) throw new Error("No se pudo cargar la base de ventas");
-  ventasBase=parsearVentas(csv);
+  var filas=descomprimirBase(JSON.parse(json));
+  if(!filas.length) throw new Error("La base de Firebase vino vacia.");
+  ventasBase=construirVentasDesdeFilas(filas);
   ventasCargadas=true;
   return ventasBase;
 }
@@ -683,7 +663,7 @@ function render(){
     /* CANTIDAD DE ARTÍCULOS: facturados vs devueltos */
     h+='<div class="card"><div class="sec-title">Cantidad de artículos: facturados vs devueltos</div>';
     h+='<div class="grid4"><div class="kpi"><div class="disp" style="color:var(--navy)">'+artFacturados.toLocaleString("es-EC")+'</div><div class="lbl">Artículos facturados (CANTIDAD del Sheet)</div></div><div class="kpi"><div class="disp" style="color:var(--rojo)">'+totalProductos.toLocaleString("es-EC")+'</div><div class="lbl">Artículos aprobados (NC)</div></div><div class="kpi"><div class="disp" style="color:'+colorTasa(tasaArticulos)+'">'+tasaArticulos.toFixed(2)+'%</div><div class="lbl">% de unidades devueltas</div></div><div class="kpi"><div class="disp" style="color:var(--navy)">'+(totalProductos>0?dnum(artFacturados/totalProductos):"—")+'</div><div class="lbl">Cantidad total ÷ devuelta (facturados por cada 1 devuelto)</div></div></div>';
-    if(!columnasCSV.cantidad) h+='<div class="muted" style="margin-top:8px;color:var(--rojo)">⚠ No se detectó la columna <b>CANTIDAD</b> en el Google Sheets. Revisa que exista y se llame exactamente así para que este indicador funcione.</div>';
+    if(!columnasCSV.cantidad) h+='<div class="muted" style="margin-top:8px;color:var(--rojo)">⚠ No se detectó la columna <b>CANTIDAD</b> en la base de facturas. Revisa que exista y se llame exactamente así para que este indicador funcione.</div>';
     h+='</div>';
 
     var mesesV=Object.keys(ventasPorMes).sort();
@@ -726,7 +706,9 @@ function render(){
 
   /* TOP 10 CLIENTES: compras vs devuelto (sin tipo mayorista/minorista) */
   h+='<div class="card"><div class="sec-title">Top 10 clientes que más devuelven — compras vs devoluciones</div><div style="max-height:340px;overflow:auto"><table><thead><tr><th>Cliente</th><th class="num">Compras (Sheet)</th><th class="num">Devuelto</th><th class="num">% devuelto</th></tr></thead><tbody>'+cli.map(function(c){ var compras=(ventasCargadas&&comprasCliente[c.k]!==undefined)?comprasCliente[c.k]:null; var pct=(compras&&compras>0)?Math.min(c.v/compras*100,100):null; return '<tr><td>'+esc(c.k)+'</td><td class="num">'+(compras==null?'<span class="muted">—</span>':money(compras))+'</td><td class="num">'+money(c.v)+'</td><td class="num">'+(pct==null?'<span class="muted">—</span>':('<b style="color:'+colorTasa(pct)+'">'+pct.toFixed(2)+'%</b>'))+'</td></tr>'; }).join("")+'</tbody></table></div>';
-  if(ventasCargadas&&!columnasCSV.cliente) h+='<div class="muted" style="margin-top:6px;color:var(--rojo)">⚠ No se detectó la columna de cliente (RAZON SOCIAL) en el Sheet, por eso las compras salen vacías.</div>';
+  if(ventasCargadas&&!columnasCSV.cliente) h+='<div class="muted" style="margin-top:6px;color:var(--rojo)">⚠ No se detectó la columna de cliente (RAZON SOCIAL) en la base, por eso las compras salen vacías.</div>';
+  /* Una base subida antes del cambio no trae TOTAL DOCUMENTO: mejor avisar que mostrar ceros. */
+  if(ventasCargadas&&!columnasCSV.totalDoc) h+='<div class="muted" style="margin-top:6px;color:var(--rojo)"><b>⚠ La base cargada en Firebase es anterior a la última actualización y no trae la columna TOTAL DOCUMENTO.</b> Por eso los montos de compra salen en cero. Pídele a Administrativo que vuelva a subir la base desde el panel Administrativo del sistema.</div>';
   else h+='<div class="muted" style="margin-top:6px">Compras = suma del TOTAL DOCUMENTO del cliente en el Sheet (mismo nombre de RAZON SOCIAL). Si un cliente sale "—" es porque su nombre no coincide exactamente entre el ticket y el Sheet.</div>';
   h+='</div>';
 
