@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>LUBAMAQUI · Devoluciones y Garantías</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://www.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://*.firebaseio.com wss://*.firebaseio.com https://*.googleapis.com https://www.gstatic.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-src 'none'">
+<meta name="referrer" content="strict-origin-when-cross-origin">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" integrity="sha384-vtjasyidUo0kW94K5MXDXntzOJpQgBKXmE7e2Ga4LG0skTTLeBi97eFAXsqewJjw" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" integrity="sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js" integrity="sha384-vuyrTV5nkscLp1knFvt+FIHfKKzmROBq5reruhMRslauj54mW+l2B8b6szMN6lCL" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
@@ -512,7 +514,10 @@ function actualizarChipBase(){ var el=document.getElementById("chip-base"); if(e
 
 /* ===== UTIL ===== */
 function $(id){ return document.getElementById(id); }
-function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];}); }
+/* Escapa tambien la comilla simple: sin ella, un valor libre insertado en un atributo
+   delimitado por comillas simples podria cerrarlo e inyectar codigo. Hoy no ocurre en
+   ningun punto del sistema, pero deja de ser un descuido posible. */
+function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];}); }
 function money(n){ return "$"+(Number(n)||0).toFixed(2); }
 /* Interpreta fechas tipo "25/01/2026 12:35:54" (DD/MM/AAAA, como las exporta el Sheet) de forma correcta.
    new Date() nativo asume MM/DD/AAAA (formato EEUU) y o bien calcula mal el día/mes, o falla en silencio
@@ -1463,7 +1468,7 @@ function mostrarPDF(d,nombre){
   if(pdfUrl){ try{ URL.revokeObjectURL(pdfUrl); }catch(e){} }
   pdfDocActual=d; pdfNombreActual=nombre;
   pdfUrl=URL.createObjectURL(d.output("blob"));
-  $("modal-root").innerHTML='<div class="modal-bg"><div class="modal" style="max-width:880px"><div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap"><h3 style="color:var(--navy);font-size:19px;flex:1">'+esc(nombre)+'</h3><button class="btn btn-p" onclick="compartirPDFActual()">📲 Compartir</button><a class="btn btn-a" href="'+pdfUrl+'" download="'+esc(nombre)+'" target="_blank">⬇ Descargar</a><button class="btn btn-g" onclick="cerrarModal()">Cerrar</button></div><iframe src="'+pdfUrl+'" style="width:100%;height:68vh;border:1px solid var(--line);border-radius:8px;background:#fff"></iframe></div></div>';
+  $("modal-root").innerHTML='<div class="modal-bg"><div class="modal" style="max-width:880px"><div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap"><h3 style="color:var(--navy);font-size:19px;flex:1">'+esc(nombre)+'</h3><button class="btn btn-p" onclick="compartirPDFActual()">📲 Compartir</button><a class="btn btn-a" href="'+pdfUrl+'" download="'+esc(nombre)+'" target="_blank" rel="noopener noreferrer">⬇ Descargar</a><button class="btn btn-g" onclick="cerrarModal()">Cerrar</button></div><iframe src="'+pdfUrl+'" style="width:100%;height:68vh;border:1px solid var(--line);border-radius:8px;background:#fff"></iframe></div></div>';
 }
 async function compartirPDFActual(){
   if(!pdfDocActual){ toast("No hay PDF para compartir."); return; }
@@ -1626,7 +1631,7 @@ function verTicket(id){
 
 /* ===== BANDEJAS ===== */
 function renderBandeja(role,titulo,sub){
-  $("main").innerHTML='<h2 style="font-size:28px;color:var(--navy)">'+titulo+'</h2><div class="muted" style="margin-bottom:'+(role==="GARANTIA"?"10px":"18px")+'">'+sub+'</div>'+(role==="GARANTIA"?'<div style="margin-bottom:18px"><a class="btn btn-a" href="lubamaqui-garantia-ia.html" target="_blank">🤖 Analizar fotos con IA</a></div>':'')+(role==="MERCADERIA"?renderSobresPendientes():'')+'<div class="card"><div class="srch-bar"><span>🔍</span><input type="text" id="band-srch" placeholder="Buscar por asesor, cliente, N° ticket, factura o guía…" value="'+esc(filtroBandeja)+'" oninput="filtroBandeja=this.value;renderBandejaTabla(\''+role+'\')">'+(filtroBandeja?'<button class="btn btn-sm btn-g" onclick="filtroBandeja=\'\';renderBandejaTabla(\''+role+'\')">✕</button>':'')+'</div><div id="band-tabla"></div></div>'+
+  $("main").innerHTML='<h2 style="font-size:28px;color:var(--navy)">'+titulo+'</h2><div class="muted" style="margin-bottom:'+(role==="GARANTIA"?"10px":"18px")+'">'+sub+'</div>'+(role==="GARANTIA"?'<div style="margin-bottom:18px"><a class="btn btn-a" href="lubamaqui-garantia-ia.html" target="_blank" rel="noopener noreferrer">🤖 Analizar fotos con IA</a></div>':'')+(role==="MERCADERIA"?renderSobresPendientes():'')+'<div class="card"><div class="srch-bar"><span>🔍</span><input type="text" id="band-srch" placeholder="Buscar por asesor, cliente, N° ticket, factura o guía…" value="'+esc(filtroBandeja)+'" oninput="filtroBandeja=this.value;renderBandejaTabla(\''+role+'\')">'+(filtroBandeja?'<button class="btn btn-sm btn-g" onclick="filtroBandeja=\'\';renderBandejaTabla(\''+role+'\')">✕</button>':'')+'</div><div id="band-tabla"></div></div>'+
     '<div class="card"><h3 style="font-size:18px;color:var(--navy);margin-bottom:8px">Reporte / Historial procesado</h3>'+
     '<div class="muted" style="margin-bottom:10px">Filtra por la fecha en que se revisó cada ticket en esta bandeja y descarga el Excel consolidado con factura, ítems, cliente, asesor y todo lo necesario para gestionar.</div>'+
     '<div class="grid3" style="margin-bottom:10px"><div class="field" style="margin-bottom:0"><label>Desde</label><input type="date" id="rep-b-desde" value="'+repDesde+'" onchange="repDesde=this.value;render()"></div><div class="field" style="margin-bottom:0"><label>Hasta</label><input type="date" id="rep-b-hasta" value="'+repHasta+'" onchange="repHasta=this.value;render()"></div><div style="display:flex;gap:8px;align-items:end"><button class="btn btn-ok" style="flex:1;justify-content:center" onclick="exportarBandeja(\''+role+'\')">⬇ Excel consolidado</button><button class="btn btn-g" onclick="repDesde=\'\';repHasta=\'\';render()">✕</button></div></div>'+
@@ -2877,7 +2882,7 @@ async function verPdfNC(id){
   var t=findT(id);
   if(!t.nc||!t.nc.pdfKey){ toast("Sin PDF de NC."); return; }
   try{ var o=await leerPdfNCfb(t.nc.pdfKey); if(!o){ toast("No se encontró el PDF."); return; }
-    $("modal-root").innerHTML='<div class="modal-bg"><div class="modal" style="max-width:880px"><div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap"><h3 style="color:var(--navy);flex:1">NC '+esc(t.nc.numero||"")+' · '+esc(o.name)+'</h3><a class="btn btn-a" href="'+o.data+'" download="'+esc(o.name)+'" target="_blank">⬇ Descargar</a><button class="btn btn-g" onclick="cerrarModal()">Cerrar</button></div><iframe src="'+o.data+'" style="width:100%;height:68vh;border:1px solid var(--line);border-radius:8px"></iframe></div></div>';
+    $("modal-root").innerHTML='<div class="modal-bg"><div class="modal" style="max-width:880px"><div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap"><h3 style="color:var(--navy);flex:1">NC '+esc(t.nc.numero||"")+' · '+esc(o.name)+'</h3><a class="btn btn-a" href="'+o.data+'" download="'+esc(o.name)+'" target="_blank" rel="noopener noreferrer">⬇ Descargar</a><button class="btn btn-g" onclick="cerrarModal()">Cerrar</button></div><iframe src="'+o.data+'" style="width:100%;height:68vh;border:1px solid var(--line);border-radius:8px"></iframe></div></div>';
   }catch(e){ toast("No se pudo cargar el PDF: "+(e&&e.message||e)); }
 }
 function exportarNCConsolidado(){
@@ -2980,7 +2985,7 @@ function renderAdmin(){
     }
     h+='</div>';
   }
-  h+='<div class="card" style="border-left:5px solid var(--navy)"><h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">📊 Indicadores de devoluciones</h3><div class="muted" style="margin-bottom:12px">Dashboard con tasa de devolución, rankings, sucursales, motivos e impacto económico. Se abre en página aparte.</div><a class="btn btn-p" href="dashboard.html" target="_blank">📊 Abrir dashboard</a></div>';
+  h+='<div class="card" style="border-left:5px solid var(--navy)"><h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">📊 Indicadores de devoluciones</h3><div class="muted" style="margin-bottom:12px">Dashboard con tasa de devolución, rankings, sucursales, motivos e impacto económico. Se abre en página aparte.</div><a class="btn btn-p" href="dashboard.html" target="_blank" rel="noopener noreferrer">📊 Abrir dashboard</a></div>';
   h+='<div class="card" style="border-left:5px solid var(--ok)"><h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">Reporte consolidado</h3><div class="muted" style="margin-bottom:12px">Excel con todos los tickets. Filtra por rango de fechas.</div><div class="grid3" style="margin-bottom:10px"><div class="field" style="margin-bottom:0"><label>Desde</label><input type="date" id="rep-desde"></div><div class="field" style="margin-bottom:0"><label>Hasta</label><input type="date" id="rep-hasta"></div><div class="field" style="margin-bottom:0"><label>&nbsp;</label><button class="btn btn-ok" style="width:100%;justify-content:center" onclick="reporteConsolidado()">⬇ Descargar</button></div></div></div>';
   h+='<div class="card" style="border-left:5px solid #6A2E91"><h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">Guías</h3><div class="muted" style="margin-bottom:12px">Anula guías y descarga el reporte.</div><button class="btn btn-p" onclick="adminVerGuias()">📦 Administrar guías</button> <button class="btn btn-ok" onclick="excelGuias()">⬇ Reporte de guías</button></div>';
   h+='<div class="grid3"><div class="card"><div class="disp" style="font-size:34px;color:var(--navy)">'+total+'</div><div class="muted">Tickets totales</div></div><div class="card"><div class="disp" style="font-size:34px;color:#8A6400">'+(pe("MERCADERIA")+pe("DEVOLUCION")+pe("GARANTIA")+pe("MIXTO"))+'</div><div class="muted">En proceso</div></div><div class="card"><div class="disp" style="font-size:34px;color:var(--ok)">'+pe("NC")+'</div><div class="muted">En notas de crédito</div></div></div>';
