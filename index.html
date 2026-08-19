@@ -176,6 +176,7 @@ var me=null, base=[], RAZONES=[];
 var ncAplicados=0, ncSinMatch=0, ncFilasNegativas=0, ncFilasCrudas=0;
 var ncSinMatchList=[], ncNegativasList=[];   /* para exportar a Excel desde Admin */
 var state={seq3200:0,seq5200:0,seq2200:0,seq8800:0,tickets:[],guias:[],avisos:[],sobres:[]};
+      estadoServidor={tickets:{},guias:{},avisos:{},sobres:{},seq:{}};
 var baseLoaded=false, baseLineas=0, baseFechaStr="";
 var vistaActiva=null;
 var nuevo=null, filtroItems="", filtroMisTickets="", filtroBandeja="", filtroAdmin="", guiaFiltroTexto="", ncTab="pend", ncVista="tickets", guiaFiltroAsesor="", ncPdfData=null, logoDataUrl=null, pdfUrl=null;
@@ -244,8 +245,10 @@ function suscribirEstado(onPrimera){
     var val=snap.val();
     if(val){
       state={seq3200:val.seq3200||0,seq5200:val.seq5200||0,seq2200:val.seq2200||0,seq8800:val.seq8800||0,tickets:arr(val.tickets),guias:arr(val.guias),avisos:arr(val.avisos),sobres:arr(val.sobres)};
+      estadoServidor={tickets:mapaServidor(val.tickets,"T"),guias:mapaServidor(val.guias,"G"),avisos:mapaServidor(val.avisos,"AV"),sobres:mapaServidor(val.sobres,"S"),seq:{seq3200:val.seq3200||0,seq5200:val.seq5200||0,seq2200:val.seq2200||0,seq8800:val.seq8800||0}};
     }else{
       state={seq3200:0,seq5200:0,seq2200:0,seq8800:0,tickets:[],guias:[],avisos:[],sobres:[]};
+      estadoServidor={tickets:{},guias:{},avisos:{},sobres:{},seq:{}};
     }
     if(primera){ primera=false; if(onPrimera) onPrimera(); }
     else if(me){ render(); }
@@ -260,17 +263,90 @@ function limpiarUndefined(obj){
   /* Quita recursivamente cualquier valor "undefined" para que Firebase nunca rechace el guardado completo */
   try{ return JSON.parse(JSON.stringify(obj)); }catch(e){ return obj; }
 }
+/* ===== GUARDADO POR REGISTRO =====
+   Antes se reescribia el estado entero (todos los tickets, guias y avisos) en cada
+   cambio: dos personas guardando a la vez se pisaban por completo, y las reglas no
+   podian distinguir quien tocaba que. Ahora se escribe solo lo que cambio, en su
+   propia ruta (estado/tickets/<id>), lo que permite ademas exigir el rol por campo.
+   La funcion conserva su nombre y su comportamiento, asi que los 31 puntos que la
+   llaman siguen igual. */
+var estadoServidor={tickets:{},guias:{},avisos:{},sobres:{},seq:{}};
+
+/* Indexa una coleccion por su id. Todos los registros del sistema ya lo traen;
+   si alguno faltara, recibe uno estable para no perderlo. */
+function porId(lista,pref){
+  var m={};
+  (lista||[]).forEach(function(x,i){
+    if(!x) return;
+    if(!x.id) x.id=pref+Date.now()+"_"+i;
+    m[x.id]=x;
+  });
+  return m;
+}
+function mapaServidor(v,pref){ return porId(arr(v),pref); }
+
 async function saveState(){
   if(!fbReady){ toast("⚠ Sin conexión. No se guardó. Si recargas la página, perderás este cambio."); throw new Error("Sin conexión a Firebase"); }
-  var payload=limpiarUndefined({seq3200:state.seq3200||0,seq5200:state.seq5200||0,seq2200:state.seq2200||0,seq8800:state.seq8800||0,tickets:state.tickets||[],guias:state.guias||[],avisos:state.avisos||[],sobres:state.sobres||[]});
-  payload._updated=firebase.database.ServerValue.TIMESTAMP;
+  var ahora=limpiarUndefined({
+    tickets:porId(state.tickets,"T"), guias:porId(state.guias,"G"),
+    avisos:porId(state.avisos,"AV"), sobres:porId(state.sobres,"S")
+  });
+  var upd={};
+  ["tickets","guias","avisos","sobres"].forEach(function(col){
+    var nuevo=ahora[col]||{}, viejo=estadoServidor[col]||{};
+    Object.keys(nuevo).forEach(function(k){
+      var a=viejo[k], b=nuevo[k];
+      if(JSON.stringify(a)===JSON.stringify(b)) return;
+      if(!a){ upd[col+"/"+k]=b; return; }          /* registro nuevo: entero */
+      /* Registro existente: se escriben solo los campos que cambiaron, cada uno en su
+         ruta. Asi las reglas pueden exigir el rol campo por campo — un asesor no puede
+         tocar la nota de credito ni el informe de garantia aunque guarde el ticket. */
+      var campos={};
+      Object.keys(b).forEach(function(c){ campos[c]=1; });
+      Object.keys(a).forEach(function(c){ campos[c]=1; });
+      Object.keys(campos).forEach(function(c){
+        if(JSON.stringify(a[c])===JSON.stringify(b[c])) return;
+        upd[col+"/"+k+"/"+c]=(b[c]===undefined?null:b[c]);
+      });
+    });
+    Object.keys(viejo).forEach(function(k){
+      if(!Object.prototype.hasOwnProperty.call(nuevo,k)) upd[col+"/"+k]=null;   /* borrado */
+    });
+  });
+  ["seq3200","seq5200","seq2200","seq8800"].forEach(function(k){
+    if((state[k]||0)!==(estadoServidor.seq[k]||0)) upd[k]=state[k]||0;
+  });
+  if(!Object.keys(upd).length) return;     /* nada cambio: no se escribe */
+  upd._updated=firebase.database.ServerValue.TIMESTAMP;
   try{
-    await fbDB.ref("estado").set(payload);
+    await fbDB.ref("estado").update(upd);
   }catch(e){
     console.error("Error al guardar en Firebase:",e);
-    toast("⚠ NO se guardó: "+(e&&e.message||e)+". Vuelve a intentar; no cierres ni recargues la página todavía.",8000);
+    var msg=(e&&e.code==="PERMISSION_DENIED")
+      ? "No tienes permiso para este cambio. Esa parte del ticket la modifica otro rol."
+      : ("⚠ NO se guardó: "+(e&&e.message||e)+". Vuelve a intentar; no cierres ni recargues la página todavía.");
+    toast(msg,8000);
     throw e;
   }
+}
+
+/* Convierte las colecciones de lista a mapa por id. Se ejecuta UNA vez, desde una
+   cuenta ADMIN, antes de publicar el codigo nuevo. Sin esto quedarian mezcladas las
+   claves numericas viejas con las nuevas. */
+async function migrarAEstructuraPorId(){
+  if(!fbReady) throw new Error("Sin Firebase");
+  var snap=await fbDB.ref("estado").get(), v=snap.val()||{};
+  var res={};
+  for(var col of ["tickets","guias","avisos","sobres"]){
+    var lista=arr(v[col]);
+    var pref={tickets:"T",guias:"G",avisos:"AV",sobres:"S"}[col];
+    var mapa=porId(lista,pref);
+    var claves=Object.keys(mapa);
+    if(lista.length!==claves.length) throw new Error("La colección "+col+" perdería registros ("+lista.length+" → "+claves.length+"): hay ids repetidos. No se migró nada.");
+    await fbDB.ref("estado/"+col).set(mapa);
+    res[col]={antes:lista.length,despues:claves.length};
+  }
+  return res;
 }
 /* ===== NUMERACIÓN DE TICKETS A PRUEBA DE CHOQUES =====
    Antes: dos personas que guardaban a la vez podían tomar el mismo número o pisarse.
