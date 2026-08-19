@@ -123,10 +123,12 @@ var LOGOS_MARCA={"PERMATEX":{"d":"data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQA
 
 function logoMarca(nombre){ try{ var k=normNombre(nombre); var o=LOGOS_MARCA[k]; return o?{data:o.d,w:o.w,h:o.h}:null; }catch(e){ return null; } }
 /* ===== CONFIG ===== */
-var CSV_URLS=[
-  "https://docs.google.com/spreadsheets/d/e/2PACX-1vTpOv2PFreipcoBc7ry-bD3QSRbqD49nQicajrI86pDAuUuQkbPoiszwxmt2HQbodo4zAlHI2rvknPk/pub?gid=1814361639&single=true&output=csv",
-  "https://docs.google.com/spreadsheets/d/19WwKz-OjCCylK-crbwRu61d3A2q4ophHbRNAguyUtl8/gviz/tq?tqx=out:csv&gid=1814361639"
-];
+/* La base de facturas YA NO se descarga de un Google Sheet publicado en la web.
+   Ese enlace dejaba las facturas (identificación y razón social de los clientes)
+   al alcance de cualquiera que leyera este archivo, y además, cuando la descarga
+   directa fallaba, los datos pasaban por servidores de terceros. Ahora la base la
+   carga Administrativo desde un archivo y se guarda en Firebase, que sí exige
+   sesión y reglas. */
 var firebaseConfig={apiKey:"AIzaSyDI_Xszfjw9f_O1CsL0VC8F_dNtWGEvmo8",authDomain:"devoluciones-y-garantias.firebaseapp.com",databaseURL:"https://devoluciones-y-garantias-default-rtdb.firebaseio.com",projectId:"devoluciones-y-garantias",storageBucket:"devoluciones-y-garantias.firebasestorage.app",messagingSenderId:"1009454788938",appId:"1:1009454788938:web:aa7dc86d838f0c6d2051b3"};
 
 /* ===== USUARIOS ===== */
@@ -301,13 +303,17 @@ async function leerPdfNCfb(id){ if(!fbReady) throw new Error("Sin Firebase"); va
 function comprimirBase(rows){
   var pool=[], map={};
   function idx(s){ s=String(s==null?"":s); if(map[s]!==undefined) return map[s]; var i=pool.length; pool.push(s); map[s]=i; return i; }
-  var r=rows.map(function(x){ return [idx(x.emision),idx(x.factura),idx(x.ruc),idx(x.razon),idx(x.codigo),idx(x.desc),idx(x.sub),idx(x.facturador),x.cant,x.neto,x.iva,x.total,x.creditoAplicado||0]; });
-  return {v:2,p:pool,r:r};
+  /* v3 agrega totalDoc y mes al final: los usa el dashboard, que antes los sacaba del
+     Sheet publicado. Se añaden al final para que una base v2 vieja se siga leyendo. */
+  var r=rows.map(function(x){ return [idx(x.emision),idx(x.factura),idx(x.ruc),idx(x.razon),idx(x.codigo),idx(x.desc),idx(x.sub),idx(x.facturador),x.cant,x.neto,x.iva,x.total,x.creditoAplicado||0,x.totalDoc||0,idx(x.mes)]; });
+  return {v:3,p:pool,r:r};
 }
 function descomprimirBase(o){
   if(!o||!o.r) return [];
   var p=o.p;
-  return o.r.map(function(a){ return {emision:p[a[0]],factura:p[a[1]],ruc:p[a[2]],razon:p[a[3]],codigo:p[a[4]],desc:p[a[5]],sub:p[a[6]],facturador:p[a[7]],cant:a[8],neto:a[9],iva:a[10],total:a[11],creditoAplicado:a[12]||0}; });
+  /* Una base v2 (subida antes de este cambio) no trae totalDoc ni mes: quedan vacíos
+     y el dashboard avisa en vez de mostrar totales equivocados. */
+  return o.r.map(function(a){ return {emision:p[a[0]],factura:p[a[1]],ruc:p[a[2]],razon:p[a[3]],codigo:p[a[4]],desc:p[a[5]],sub:p[a[6]],facturador:p[a[7]],cant:a[8],neto:a[9],iva:a[10],total:a[11],creditoAplicado:a[12]||0,totalDoc:a.length>13?(a[13]||0):0,mes:a.length>14?(p[a[14]]||""):""}; });
 }
 var FB_CHUNK=200000;
 async function subirBaseAFirebase(rows,onProg){
@@ -355,38 +361,35 @@ async function cargarBase(forzar,onProg){
       return;
     }
   }catch(e){ console.warn("Firebase base:",e&&e.message); }
-  if(onProg) onProg("Cargando desde Google Sheets…",15);
-  await cargarBaseDesdeSheets(true,onProg);
+  /* Sin base en Firebase no hay de dónde sacarla: la sube Administrativo desde el archivo. */
+  throw new Error("La base de facturas no está cargada. Pídele a Administrativo que la suba desde el panel Administrativo.");
 }
-async function cargarBaseDesdeSheets(forzar,onProg){
-  var csvText=null, ultimoError="";
-  var cb="&_="+Date.now();
-  function conBuster(u){ return u+(u.indexOf("?")>=0?cb:"?"+cb.slice(1)); }
-  async function fetchTexto(m,url){
-    var u=conBuster(url), opts={cache:"no-store"};
-    if(m==="d"){ var r=await fetch(u,opts); if(!r.ok) throw new Error("HTTP "+r.status); return await r.text(); }
-    if(m==="a"){ var r2=await fetch("https://api.allorigins.win/raw?url="+encodeURIComponent(u),opts); if(!r2.ok) throw new Error("HTTP "+r2.status); return await r2.text(); }
-    if(m==="c"){ var r3=await fetch("https://corsproxy.io/?url="+encodeURIComponent(u),opts); if(!r3.ok) throw new Error("HTTP "+r3.status); return await r3.text(); }
-    if(m==="g"){ var r4=await fetch("https://api.allorigins.win/get?url="+encodeURIComponent(u)+"&_="+Date.now(),opts); if(!r4.ok) throw new Error("HTTP "+r4.status); var j=await r4.json(); return j.contents; }
-    if(m==="t"){ var r5=await fetch("https://api.codetabs.com/v1/proxy/?quest="+encodeURIComponent(u),opts); if(!r5.ok) throw new Error("HTTP "+r5.status); return await r5.text(); }
-    return null;
+/* Lee la base desde un archivo que elige Administrativo (CSV o Excel exportado de Perseo).
+   Sustituye a la descarga del Google Sheet publicado: los datos van del computador de
+   quien la sube directo a Firebase, sin pasar por ningún servidor ajeno. */
+async function cargarBaseDesdeArchivo(file,onProg){
+  if(!file) throw new Error("No se eligió ningún archivo.");
+  if(onProg) onProg("Leyendo "+file.name+"…",15);
+  var nom=(file.name||"").toLowerCase(), csvText="";
+  if(/\.(xlsx|xlsm|xls)$/.test(nom)){
+    if(typeof XLSX==="undefined") throw new Error("No se pudo cargar el lector de Excel. Revisa tu conexión.");
+    var buf=await file.arrayBuffer();
+    var wb=XLSX.read(new Uint8Array(buf),{type:"array"});
+    var hoja=wb.Sheets[wb.SheetNames[0]];
+    if(!hoja) throw new Error("El archivo de Excel no tiene hojas.");
+    /* rawNumbers:true lee el VALOR de la celda, no el texto que Excel muestra. El texto
+       mostrado puede venir redondeado (101,8 en vez de 101,83) y estos son montos. */
+    csvText=XLSX.utils.sheet_to_csv(hoja,{rawNumbers:true});
+  }else{
+    csvText=await file.text();
   }
-  var metodos=["d","a","c","g","t"], intento=0, total=CSV_URLS.length*5;
-  for(var ui=0;ui<CSV_URLS.length;ui++){
-    for(var mi=0;mi<metodos.length;mi++){
-      intento++;
-      try{
-        if(onProg) onProg("Conectando ("+intento+"/"+total+")…",10+Math.round(intento/total*40));
-        var txt=await fetchTexto(metodos[mi],CSV_URLS[ui]);
-        if(txt&&txt.length>50&&txt.trim().toLowerCase().indexOf("<!doctype")!==0&&txt.trim().toLowerCase().indexOf("<html")!==0&&txt.indexOf(",")>=0){ csvText=txt; break; }
-        ultimoError="Respuesta no válida";
-      }catch(e){ ultimoError=(e&&e.message)||String(e); }
-    }
-    if(csvText) break;
-  }
-  if(!csvText) throw new Error("No se pudo descargar la base. "+ultimoError+".");
-  if(onProg) onProg("Procesando filas…",60);
-  base=parsearCSV(csvText); indexarBase(); baseLoaded=true; baseLineas=base.length+(ncFilasCrudas||0); baseFechaStr="Google Sheets"; actualizarChipBase();
+  if(!csvText||csvText.length<50) throw new Error("El archivo está vacío o no se pudo leer.");
+  if(csvText.indexOf(",")<0&&csvText.indexOf(";")<0) throw new Error("El archivo no parece una base de facturas.");
+  if(onProg) onProg("Procesando filas…",50);
+  var filas=parsearCSV(csvText);
+  if(!filas.length) throw new Error("No se reconoció ninguna factura. Revisa que el archivo tenga las columnas de siempre (FACTURA, RAZON SOCIAL, …).");
+  base=filas; indexarBase(); baseLoaded=true;
+  baseLineas=base.length+(ncFilasCrudas||0); baseFechaStr="Archivo"; actualizarChipBase();
   if(onProg) onProg("Base lista: "+baseLineas.toLocaleString("es-EC")+" líneas",100);
 }
 /* Conversor numérico robusto: entiende "1,0000" (coma decimal, formato latino) y también "1.0000" */
@@ -414,6 +417,9 @@ function parsearCSV(text){
   var headers=splitCSVLine(lines[0],sep).map(norm);
   function idx(h){ return headers.indexOf(h); }
   var iEmi=idx("EMISION"),iFact=idx("FACTURA"),iRuc=idx("IDENTIFICACION"),iRazon=idx("RAZON SOCIAL"),iCod=idx("CODIGO PRODUCTO"),iDesc=idx("DESCRIPCION PRODUCTO"),iSub=idx("SUBGRUPO"),iCant=idx("CANTIDAD"),iNeto=idx("PRECIO TOTAL NETO"),iIva=idx("IVA TOTAL"),iTot=idx("TOTAL PRODUCTO"),iF2=idx("FACTURADOR"),iFacNC=idx("FAC DE LA NC"),iValorNC=idx("VALOR NC");
+  /* TOTAL DOCUMENTO y MES no los usa esta pantalla, pero sí el dashboard. Se guardan aquí
+     para que el dashboard pueda leer de Firebase y no del Sheet publicado. */
+  var iTotDoc=idx("TOTAL DOCUMENTO"),iMes=idx("MES");
   for(var i=1;i<lines.length;i++){
     if(!lines[i].trim()) continue;
     var c=splitCSVLine(lines[i],sep);
@@ -434,7 +440,8 @@ function parsearCSV(text){
       ncList.push({facOrigen:facOrigen,codigo:codigo,cant:cant,neto:neto,iva:iva,total:tot});
       continue;
     }
-    rows.push({emision:String(c[iEmi]||"").trim(),factura:fact,ruc:String(c[iRuc]||"").trim(),razon:razon,codigo:codigo,desc:String(c[iDesc]||"").trim(),sub:String(c[iSub]||"").trim(),facturador:String(c[iF2]||"").trim(),cant:cant,neto:neto,iva:iva,total:tot,creditoAplicado:0});
+    rows.push({emision:String(c[iEmi]||"").trim(),factura:fact,ruc:String(c[iRuc]||"").trim(),razon:razon,codigo:codigo,desc:String(c[iDesc]||"").trim(),sub:String(c[iSub]||"").trim(),facturador:String(c[iF2]||"").trim(),cant:cant,neto:neto,iva:iva,total:tot,creditoAplicado:0,
+               totalDoc:iTotDoc>=0?numEC(c[iTotDoc]):0, mes:iMes>=0?String(c[iMes]||"").trim():""});
   }
   conciliarCreditosNC(rows,ncList);
   ncFilasCrudas=ncList.length;   /* NC crudas: se restan de sus facturas pero SÍ cuentan como líneas de la base */
@@ -2953,7 +2960,7 @@ function renderAdmin(){
   h+='<div class="card" style="border-left:5px solid var(--navy)"><h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">⏱ Reporte de control de respuesta (asesores)</h3>';
   h+='<div class="muted" style="margin-bottom:10px">Excel con TODOS los avisos de ítems extra y todas las incidencias de guía incorrecta (resueltas y pendientes), con la fecha en que se originaron y cuánto tardó (o lleva) el asesor en responder. Filtra por la fecha en que se originó cada caso.</div>';
   h+='<div class="grid3"><div class="field" style="margin-bottom:0"><label>Desde</label><input type="date" id="ctrl-desde" value="'+ctrlDesde+'" onchange="ctrlDesde=this.value"></div><div class="field" style="margin-bottom:0"><label>Hasta</label><input type="date" id="ctrl-hasta" value="'+ctrlHasta+'" onchange="ctrlHasta=this.value"></div><div style="display:flex;align-items:end"><button class="btn btn-ok" style="width:100%;justify-content:center" onclick="exportarControlVendedores()">⬇ Reporte de control</button></div></div></div>';
-  h+='<div class="card" style="border-left:5px solid var(--amber)"><h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">Base de facturas</h3><div class="muted" style="margin-bottom:10px">'+(baseLoaded?'✓ Base: <b>'+baseLineas.toLocaleString("es-EC")+'</b> líneas ('+esc(baseFechaStr)+')'+(ncFilasCrudas?' · '+base.length.toLocaleString("es-EC")+' ventas + '+ncFilasCrudas.toLocaleString("es-EC")+' NC conciliadas':''):"Base no cargada")+'</div><div class="muted" style="margin-bottom:12px;background:#E2F3EA;padding:10px 12px;border-radius:6px"><b>💡</b> Cuando actualices el Excel, presiona "Actualizar base a Firebase" para que todos entren rápido.</div><button class="btn btn-a" onclick="actualizarBaseFirebase()">📤 Actualizar base a Firebase</button> <button class="btn btn-g" onclick="recargarBase()">🔄 Recargar</button><div id="adm-prog" style="margin-top:10px"></div></div>';
+  h+='<div class="card" style="border-left:5px solid var(--amber)"><h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">Base de facturas</h3><div class="muted" style="margin-bottom:10px">'+(baseLoaded?'✓ Base: <b>'+baseLineas.toLocaleString("es-EC")+'</b> líneas ('+esc(baseFechaStr)+')'+(ncFilasCrudas?' · '+base.length.toLocaleString("es-EC")+' ventas + '+ncFilasCrudas.toLocaleString("es-EC")+' NC conciliadas':''):"Base no cargada")+'</div><div class="muted" style="margin-bottom:12px;background:#E2F3EA;padding:10px 12px;border-radius:6px"><b>💡</b> Exporta la base de Perseo (CSV o Excel), elígela aquí abajo y presiona "Subir base a Firebase". Desde ahí la leen todos.</div><div class="field" style="margin-bottom:10px"><label>Archivo de la base (CSV o Excel)</label><input type="file" id="adm-archivo-base" accept=".csv,.xlsx,.xlsm,.xls"></div><button class="btn btn-a" onclick="actualizarBaseFirebase()">📤 Subir base a Firebase</button> <button class="btn btn-g" onclick="recargarBase()">🔄 Recargar</button><div id="adm-prog" style="margin-top:10px"></div></div>';
 
   if(baseLoaded){
     h+='<div class="card" style="border-left:5px solid #6A2E91"><h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">🧾 Conciliación de Notas de Crédito (desde el Sheet)</h3>';
@@ -3067,10 +3074,13 @@ async function actualizarBaseFirebase(){
   if(!puedeActuar()){ toast("👁 Modo solo lectura: no puedes actualizar la base fuera de tu propia pestaña.",4000); return; }
   if(!fbReady){ toast("Sin Firebase."); return; }
   function setP(msg,pct){ var el=$("adm-prog"); if(el) el.innerHTML='<div class="muted">'+esc(msg)+'</div><div class="prog-bar"><div class="prog-fill" style="width:'+pct+'%"></div></div>'; }
-  setP("Descargando de Google Sheets…",5);
+  var inp=$("adm-archivo-base");
+  var file=inp&&inp.files&&inp.files[0];
+  if(!file){ toast("Primero elige el archivo de la base (CSV o Excel).",5000); if(inp) inp.click(); return; }
+  setP("Leyendo el archivo…",5);
   try{
-    await cargarBaseDesdeSheets(true,function(m,p){ setP(m,Math.min(60,p)); });
-    if(!base.length) throw new Error("No se descargaron facturas.");
+    await cargarBaseDesdeArchivo(file,function(m,p){ setP(m,Math.min(60,p)); });
+    if(!base.length) throw new Error("El archivo no traía facturas.");
     var meta=await subirBaseAFirebase(base,function(m,p){ setP(m,p); });
     baseFechaStr="Firebase";
     setP("✓ Base actualizada en Firebase: "+baseLineas.toLocaleString("es-EC")+" líneas ("+meta.rows.toLocaleString("es-EC")+" ventas + "+(ncFilasCrudas||0).toLocaleString("es-EC")+" NC)",100);
