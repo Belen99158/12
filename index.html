@@ -237,6 +237,33 @@ async function iniciarSesionFirebase(nombre,pin){
     return true;
   }catch(e){ console.error(e); fbReady=false; return mensajeErrorLogin(e); }
 }
+/* Al entrar, si quedo un guardado sin completar de una sesion anterior, se avisa y se
+   ofrece reintentarlo en vez de dejarlo perdido en silencio. */
+function revisarPendienteLocal(){
+  var p=leerPendienteLocal();
+  if(!p||!p.state) return;
+  var mios=(p.state.tickets||[]), enServidor={};
+  (state.tickets||[]).forEach(function(t){ if(t&&t.id) enServidor[t.id]=1; });
+  var faltan=mios.filter(function(t){ return t&&t.id&&!enServidor[t.id]; });
+  if(!faltan.length){ limpiarPendienteLocal(); return; }
+  var cuando=new Date(p.f||Date.now()).toLocaleString("es-EC");
+  $("modal-root").innerHTML='<div class="modal-bg"><div class="modal" style="max-width:620px">'+
+    '<h2 style="font-size:20px;color:var(--bad);margin-bottom:6px">⚠ Quedó trabajo sin guardar</h2>'+
+    '<div class="muted" style="margin-bottom:10px">El '+esc(cuando)+' no se pudo guardar en el sistema y quedó respaldado en este navegador. '+
+    'Estos registros <b>no están</b> en el sistema:</div>'+
+    '<ul style="margin:0 0 14px 18px">'+faltan.map(function(t){ return '<li>'+esc(t.numero||t.id)+' — '+esc(t.razonSocial||"")+'</li>'; }).join("")+'</ul>'+
+    '<div style="display:flex;gap:10px;justify-content:flex-end">'+
+      '<button class="btn btn-g" onclick="limpiarPendienteLocal();cerrarModal()">Descartar</button>'+
+      '<button class="btn btn-p" onclick="recuperarPendienteLocal()">Recuperarlos ahora</button></div>'+
+    '</div></div>';
+}
+async function recuperarPendienteLocal(){
+  var p=leerPendienteLocal(); if(!p||!p.state){ cerrarModal(); return; }
+  var enServidor={}; (state.tickets||[]).forEach(function(t){ if(t&&t.id) enServidor[t.id]=1; });
+  (p.state.tickets||[]).forEach(function(t){ if(t&&t.id&&!enServidor[t.id]) state.tickets.push(t); });
+  try{ await saveState(); toast("✓ Trabajo recuperado."); cerrarModal(); render(); }
+  catch(e){ toast("No se pudo recuperar todavía: "+(e&&e.message||e),8000); }
+}
 function suscribirEstado(onPrimera){
   if(!fbReady){ if(onPrimera) onPrimera(); return; }
   var primera=true;
@@ -247,7 +274,7 @@ function suscribirEstado(onPrimera){
     }else{
       state={seq3200:0,seq5200:0,seq2200:0,seq8800:0,tickets:[],guias:[],avisos:[],sobres:[]};
     }
-    if(primera){ primera=false; if(onPrimera) onPrimera(); }
+    if(primera){ primera=false; if(onPrimera) onPrimera(); setTimeout(function(){ try{ revisarPendienteLocal(); }catch(e){} },1200); }
     else if(me){ render(); }
   },function(err){
     console.error(err); toast("⚠ Error Firebase: "+(err&&err.message||err),5000);
@@ -260,17 +287,39 @@ function limpiarUndefined(obj){
   /* Quita recursivamente cualquier valor "undefined" para que Firebase nunca rechace el guardado completo */
   try{ return JSON.parse(JSON.stringify(obj)); }catch(e){ return obj; }
 }
+/* Copia de emergencia en el propio navegador. Si el guardado falla —se corta la red a
+   media escritura, por ejemplo— el ticket recien creado ya consumio su numero y se
+   perderia al recargar. Con esto queda recuperable. */
+var RESPALDO_LOCAL="lbq_pendiente";
+function guardarPendienteLocal(){
+  try{ localStorage.setItem(RESPALDO_LOCAL,JSON.stringify({f:Date.now(),por:(me&&me.name)||"",state:state})); }catch(e){}
+}
+function limpiarPendienteLocal(){ try{ localStorage.removeItem(RESPALDO_LOCAL); }catch(e){} }
+function leerPendienteLocal(){ try{ return JSON.parse(localStorage.getItem(RESPALDO_LOCAL)||"null"); }catch(e){ return null; } }
+
 async function saveState(){
-  if(!fbReady){ toast("⚠ Sin conexión. No se guardó. Si recargas la página, perderás este cambio."); throw new Error("Sin conexión a Firebase"); }
+  if(!fbReady){ guardarPendienteLocal(); toast("⚠ Sin conexión. No se guardó, pero tu trabajo quedó respaldado en este navegador. No cierres la página.",9000); throw new Error("Sin conexión a Firebase"); }
   var payload=limpiarUndefined({seq3200:state.seq3200||0,seq5200:state.seq5200||0,seq2200:state.seq2200||0,seq8800:state.seq8800||0,tickets:state.tickets||[],guias:state.guias||[],avisos:state.avisos||[],sobres:state.sobres||[]});
   payload._updated=firebase.database.ServerValue.TIMESTAMP;
-  try{
-    await fbDB.ref("estado").set(payload);
-  }catch(e){
-    console.error("Error al guardar en Firebase:",e);
-    toast("⚠ NO se guardó: "+(e&&e.message||e)+". Vuelve a intentar; no cierres ni recargues la página todavía.",8000);
-    throw e;
+  /* Se reintenta: la mayoria de los fallos son cortes momentaneos de red, y perder un
+     ticket por eso es inaceptable. */
+  var ultimo=null;
+  for(var intento=1;intento<=3;intento++){
+    try{
+      await fbDB.ref("estado").set(payload);
+      limpiarPendienteLocal();
+      return;
+    }catch(e){
+      ultimo=e; console.error("Guardado, intento "+intento+":",e);
+      if(intento<3){
+        toast("Reintentando guardar ("+intento+" de 3)…",2500);
+        await new Promise(function(r){ setTimeout(r,intento*1500); });
+      }
+    }
   }
+  guardarPendienteLocal();
+  toast("⚠ NO se pudo guardar: "+((ultimo&&ultimo.message)||ultimo)+". Tu trabajo quedó respaldado en este navegador: NO cierres la página, revisa tu conexión y vuelve a intentar.",12000);
+  throw ultimo;
 }
 /* ===== NUMERACIÓN DE TICKETS A PRUEBA DE CHOQUES =====
    Antes: dos personas que guardaban a la vez podían tomar el mismo número o pisarse.
@@ -351,20 +400,33 @@ async function leerBaseDeFirebase(onProg){
 }
 
 /* ===== CARGA DE BASE ===== */
+/* La base son ~38 bloques y 86.000 filas: en una conexión lenta tarda. Antes se
+   abandonaba a los 20 s y, como ya no existe el respaldo del Sheet, el usuario se
+   quedaba sin poder crear tickets con un mensaje que además culpaba a Administrativo.
+   Ahora espera más y reintenta antes de rendirse, y distingue "va lento" de "no está". */
 async function cargarBase(forzar,onProg){
   if(baseLoaded&&!forzar) return;
-  try{
-    if(onProg) onProg("Buscando base en Firebase…",10);
-    var to=new Promise(function(res,rej){ setTimeout(function(){ rej(new Error("timeout")); },20000); });
-    var r=await Promise.race([leerBaseDeFirebase(onProg),to]);
-    if(r&&r.rows&&r.rows.length){
-      base=r.rows; indexarBase(); baseLoaded=true; baseLineas=base.length+(ncFilasCrudas||0); baseFechaStr="Firebase"; actualizarChipBase();
-      if(onProg) onProg("Base lista: "+baseLineas.toLocaleString("es-EC")+" líneas (Firebase)",100);
-      return;
+  var ultimoError=null, hayBase=null;
+  for(var intento=1; intento<=3; intento++){
+    try{
+      if(onProg) onProg(intento===1?"Buscando base…":("Reintentando ("+intento+" de 3)…"),10);
+      var espera=intento*45000;   /* 45 s, 90 s, 135 s */
+      var to=new Promise(function(res,rej){ setTimeout(function(){ rej(new Error("La base está tardando demasiado en descargar.")); },espera); });
+      var r=await Promise.race([leerBaseDeFirebase(onProg),to]);
+      if(r&&r.rows&&r.rows.length){
+        base=r.rows; indexarBase(); baseLoaded=true; baseLineas=base.length+(ncFilasCrudas||0); baseFechaStr="Firebase"; actualizarChipBase();
+        if(onProg) onProg("Base lista: "+baseLineas.toLocaleString("es-EC")+" líneas",100);
+        return;
+      }
+      hayBase=false;              /* respondió, pero no hay base cargada */
+      break;
+    }catch(e){
+      ultimoError=e; hayBase=true;   /* falló la descarga, no que falte la base */
+      console.warn("Base, intento "+intento+":",e&&e.message);
     }
-  }catch(e){ console.warn("Firebase base:",e&&e.message); }
-  /* Sin base en Firebase no hay de dónde sacarla: la sube Administrativo desde el archivo. */
-  throw new Error("La base de facturas no está cargada. Pídele a Administrativo que la suba desde el panel Administrativo.");
+  }
+  if(hayBase===false) throw new Error("La base de facturas no está cargada en el sistema. Pídele a Administrativo que la suba desde el panel Administrativo.");
+  throw new Error("No se pudo descargar la base de facturas: "+((ultimoError&&ultimoError.message)||"error de red")+" Revisa tu conexión y vuelve a intentar; los datos están a salvo.");
 }
 /* Lee la base desde un archivo que elige Administrativo (CSV o Excel exportado de Perseo).
    Sustituye a la descarga del Google Sheet publicado: los datos van del computador de
