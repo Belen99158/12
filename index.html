@@ -267,6 +267,7 @@ function suscribirEstado(onPrimera){
   var primera=true;
   fbDB.ref("estado").on("value",function(snap){
     var val=snap.val();
+    estadoCargado=true;          /* llegó del servidor: a partir de aquí sí se puede guardar */
     if(val){
       state={seq3200:val.seq3200||0,seq5200:val.seq5200||0,seq2200:val.seq2200||0,seq8800:val.seq8800||0,tickets:arr(val.tickets),guias:arr(val.guias),avisos:arr(val.avisos),sobres:arr(val.sobres)};
     }else{
@@ -295,7 +296,18 @@ function guardarPendienteLocal(){
 function limpiarPendienteLocal(){ try{ localStorage.removeItem(RESPALDO_LOCAL); }catch(e){} }
 function leerPendienteLocal(){ try{ return JSON.parse(localStorage.getItem(RESPALDO_LOCAL)||"null"); }catch(e){ return null; } }
 
+/* Si el estado nunca llegó del servidor, state está vacío. Guardar en esa situación
+   escribiria un estado vacio y borraria TODOS los tickets de todo el mundo. Con red
+   lenta el login continuaba a los 8 segundos aunque los datos no hubieran llegado:
+   el usuario veia la pantalla vacia y, al guardar cualquier cosa, arrasaba con todo.
+   Esta es la guarda que lo impide. */
+var estadoCargado=false;
+
 async function saveState(){
+  if(!estadoCargado){
+    toast("⚠ Todavía no se han cargado los datos del sistema. NO se guardó, para no borrar lo que ya existe. Espera unos segundos o recarga la página.",10000);
+    throw new Error("El estado aún no se ha cargado desde el servidor");
+  }
   if(!fbReady){ guardarPendienteLocal(); toast("⚠ Sin conexión. No se guardó, pero tu trabajo quedó respaldado en este navegador. No cierres la página.",9000); throw new Error("Sin conexión a Firebase"); }
   var payload=limpiarUndefined({seq3200:state.seq3200||0,seq5200:state.seq5200||0,seq2200:state.seq2200||0,seq8800:state.seq8800||0,tickets:state.tickets||[],guias:state.guias||[],avisos:state.avisos||[],sobres:state.sobres||[]});
   payload._updated=firebase.database.ServerValue.TIMESTAMP;
@@ -718,8 +730,20 @@ async function doLogin(){
     var done=false;
     function fin(){ if(!done){ done=true; resolve(); } }
     suscribirEstado(fin);
-    setTimeout(fin,8000);
+    setTimeout(fin,25000);   /* con long-polling la primera carga tarda mas */
   });
+  if(!estadoCargado){
+    /* No se recibieron los datos. Se avisa en pantalla en vez de dejar al usuario
+       viendo sus bandejas vacias y creyendo que se borro todo. */
+    $("main").innerHTML='<div class="empty" style="padding:50px 20px">'+
+      '<div class="big" style="color:var(--bad)">No se pudieron cargar los datos</div>'+
+      '<div class="muted" style="max-width:520px;margin:10px auto 0">Tus tickets <b>no se han borrado</b>: siguen en el sistema, '+
+      'pero esta pantalla no logró descargarlos. Suele ser la conexión.<br><br>'+
+      'Mientras tanto <b>no se puede guardar</b>, a propósito, para no dañar la información.</div>'+
+      '<button class="btn btn-p" style="margin-top:16px" onclick="location.reload()">🔄 Reintentar</button></div>';
+    toast("⚠ No se cargaron los datos. Tus tickets están a salvo; revisa tu conexión y reintenta.",12000);
+    return;
+  }
   try{
     await cargarBase(false,function(msg,pct){ var el=$("load-msg"); if(el) el.textContent=msg; var pp=$("load-prog"); if(pp) pp.style.width=Math.max(40,pct)+"%"; });
   }catch(e){ toast("⚠ "+e.message,6000); }
