@@ -748,6 +748,7 @@ async function doLogin(){
     await cargarBase(false,function(msg,pct){ var el=$("load-msg"); if(el) el.textContent=msg; var pp=$("load-prog"); if(pp) pp.style.width=Math.max(40,pct)+"%"; });
   }catch(e){ toast("⚠ "+e.message,6000); }
   try{ render(); }catch(e){ console.error(e); toast("Error al mostrar: "+(e&&e.message||e),6000); }
+  setTimeout(function(){ respaldoAutomaticoDiario(); },3000);   /* copia diaria automática */
 }
 function logout(){ try{ firebase.auth().signOut(); }catch(e){} fbReady=false; fbSuscrito=false; me=null; vistaActiva=null; var ps=$("panel-selector"); if(ps) ps.remove(); $("login-pass").value=""; $("app-view").style.display="none"; $("login-view").style.display="flex"; baseLoaded=false; }
 
@@ -3078,9 +3079,53 @@ function renderAdmin(){
   else h+='<div class="srch-bar"><span>🔍</span><input type="text" id="adm-srch" placeholder="Buscar por asesor, cliente, N° ticket, factura o guía…" value="'+esc(filtroAdmin)+'" oninput="filtroAdmin=this.value;renderAdminTabla()">'+(filtroAdmin?'<button class="btn btn-sm btn-g" onclick="filtroAdmin=\'\';render()">✕</button>':'')+'</div><div id="adm-tabla"></div>';
   h+='</div>';
   h+='<div class="card" style="border-left:5px solid var(--ok)"><h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">💾 Respaldo de seguridad</h3><div class="muted" style="margin-bottom:12px">Descarga TODO (tickets, guías, avisos y sobres) en un archivo. Guárdalo cada quince días, sin pasar de un mes; si algún día pasara algo, se restaura desde aquí.</div><button class="btn btn-ok" onclick="descargarRespaldo()">⬇ Descargar respaldo completo</button> <button class="btn btn-g" onclick="$(\'resp-file\').click()">⬆ Restaurar respaldo</button><input type="file" id="resp-file" accept="application/json" style="display:none" onchange="leerArchivoRespaldo(this)"></div>';
+  h+='<div class="card" style="border-left:5px solid var(--navy)"><h3 style="font-size:19px;color:var(--navy);margin-bottom:6px">☁ Copias automáticas en la nube</h3><div class="muted" style="margin-bottom:10px">El sistema guarda una copia cada día por su cuenta y conserva las últimas 2 semanas. Puedes descargar cualquiera o restaurarla si hiciera falta.</div><div id="adm-nube"><div class="muted">Cargando copias…</div></div></div>';
   h+='<div class="card" style="border-left:5px solid var(--bad)"><h3 style="font-size:19px;color:var(--bad);margin-bottom:6px">⚠ Limpiar datos de prueba</h3><div class="muted" style="margin-bottom:12px">Borra todos los tickets y guías. La base de facturas NO se toca.</div><button class="btn btn-bad" onclick="abrirLimpiarTodo()">🗑 Borrar tickets y guías</button></div>';
   $("main").innerHTML=h;
   renderAdminTabla();
+  renderCopiasNube();
+}
+/* Lista las copias automáticas guardadas en la nube, con opción de descargar o restaurar. */
+async function renderCopiasNube(){
+  var cont=$("adm-nube"); if(!cont) return;
+  try{
+    var v=(await fbDB.ref("respaldos").get()).val()||{};
+    var fechas=Object.keys(v).sort().reverse();
+    if(!fechas.length){ cont.innerHTML='<div class="muted">Aún no hay copias. Se generará una hoy automáticamente.</div>'; return; }
+    var h='<table style="width:100%;font-size:13px;border-collapse:collapse">';
+    h+='<tr style="text-align:left;color:#5B6877"><th style="padding:4px 6px">Fecha</th><th>Tickets</th><th>Guías</th><th></th></tr>';
+    fechas.forEach(function(f){
+      var c=v[f]||{}, nt=(c.tickets||[]).length, ng=(c.guias||[]).length;
+      h+='<tr style="border-top:1px solid #eee"><td style="padding:5px 6px"><b>'+esc(f)+'</b></td><td>'+nt+'</td><td>'+ng+'</td>'+
+         '<td style="text-align:right"><button class="btn btn-g btn-sm" onclick="descargarRespaldoDe(\''+f+'\')">⬇ Descargar</button> '+
+         '<button class="btn btn-a btn-sm" onclick="restaurarDeNube(\''+f+'\')">↩ Restaurar</button></td></tr>';
+    });
+    h+='</table>';
+    cont.innerHTML=h;
+  }catch(e){ cont.innerHTML='<div class="muted" style="color:var(--bad)">No se pudieron leer las copias: '+esc(e.message||"")+'</div>'; }
+}
+async function restaurarDeNube(fecha){
+  if(!puedeActuar()){ toast("👁 Solo Administrativo puede restaurar.",4000); return; }
+  var c=(await fbDB.ref("respaldos/"+fecha).get()).val();
+  if(!c){ toast("No se encontró esa copia."); return; }
+  $("modal-root").innerHTML='<div class="modal-bg"><div class="modal" style="max-width:560px">'+
+    '<h2 style="font-size:20px;color:var(--bad);margin-bottom:6px">↩ Restaurar copia del '+esc(fecha)+'</h2>'+
+    '<div class="muted" style="margin-bottom:12px">Esto reemplazará <b>todo</b> lo que hay ahora ('+(state.tickets||[]).length+' tickets) por la copia del '+esc(fecha)+' ('+(c.tickets||[]).length+' tickets). Antes de reemplazar se guarda una copia de lo actual, por si acaso.<br><br>Escribe <b>RESTAURAR</b> para confirmar:</div>'+
+    '<input id="conf-rest" placeholder="RESTAURAR" style="margin-bottom:12px">'+
+    '<div style="display:flex;gap:10px;justify-content:flex-end"><button class="btn btn-g" onclick="cerrarModal()">Cancelar</button>'+
+    '<button class="btn btn-p" onclick="ejecutarRestaurarNube(\''+fecha+'\')">Restaurar</button></div></div></div>';
+}
+async function ejecutarRestaurarNube(fecha){
+  if(($("conf-rest").value||"").trim().toUpperCase()!=="RESTAURAR"){ toast("Escribe RESTAURAR para confirmar."); return; }
+  try{
+    var c=(await fbDB.ref("respaldos/"+fecha).get()).val();
+    if(!c){ toast("No se encontró la copia."); return; }
+    /* guardar una copia de emergencia del estado actual antes de pisarlo */
+    await fbDB.ref("respaldos/_antes_de_restaurar_"+hoyStr()).set({_app:"devoluciones-lubamaqui",_fecha:new Date().toISOString(),tickets:state.tickets||[],guias:state.guias||[],avisos:state.avisos||[],sobres:state.sobres||[],seq3200:state.seq3200||0,seq5200:state.seq5200||0,seq2200:state.seq2200||0,seq8800:state.seq8800||0});
+    state={seq3200:c.seq3200||0,seq5200:c.seq5200||0,seq2200:c.seq2200||0,seq8800:c.seq8800||0,tickets:arr(c.tickets),guias:arr(c.guias),avisos:arr(c.avisos),sobres:arr(c.sobres)};
+    await saveState();
+    cerrarModal(); toast("✓ Restaurado desde la copia del "+fecha+" ("+state.tickets.length+" tickets).",6000); render();
+  }catch(e){ toast("Error al restaurar: "+(e&&e.message||e),8000); }
 }
 function renderAdminTabla(){
   var cont=$("adm-tabla"); if(!cont) return;
@@ -3175,6 +3220,46 @@ async function actualizarBaseFirebase(){
     setP("✓ Base actualizada en Firebase: "+baseLineas.toLocaleString("es-EC")+" líneas ("+meta.rows.toLocaleString("es-EC")+" ventas + "+(ncFilasCrudas||0).toLocaleString("es-EC")+" NC)",100);
     toast("✓ Base subida. Ahora todos cargan rápido."); render();
   }catch(e){ console.error(e); toast("Error: "+e.message,6000); var el=$("adm-prog"); if(el) el.innerHTML='<div class="muted" style="color:var(--bad)">'+esc(e.message)+'</div>'; }
+}
+/* ===== RESPALDO AUTOMÁTICO DIARIO =====
+   El 26/08/2026 se perdieron todos los tickets y el único respaldo era del 19,
+   descargado a mano. Esto guarda una copia CADA DÍA dentro de Firebase, sin que
+   nadie tenga que apretar un botón, y conserva los últimos 14 días. Si algo vuelve
+   a borrar el estado, la copia de ayer está en la nube, no en las Descargas de alguien.
+   La copia la dispara el primer ADMIN que entra cada día; para los demás no hace nada. */
+var RESPALDO_DIAS=14;
+async function respaldoAutomaticoDiario(){
+  try{
+    if(!fbReady||!estadoCargado||!me) return;
+    if(!(esSuperAdmin()||me.role==="ADMIN")) return;         /* solo lo hace un ADMIN */
+    if(!(state.tickets&&state.tickets.length)) return;        /* nunca respaldar vacío */
+    var hoy=hoyStr();
+    var ya=await fbDB.ref("respaldos/"+hoy+"/_fecha").get();
+    if(ya.exists()) return;                                    /* ya hay copia de hoy */
+    var copia={_app:"devoluciones-lubamaqui",_fecha:new Date().toISOString(),_por:me.name,
+      seq3200:state.seq3200||0,seq5200:state.seq5200||0,seq2200:state.seq2200||0,seq8800:state.seq8800||0,
+      tickets:state.tickets||[],guias:state.guias||[],avisos:state.avisos||[],sobres:state.sobres||[]};
+    await fbDB.ref("respaldos/"+hoy).set(copia);
+    console.log("Respaldo automático guardado:",hoy,copia.tickets.length,"tickets");
+    /* limpiar copias mas viejas que RESPALDO_DIAS */
+    var todos=await fbDB.ref("respaldos").get(); var v=todos.val()||{};
+    var fechas=Object.keys(v).sort();
+    while(fechas.length>RESPALDO_DIAS){ var vieja=fechas.shift(); try{ await fbDB.ref("respaldos/"+vieja).remove(); }catch(e){} }
+  }catch(e){ console.warn("Respaldo automático:",e&&e.message); }
+}
+/* Descarga a archivo la copia de una fecha (o la de hoy). Para tener también copia fuera de la nube. */
+async function descargarRespaldoDe(fecha){
+  try{
+    var ref=fecha?("respaldos/"+fecha):null;
+    var data;
+    if(ref){ data=(await fbDB.ref(ref).get()).val(); }
+    else { data={_app:"devoluciones-lubamaqui",_fecha:new Date().toISOString(),seq3200:state.seq3200||0,seq5200:state.seq5200||0,seq2200:state.seq2200||0,seq8800:state.seq8800||0,tickets:state.tickets||[],guias:state.guias||[],avisos:state.avisos||[],sobres:state.sobres||[]}; }
+    if(!data){ toast("No hay respaldo de esa fecha."); return; }
+    var blob=new Blob([JSON.stringify(data)],{type:"application/json"});
+    var url=URL.createObjectURL(blob);
+    var a=document.createElement("a"); a.href=url; a.download="respaldo_devoluciones_"+(fecha||hoyStr())+".json"; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function(){ try{URL.revokeObjectURL(url);}catch(e){} },4000);
+  }catch(e){ toast("Error: "+(e&&e.message||e),6000); }
 }
 function descargarRespaldo(){
   try{
