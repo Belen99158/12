@@ -262,6 +262,20 @@ async function recuperarPendienteLocal(){
   try{ await saveState(); toast("✓ Trabajo recuperado."); cerrarModal(); render(); }
   catch(e){ toast("No se pudo recuperar todavía: "+(e&&e.message||e),8000); }
 }
+/* Un error dentro de un onclick (async) se perdia sin dejar rastro: el usuario
+   pulsaba Guardar y no pasaba NADA — ni guardaba, ni avisaba, ni cerraba.
+   Asi se perdio una revision de devolucion el 09/09. Ahora cualquier fallo
+   inesperado se muestra en vez de desaparecer. */
+function avisarFalloInesperado(e){
+  console.error("Fallo inesperado:",e);
+  try{
+    toast("⚠ No se pudo completar la acción: "+((e&&e.message)||e)+
+          ". Tu trabajo NO se guardó. Recarga la página (Ctrl+F5) y vuelve a intentar.",12000);
+  }catch(_){}
+}
+window.addEventListener("unhandledrejection",function(ev){ avisarFalloInesperado(ev.reason); });
+window.addEventListener("error",function(ev){ if(ev&&ev.error) avisarFalloInesperado(ev.error); });
+
 function suscribirEstado(onPrimera){
   if(!fbReady){ if(onPrimera) onPrimera(); return; }
   var primera=true;
@@ -2267,6 +2281,14 @@ async function guardarDev(id){
   if(!puedeActuar()){ toast("👁 Modo solo lectura.",4000); return; }
   var t=findT(id), idxs=[];
   t.items.forEach(function(i,x){ if(llegoQ(i)>0&&tipoDeItem(t,i)==="DEVOLUCION") idxs.push(x); });
+  /* Si mientras se llenaba el formulario otra persona guardó, el ticket cambió por
+     debajo y los campos en pantalla ya no corresponden. Antes esto reventaba en
+     silencio; ahora se avisa y se vuelve a abrir la revisión con los datos al día. */
+  var faltan=idxs.filter(function(x){ return !$("d-ac-"+x); });
+  if(faltan.length){
+    toast("⚠ Otra persona modificó este ticket mientras lo revisabas. Se vuelve a abrir con los datos actualizados; revisa y guarda de nuevo.",12000);
+    revisarDev(t); return;
+  }
   for(var k=0;k<idxs.length;k++){ if($("d-ac-"+idxs[k]).value===""){ toast("Selecciona la decisión en todos los productos."); return; } }
   /* Comprobación del motivo: obligatoria antes de decidir la devolución */
   var motOk=$("d-mot-ok")?$("d-mot-ok").value:"";
