@@ -276,6 +276,12 @@ function avisarFalloInesperado(e){
 window.addEventListener("unhandledrejection",function(ev){ avisarFalloInesperado(ev.reason); });
 window.addEventListener("error",function(ev){ if(ev&&ev.error) avisarFalloInesperado(ev.error); });
 
+/* Trabajo simultaneo: si otra persona guarda mientras esta pantalla tiene un
+   formulario abierto, los datos se actualizan igual (para no pisar su trabajo al
+   guardar) pero el redibujo se aplaza hasta cerrar, para no destruir el formulario. */
+var redibujoPendiente=false;
+function hayModalAbierto(){ var m=document.getElementById("modal-root"); return !!(m&&m.innerHTML&&m.innerHTML.length>50); }
+
 function suscribirEstado(onPrimera){
   if(!fbReady){ if(onPrimera) onPrimera(); return; }
   var primera=true;
@@ -288,7 +294,7 @@ function suscribirEstado(onPrimera){
       state={seq3200:0,seq5200:0,seq2200:0,seq8800:0,tickets:[],guias:[],avisos:[],sobres:[]};
     }
     if(primera){ primera=false; if(onPrimera) onPrimera(); setTimeout(function(){ try{ revisarPendienteLocal(); }catch(e){} },1200); }
-    else if(me){ render(); }
+    else if(me){ if(hayModalAbierto()) redibujoPendiente=true; else render(); }
   },function(err){
     console.error(err); toast("⚠ Error Firebase: "+(err&&err.message||err),5000);
     if(primera){ primera=false; if(onPrimera) onPrimera(); }
@@ -874,7 +880,10 @@ function abrirNuevo(){
     '<div class="card" style="background:#F0F3F7;margin-top:14px"><label style="display:flex;align-items:center;gap:8px;text-transform:none;font-size:14px;color:var(--ink);letter-spacing:0;cursor:pointer"><input type="checkbox" id="n-sobre" style="width:auto"> 📨 En esta guía también se envió un <b>sobre</b></label></div>'+
     '<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px"><button class="btn btn-g" onclick="cerrarModal()">Cancelar</button><button class="btn btn-p" onclick="guardarTicket()">Guardar ticket</button></div></div></div>';
 }
-function cerrarModal(){ $("modal-root").innerHTML=""; }
+function cerrarModal(){
+  $("modal-root").innerHTML="";
+  if(redibujoPendiente){ redibujoPendiente=false; try{ if(me) render(); }catch(e){} }
+}
 function buscarRazon(){
   var q=$("n-razon").value.trim().toUpperCase(), list=$("n-razon-list");
   if(q.length<2){ list.style.display="none"; return; }
