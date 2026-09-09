@@ -2232,11 +2232,22 @@ async function guardarLlegadaPaquete(id){
    constancia del número anterior. */
 var rcTicketId=null;
 function puedeReclasificar(){
-  return me && (esSuperAdmin() || rolActivo()==="MERCADERIA" || rolActivo()==="ADMIN");
+  var r=rolActivo();
+  return me && (esSuperAdmin() || r==="MERCADERIA" || r==="ADMIN" || r==="DEVOLUCION" || r==="GARANTIA");
+}
+/* Estados en los que el ticket YA fue encaminado a una bandeja de revision: al
+   corregir el motivo hay que volver a encaminarlo, o se quedaria en la bandeja
+   equivocada. */
+function yaEncaminado(t){
+  return ["DEVOLUCION","GARANTIA","MIXTO","DACION_ADMIN","NO_LLEGO"].indexOf(t.estado)>=0;
+}
+function nombreBandeja(e){
+  return {DEVOLUCION:"Revisión de devolución",GARANTIA:"Revisión de garantía",MIXTO:"Devolución y garantía (mixto)",
+          DACION_ADMIN:"Autorización administrativa",NO_LLEGO:"No llegó mercadería",NC:"Notas de crédito"}[e]||e;
 }
 function abrirReclasificar(id){
   var t=findT(id); if(!t) return;
-  if(!puedeReclasificar()){ toast("👁 Solo Mercadería o Administrativo pueden corregir el motivo.",4000); return; }
+  if(!puedeReclasificar()){ toast("👁 Solo Mercadería, los revisores de devolución y garantía, o Administrativo pueden corregir el motivo.",4000); return; }
   rcTicketId=id;
   var opciones=MOTIVOS.map(function(m){
     return '<option value="'+esc(m)+'"'+(m===t.motivo?" selected":"")+">"+esc(m)+" · serie "+prefijoDeMotivo(m)+"</option>";
@@ -2263,12 +2274,21 @@ function rcAviso(){
   var sel=$("rc-motivo"), caja=$("rc-aviso"), t=findT(rcTicketId);
   if(!sel||!caja||!t) return;
   var antes=prefijoDeMotivo(t.motivo), ahora=prefijoDeMotivo(sel.value);
-  caja.innerHTML = (antes===ahora)
+  var txt = (antes===ahora)
     ? '<div class="muted">El número <b>'+esc(t.numero)+'</b> se mantiene: sigue en la serie '+ahora+'.</div>'
     : '<div style="background:#FFF4D6;border:1px solid #E8C766;border-radius:8px;padding:10px 12px">⚠ Cambia de serie <b>'+antes+'</b> a <b>'+ahora+'</b>: el ticket recibirá un <b>número nuevo</b> de la serie '+ahora+', y quedará constancia de que antes era '+esc(t.numero)+'.</div>';
+  /* Si ya esta en una bandeja, se calcula a cual se movera con el motivo nuevo. */
+  if(yaEncaminado(t)){
+    var prueba=JSON.parse(JSON.stringify(t)); prueba.motivo=sel.value; prueba.historial=[];
+    var guardaMe=me; try{ routeTrasMerc(prueba,new Date().toISOString(),""); }catch(e){} me=guardaMe;
+    txt += (prueba.estado===t.estado)
+      ? '<div class="muted" style="margin-top:8px">Se queda en la bandeja: <b>'+esc(nombreBandeja(t.estado))+'</b>.</div>'
+      : '<div style="background:#E5F1EB;border:1px solid #9CC9B4;border-radius:8px;padding:10px 12px;margin-top:8px">📤 Pasará de <b>'+esc(nombreBandeja(t.estado))+'</b> a <b>'+esc(nombreBandeja(prueba.estado))+'</b>.</div>';
+  }
+  caja.innerHTML=txt;
 }
 async function guardarReclasificar(){
-  if(!puedeReclasificar()){ toast("👁 Solo Mercadería o Administrativo pueden corregir el motivo.",4000); return; }
+  if(!puedeReclasificar()){ toast("👁 Solo Mercadería, los revisores de devolución y garantía, o Administrativo pueden corregir el motivo.",4000); return; }
   var t=findT(rcTicketId); if(!t){ toast("Vuelve a abrir la corrección."); return; }
   var sel=$("rc-motivo"); if(!sel){ toast("Vuelve a abrir la corrección."); return; }
   var nuevoMotivo=sel.value, com=($("rc-com")?$("rc-com").value:"").trim();
@@ -2285,9 +2305,20 @@ async function guardarReclasificar(){
   }
   t.reclasificacion={de:antesMotivo,a:nuevoMotivo,numeroAnterior:antesNumero,numeroNuevo:t.numero,com:com,por:me.name,f:ahora};
   t.historial.push({f:ahora,e:"Motivo corregido: de «"+antesMotivo+"» a «"+nuevoMotivo+"»"+(prefA!==prefB?(" · número "+antesNumero+" → "+t.numero):"")+" ("+me.name+"). Motivo: "+com});
+  /* Si el ticket ya estaba en una bandeja, se vuelve a encaminar con el motivo nuevo,
+     para que le llegue a quien corresponde en vez de quedarse donde estaba. */
+  var bandejaAntes=t.estado;
+  if(yaEncaminado(t)){
+    t.devPendiente=false; t.garPendiente=false; t.devSolicitado=false; t.garSolicitado=false;
+    routeTrasMerc(t,ahora,"Reencaminado tras corregir el motivo → ");
+    t.reclasificacion.bandejaAnterior=bandejaAntes;
+    t.reclasificacion.bandejaNueva=t.estado;
+  }
   try{ await saveState(); }catch(e){ return; }
   cerrarModal();
-  toast("✓ Motivo corregido"+(prefA!==prefB?(" · nuevo número "+t.numero):"")+".",7000);
+  var mueve=(t.reclasificacion.bandejaNueva&&t.reclasificacion.bandejaNueva!==t.reclasificacion.bandejaAnterior);
+  toast("✓ Motivo corregido"+(prefA!==prefB?(" · nuevo número "+t.numero):"")+
+        (mueve?(" · enviado a "+nombreBandeja(t.reclasificacion.bandejaNueva)):"")+".",8000);
   render();
 }
 
@@ -2428,12 +2459,22 @@ async function guardarMerc(id){
 /* ===== REV DEVOLUCIÓN ===== */
 function revisarDev(t){
   var items=t.items.filter(function(i){return llegoQ(i)>0&&tipoDeItem(t,i)==="DEVOLUCION";});
+  /* Corregir el motivo desde aqui: si lo mandaron como devolucion y es garantia (o al
+     reves), se corrige y el ticket se va solo a la bandeja que corresponde. */
+  var btnMotivo = puedeReclasificar()
+    ? ('<div class="card" style="background:#EEF4FB;border-color:#BFD4EA;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+
+       '<div style="flex:1 1 250px">Motivo declarado: <b>'+esc(t.motivo)+'</b>'+
+       (t.numeroAnterior?('<div class="muted" style="margin-top:4px">Antes era '+esc(t.numeroAnterior)+'.</div>'):'')+'</div>'+
+       '<button class="btn btn-g btn-sm" data-id="'+esc(t.id)+'" onclick="abrirReclasificar(this.dataset.id)">⇄ No es este motivo</button></div>')
+    : '';
+
   var h='<div class="modal-bg"><div class="modal"><h2 style="font-size:24px;color:var(--navy)">Revisión de devolución · '+esc(t.numero)+'</h2><div class="muted" style="margin-bottom:14px">'+esc(t.razonSocial)+' · Factura '+esc(t.factura)+'</div>';
   if(t.motivo==="DEVOLUCION Y REFACTURACION") h+='<div class="card" style="background:#E3ECF7;border-color:#B9CBE3"><span class="tag tag-dev">🔁 DEVOLUCIÓN Y REFACTURACIÓN</span><div style="margin-top:8px">La NC se hará a <b>'+esc(t.razonSocial)+'</b> (cliente de quien se retira la mercadería) y se debe <b>refacturar a '+esc(t.refactCliente||"cliente destino")+'</b>.'+(t.refactValidado?'<div class="muted" style="margin-top:4px">✅ Refacturación validada por mercadería ('+esc(t.refactValidado.por||"")+', '+fdate(t.refactValidado.f)+')'+(t.refactValidado.facturaNueva?(' · Factura nueva: <b>'+esc(t.refactValidado.facturaNueva)+'</b>'):'')+'</div>':'')+'<div class="muted" style="margin-top:4px">Al guardar la aceptación, el <b>PDF del ticket se enviará a la bandeja del asesor</b>.</div></div></div>';
   if(t.estado==="MIXTO") h+='<div class="card" style="background:#F0E4F7;border-color:#D9B8EC"><span class="tag tag-gar">MIXTO</span> Este ticket también tiene ítems de <b>garantía</b> que se revisan por separado en la bandeja de garantía.</div>';
   /* ===== El revisor comprueba el motivo declarado por el asesor ===== */
   var comAsesor=t.items.map(function(i){ return i.comVendedor?("• "+i.codigo+": "+i.comVendedor):""; }).filter(Boolean).join("<br>");
   var mrv=t.motivoRevision||null;
+  h+=btnMotivo;
   h+='<div class="card" style="background:#FFF4D6;border-color:#E8C766"><h3 style="font-size:16px;color:var(--navy);margin-bottom:8px">🔎 Comprobación del motivo</h3>'+
      '<div class="kv" style="margin-bottom:10px"><b>Motivo del asesor</b><span><b>'+esc(t.motivo)+'</b></span><b>Comentario del asesor</b><span>'+(comAsesor||'<span class="muted">— sin comentario —</span>')+'</span></div>'+
      '<div class="field"><label>¿El motivo declarado corresponde a lo que llegó? · obligatorio</label><select id="d-mot-ok" onchange="var e=document.getElementById(\'d-mot-box\');if(e)e.style.display=this.value===\'0\'?\'block\':\'none\'"><option value="">— Seleccionar —</option><option value="1"'+(mrv&&mrv.correcto===true?" selected":"")+'>SÍ, el motivo es correcto</option><option value="0"'+(mrv&&mrv.correcto===false?" selected":"")+'>NO, el motivo real es otro</option></select></div>'+
@@ -2557,11 +2598,20 @@ function garInicializarBorrador(t,g){
   return b;
 }
 function formGar(t,g){
+  /* Corregir el motivo desde aqui: si lo mandaron como devolucion y es garantia (o al
+     reves), se corrige y el ticket se va solo a la bandeja que corresponde. */
+  var btnMotivo = puedeReclasificar()
+    ? ('<div class="card" style="background:#EEF4FB;border-color:#BFD4EA;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+
+       '<div style="flex:1 1 250px">Motivo declarado: <b>'+esc(t.motivo)+'</b>'+
+       (t.numeroAnterior?('<div class="muted" style="margin-top:4px">Antes era '+esc(t.numeroAnterior)+'.</div>'):'')+'</div>'+
+       '<button class="btn btn-g btn-sm" data-id="'+esc(t.id)+'" onclick="abrirReclasificar(this.dataset.id)">⇄ No es este motivo</button></div>')
+    : '';
   g=g||{}; var it=g.informe||{};
   garTicketId=t.id;
   garBorrador=garInicializarBorrador(t,g);
   var items=t.items.filter(function(i){return llegoQ(i)>0&&tipoDeItem(t,i)==="GARANTIA";}), editando=!!t.gar;
   var h='<div class="modal-bg"><div class="modal"><h2 style="font-size:24px;color:var(--navy)">'+(editando?"Editar":"Revisión de")+' garantía · '+esc(t.numero)+'</h2><div class="muted" style="margin-bottom:14px">'+esc(t.razonSocial)+' · Factura '+esc(t.factura)+'</div>';
+  h+=btnMotivo;
   if(t.estado==="MIXTO") h+='<div class="card" style="background:#E3ECF7;border-color:#B9CBE3"><span class="tag tag-dev">MIXTO</span> Este ticket también tiene ítems de <b>devolución</b> que se revisan por separado en la bandeja de devolución.</div>';
   h+='<div class="muted" style="margin-bottom:10px">Indica cuántas unidades de cada ítem <b>se aceptan</b> (van a la NC). Las restantes se consideran <b>rechazadas</b> y entran al informe técnico.</div>';
   h+=items.map(function(i){ var x=t.items.indexOf(i), q=llegoQ(i);
