@@ -289,6 +289,16 @@ function suscribirEstado(onPrimera){
     var val=snap.val();
     estadoCargado=true;          /* llegó del servidor: a partir de aquí sí se puede guardar */
     if(val){
+      /* Se recuerda lo recibido para poder escribir solo las diferencias. */
+      estadoServidor={tickets:mapaServidor(val.tickets,"T"),guias:mapaServidor(val.guias,"G"),
+        avisos:mapaServidor(val.avisos,"AV"),sobres:mapaServidor(val.sobres,"S"),
+        seq:{seq3200:val.seq3200||0,seq5200:val.seq5200||0,seq2200:val.seq2200||0,seq8800:val.seq8800||0}};
+      formatoPorId=!Array.isArray(val.tickets);
+    }else{
+      estadoServidor={tickets:{},guias:{},avisos:{},sobres:{},seq:{}};
+      formatoPorId=false;
+    }
+    if(val){
       state={seq3200:val.seq3200||0,seq5200:val.seq5200||0,seq2200:val.seq2200||0,seq8800:val.seq8800||0,tickets:arr(val.tickets),guias:arr(val.guias),avisos:arr(val.avisos),sobres:arr(val.sobres)};
     }else{
       state={seq3200:0,seq5200:0,seq2200:0,seq8800:0,tickets:[],guias:[],avisos:[],sobres:[]};
@@ -323,20 +333,89 @@ function leerPendienteLocal(){ try{ return JSON.parse(localStorage.getItem(RESPA
    Esta es la guarda que lo impide. */
 var estadoCargado=false;
 
+/* ===== GUARDADO POR REGISTRO Y POR CAMPO =====
+   Antes se reescribia el estado entero -233 tickets, casi 1 MB- cada vez que alguien
+   guardaba. De ahi venian tres problemas: dos personas guardando a la vez se pisaban;
+   el guardado de una redibujaba la pantalla de las otras; y un microcorte de red
+   perdia el trabajo completo.
+   Ahora se compara contra lo ultimo que mando el servidor y se escribe SOLO lo que
+   cambio, campo por campo, en su propia ruta (estado/tickets/<id>/<campo>). Un
+   registro nuevo se escribe entero, para poder crearlo. La funcion conserva su
+   nombre y su comportamiento, asi que los 31 puntos que la llaman no cambian. */
+var estadoServidor={tickets:{},guias:{},avisos:{},sobres:{},seq:{}};
+var formatoPorId=false;   /* ¿el servidor ya guarda las colecciones indexadas por id? */
+
+function porId(lista,pref){
+  var m={};
+  (lista||[]).forEach(function(x,i){
+    if(!x) return;
+    if(!x.id) x.id=pref+Date.now()+"_"+i;
+    m[x.id]=x;
+  });
+  return m;
+}
+function mapaServidor(v,pref){ return porId(arr(v),pref); }
+
 async function saveState(){
   if(!estadoCargado){
     toast("⚠ Todavía no se han cargado los datos del sistema. NO se guardó, para no borrar lo que ya existe. Espera unos segundos o recarga la página.",10000);
     throw new Error("El estado aún no se ha cargado desde el servidor");
   }
   if(!fbReady){ guardarPendienteLocal(); toast("⚠ Sin conexión. No se guardó, pero tu trabajo quedó respaldado en este navegador. No cierres la página.",9000); throw new Error("Sin conexión a Firebase"); }
-  var payload=limpiarUndefined({seq3200:state.seq3200||0,seq5200:state.seq5200||0,seq2200:state.seq2200||0,seq8800:state.seq8800||0,tickets:state.tickets||[],guias:state.guias||[],avisos:state.avisos||[],sobres:state.sobres||[]});
-  payload._updated=firebase.database.ServerValue.TIMESTAMP;
-  /* Se reintenta: la mayoria de los fallos son cortes momentaneos de red, y perder un
-     ticket por eso es inaceptable. */
+
+  var ahora=limpiarUndefined({
+    tickets:porId(state.tickets,"T"), guias:porId(state.guias,"G"),
+    avisos:porId(state.avisos,"AV"), sobres:porId(state.sobres,"S")
+  });
+
+  /* Conversion unica: mientras el servidor guarde las colecciones como listas, escribir
+     por id crearia claves duplicadas junto a los indices 0,1,2... Se convierte una sola
+     vez, de forma atomica, y a partir de ahi todo es incremental. */
+  if(!formatoPorId){
+    try{
+      for(var col of ["tickets","guias","avisos","sobres"]){
+        await fbDB.ref("estado/"+col).set(ahora[col]);
+      }
+      await fbDB.ref("estado").update({seq3200:state.seq3200||0,seq5200:state.seq5200||0,
+        seq2200:state.seq2200||0,seq8800:state.seq8800||0,_updated:firebase.database.ServerValue.TIMESTAMP});
+      formatoPorId=true; limpiarPendienteLocal();
+      return;
+    }catch(e){
+      guardarPendienteLocal();
+      toast("⚠ NO se pudo guardar: "+((e&&e.message)||e)+". Tu trabajo quedó respaldado en este navegador.",12000);
+      throw e;
+    }
+  }
+
+  var upd={};
+  ["tickets","guias","avisos","sobres"].forEach(function(col){
+    var nuevo=ahora[col]||{}, viejo=estadoServidor[col]||{};
+    Object.keys(nuevo).forEach(function(k){
+      var a=viejo[k], b=nuevo[k];
+      if(JSON.stringify(a)===JSON.stringify(b)) return;
+      if(!a){ upd[col+"/"+k]=b; return; }              /* registro nuevo: entero */
+      var campos={};
+      Object.keys(b).forEach(function(c){ campos[c]=1; });
+      Object.keys(a).forEach(function(c){ campos[c]=1; });
+      Object.keys(campos).forEach(function(c){
+        if(JSON.stringify(a[c])===JSON.stringify(b[c])) return;
+        upd[col+"/"+k+"/"+c]=(b[c]===undefined?null:b[c]);
+      });
+    });
+    Object.keys(viejo).forEach(function(k){
+      if(!Object.prototype.hasOwnProperty.call(nuevo,k)) upd[col+"/"+k]=null;   /* borrado */
+    });
+  });
+  ["seq3200","seq5200","seq2200","seq8800"].forEach(function(k){
+    if((state[k]||0)!==(estadoServidor.seq[k]||0)) upd[k]=state[k]||0;
+  });
+  if(!Object.keys(upd).length){ limpiarPendienteLocal(); return; }   /* nada cambio */
+  upd._updated=firebase.database.ServerValue.TIMESTAMP;
+
   var ultimo=null;
   for(var intento=1;intento<=3;intento++){
     try{
-      await fbDB.ref("estado").set(payload);
+      await fbDB.ref("estado").update(upd);
       limpiarPendienteLocal();
       return;
     }catch(e){
