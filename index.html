@@ -289,9 +289,13 @@ function suscribirEstado(onPrimera){
     var val=snap.val();
     estadoCargado=true;          /* llegó del servidor: a partir de aquí sí se puede guardar */
     if(val){
-      /* Se recuerda lo recibido para poder escribir solo las diferencias. */
-      estadoServidor={tickets:mapaServidor(val.tickets,"T"),guias:mapaServidor(val.guias,"G"),
-        avisos:mapaServidor(val.avisos,"AV"),sobres:mapaServidor(val.sobres,"S"),
+      /* Se recuerda lo recibido para poder escribir solo las diferencias.
+         TIENE que ser una copia independiente: si compartiera los objetos con state,
+         al editar un ticket se editaria tambien la referencia, la comparacion no veria
+         ninguna diferencia y NADA se guardaria. */
+      var copiaSrv=JSON.parse(JSON.stringify(val));
+      estadoServidor={tickets:mapaServidor(copiaSrv.tickets,"T"),guias:mapaServidor(copiaSrv.guias,"G"),
+        avisos:mapaServidor(copiaSrv.avisos,"AV"),sobres:mapaServidor(copiaSrv.sobres,"S"),
         seq:{seq3200:val.seq3200||0,seq5200:val.seq5200||0,seq2200:val.seq2200||0,seq8800:val.seq8800||0}};
       formatoPorId=!Array.isArray(val.tickets);
     }else{
