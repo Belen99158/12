@@ -190,7 +190,7 @@ var ctrlDesde="", ctrlHasta="";              /* reporte de control de respuesta 
 /* Solo STALIN COBA, MABEL JACOME y CALL CENTER 1 pueden enviar directo sin guía.
    Todos los demás: sin guía el ticket queda PENDIENTE (SIN_GUIA) y no llega a mercadería. */
 function normNombre(s){ return String(s||"").toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/\s+/g," ").trim(); }
-var SIN_GUIA_NOMBRES=["STALIN COBA","MABEL JACOME","CALL CENTER 1","CALLCENTER1","CALL CENTER1"].map(normNombre);
+var SIN_GUIA_NOMBRES=["STALIN COBA","MABEL JACOME","CALL CENTER 1","CALLCENTER1","CALL CENTER1","EDUARDO PICO"].map(normNombre);
 function requiereGuia(nombre){ return SIN_GUIA_NOMBRES.indexOf(normNombre(nombre))<0; }
 /* ===== SIN GUÍA NO SE IMPRIME =====
    Si el asesor está obligado a poner guía y el ticket todavía no la tiene, no se puede
@@ -2224,12 +2224,86 @@ async function guardarLlegadaPaquete(id){
 }
 
 /* ===== PASO 2 DE MERCADERÍA · REVISIÓN DE LA MERCADERÍA ===== */
+/* ===== RECLASIFICAR EL MOTIVO DE UN TICKET =====
+   A veces el asesor manda como garantía algo que es devolución, o al revés. Antes
+   había que anular el ticket y pedirle que lo repitiera todo. Ahora Mercadería puede
+   corregir el motivo; si cambia de familia, el ticket recibe un número nuevo de la
+   serie que le toca (3200 devolución, 5200 garantía, 8800 refacturación) y queda
+   constancia del número anterior. */
+var rcTicketId=null;
+function puedeReclasificar(){
+  return me && (esSuperAdmin() || rolActivo()==="MERCADERIA" || rolActivo()==="ADMIN");
+}
+function abrirReclasificar(id){
+  var t=findT(id); if(!t) return;
+  if(!puedeReclasificar()){ toast("👁 Solo Mercadería o Administrativo pueden corregir el motivo.",4000); return; }
+  rcTicketId=id;
+  var opciones=MOTIVOS.map(function(m){
+    return '<option value="'+esc(m)+'"'+(m===t.motivo?" selected":"")+">"+esc(m)+" · serie "+prefijoDeMotivo(m)+"</option>";
+  }).join("");
+  $("modal-root").innerHTML=
+    '<div class="modal-bg"><div class="modal" style="max-width:620px">'+
+    '<h2 style="font-size:21px;color:var(--navy);margin-bottom:4px">Corregir el motivo · '+esc(t.numero)+'</h2>'+
+    '<div class="muted" style="margin-bottom:12px">Si el asesor se equivocó de motivo, corrígelo aquí en vez de pedirle que repita el ticket.</div>'+
+    '<div class="card" style="background:#F0F3F7;border-color:#C9D3DD;margin-bottom:12px">'+
+      '<div class="kv"><b>Cliente</b><span>'+esc(t.razonSocial||"")+'</span>'+
+      '<b>Factura</b><span>'+esc(t.factura||"")+'</span>'+
+      '<b>Motivo actual</b><span><b>'+esc(t.motivo)+'</b> · serie '+prefijoDeMotivo(t.motivo)+'</span></div></div>'+
+    '<div class="field"><label>Motivo correcto</label><select id="rc-motivo" onchange="rcAviso()">'+opciones+'</select></div>'+
+    '<div class="field"><label>¿Por qué se corrige? · obligatorio</label>'+
+      '<input id="rc-com" placeholder="Ej.: el asesor lo mandó como garantía y es devolución"></div>'+
+    '<div id="rc-aviso" style="margin-bottom:12px"></div>'+
+    '<div style="display:flex;gap:10px;justify-content:flex-end">'+
+      '<button class="btn btn-g" onclick="cerrarModal()">Cancelar</button>'+
+      '<button class="btn btn-p" onclick="guardarReclasificar()">Corregir motivo</button></div>'+
+    '</div></div>';
+  rcAviso();
+}
+function rcAviso(){
+  var sel=$("rc-motivo"), caja=$("rc-aviso"), t=findT(rcTicketId);
+  if(!sel||!caja||!t) return;
+  var antes=prefijoDeMotivo(t.motivo), ahora=prefijoDeMotivo(sel.value);
+  caja.innerHTML = (antes===ahora)
+    ? '<div class="muted">El número <b>'+esc(t.numero)+'</b> se mantiene: sigue en la serie '+ahora+'.</div>'
+    : '<div style="background:#FFF4D6;border:1px solid #E8C766;border-radius:8px;padding:10px 12px">⚠ Cambia de serie <b>'+antes+'</b> a <b>'+ahora+'</b>: el ticket recibirá un <b>número nuevo</b> de la serie '+ahora+', y quedará constancia de que antes era '+esc(t.numero)+'.</div>';
+}
+async function guardarReclasificar(){
+  if(!puedeReclasificar()){ toast("👁 Solo Mercadería o Administrativo pueden corregir el motivo.",4000); return; }
+  var t=findT(rcTicketId); if(!t){ toast("Vuelve a abrir la corrección."); return; }
+  var sel=$("rc-motivo"); if(!sel){ toast("Vuelve a abrir la corrección."); return; }
+  var nuevoMotivo=sel.value, com=($("rc-com")?$("rc-com").value:"").trim();
+  if(!com){ toast("⚠ Escribe por qué se corrige el motivo."); var c=$("rc-com"); if(c) c.focus(); return; }
+  if(nuevoMotivo===t.motivo){ toast("El motivo es el mismo; no hay nada que corregir."); return; }
+  var ahora=new Date().toISOString(), antesMotivo=t.motivo, antesNumero=t.numero;
+  var prefA=prefijoDeMotivo(antesMotivo), prefB=prefijoDeMotivo(nuevoMotivo);
+  t.motivo=nuevoMotivo;
+  if(prefA!==prefB){
+    var num;
+    try{ num=await siguienteNumero(prefB); }
+    catch(e){ t.motivo=antesMotivo; toast("No se pudo asignar el número nuevo: "+((e&&e.message)||e),8000); return; }
+    t.numeroAnterior=antesNumero; t.numero=num;
+  }
+  t.reclasificacion={de:antesMotivo,a:nuevoMotivo,numeroAnterior:antesNumero,numeroNuevo:t.numero,com:com,por:me.name,f:ahora};
+  t.historial.push({f:ahora,e:"Motivo corregido: de «"+antesMotivo+"» a «"+nuevoMotivo+"»"+(prefA!==prefB?(" · número "+antesNumero+" → "+t.numero):"")+" ("+me.name+"). Motivo: "+com});
+  try{ await saveState(); }catch(e){ return; }
+  cerrarModal();
+  toast("✓ Motivo corregido"+(prefA!==prefB?(" · nuevo número "+t.numero):"")+".",7000);
+  render();
+}
+
 function revisarMerc(t){
   if(t.motivo==="DEVOLUCION Y REFACTURACION"){ revisarMercRefact(t); return; }
   var soloGuia=!!t.mercRevisada;   /* REQ 3: ya revisada y aprobada, solo falta validar la guía corregida */
   var tieneGuia=!!t.guiaNumero;
+  /* Corregir el motivo aqui evita anular el ticket y pedirle al asesor que lo repita. */
+  var avisoMotivo='<div class="card" style="background:#EEF4FB;border-color:#BFD4EA;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+
+    '<div style="flex:1 1 260px">Motivo declarado: <b>'+esc(t.motivo)+'</b> · serie '+prefijoDeMotivo(t.motivo)+
+    (t.numeroAnterior?('<div class="muted" style="margin-top:4px">Antes era '+esc(t.numeroAnterior)+', se corrigió el motivo.</div>'):'')+'</div>'+
+    (puedeReclasificar()?('<button class="btn btn-g btn-sm" data-id="'+esc(t.id)+'" onclick="abrirReclasificar(this.dataset.id)">⇄ No es este motivo</button>'):'')+
+    '</div>';
   var h='<div class="modal-bg"><div class="modal"><h2 style="font-size:24px;color:var(--navy)">'+(soloGuia?"Validar guía corregida · ":"Revisión de mercadería · ")+esc(t.numero)+'</h2><div class="muted" style="margin-bottom:10px">'+esc(t.razonSocial)+' · Factura '+esc(t.factura)+'</div>';
   h+='<div class="card" style="background:#FFF1F1;border-color:#E8B0AB">'+(t.guiaModificada?'<div style="background:var(--amber);color:#fff;padding:6px 10px;border-radius:6px;font-weight:700;margin-bottom:10px;font-size:13px">✎ GUÍA MODIFICADA — el vendedor corrigió la guía.'+(soloGuia?' La mercadería ya fue revisada: solo valida la guía.':' Verifica de nuevo.')+'</div>':'')+'<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><div><span class="muted">Guía:</span> <b style="font-size:16px">'+esc(t.guiaNumero||"(sin guía)")+'</b></div>'+(t.sobre?'<span class="tag tag-dev">📨 Incluye sobre</span>':'<span class="muted">Sin sobre</span>')+'</div>';
+  h+=avisoMotivo;
   if(tieneGuia) h+=bloqueGuiaMerc(t,"m");
   else if(requiereGuia(t.vendedor)) h+='<div style="margin-top:10px;background:var(--bad-bg);border:1px solid #E8B0AB;border-radius:8px;padding:10px 12px">⚠ <b>Este ticket llegó SIN guía.</b> Todo envío debe tener guía obligatoriamente.<div style="margin-top:8px"><button class="btn btn-bad btn-sm" onclick="abrirDevolverTicket(\''+t.id+'\')">↩ Devolver ticket al asesor</button></div></div>';
   else h+='<div class="muted" style="margin-top:10px">Este ticket se creó sin guía (asesor autorizado a enviar sin guía), no requiere validación de guía.</div>';
