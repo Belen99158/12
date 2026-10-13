@@ -610,6 +610,59 @@ function render(){
     h+='<div class="muted" style="margin-top:8px">Estos tickets entran a la vez a Notas de crédito y a Revisión de mercadería, y no pasan por revisión de devolución.</div></div>';
   }
 
+  /* ===== GARANTÍAS DIRECTAS =====
+     Aprobadas sin revisión técnica, bajo la autorización permanente acordada entre
+     Revisión de garantía y Mercadería para productos de historial conocido. Se miden
+     aparte porque, al no pasar por el técnico, deben poder seguirse: cuántas, quién
+     las aprueba y por cuánto dinero. */
+  var gdir=datos.filter(function(d){ return d.t && d.t.garantiaDirecta; });
+  if(gdir.length){
+    var gdMonto=gdir.reduce(function(s,d){ return s+((d.t.garantiaDirecta.total)||0); },0);
+    var gdPorQuien={}, gdPorProducto={};
+    gdir.forEach(function(d){
+      var q=d.t.garantiaDirecta.por||"—";
+      if(!gdPorQuien[q]) gdPorQuien[q]={cant:0,monto:0};
+      gdPorQuien[q].cant++; gdPorQuien[q].monto+=(d.t.garantiaDirecta.total||0);
+      (d.t.items||[]).forEach(function(i){
+        var c=i.codigo||"—";
+        if(!gdPorProducto[c]) gdPorProducto[c]={cant:0,monto:0,desc:i.desc||""};
+        gdPorProducto[c].cant++; gdPorProducto[c].monto+=(i.total||0);
+      });
+    });
+    /* Cuánto pesan dentro del total de garantías del periodo */
+    var garTodas=datos.filter(function(d){ return d.t && (d.t.motivo==="GARANTIAS"||d.t.motivo==="GARANTIA DIRECTA"); });
+    var pct=garTodas.length?Math.round(gdir.length/garTodas.length*100):0;
+
+    h+='<div class="card" style="border-left:5px solid #C77F00"><div class="sec-title" style="margin-top:0">⚡ Garantías directas · aprobadas sin revisión técnica</div>'+
+       '<div class="grid4" style="margin-bottom:10px">'+
+       '<div class="kpi"><div class="disp" style="color:#C77F00">'+gdir.length+'</div><div class="lbl">Garantías directas del periodo</div></div>'+
+       '<div class="kpi"><div class="disp" style="color:#C77F00">'+money(gdMonto)+'</div><div class="lbl">Monto aprobado</div></div>'+
+       '<div class="kpi"><div class="disp" style="color:'+(pct>50?"var(--rojo)":"var(--navy)")+'">'+pct+'%</div><div class="lbl">De todas las garantías del periodo</div></div>'+
+       '<div class="kpi"><div class="disp" style="color:var(--navy)">'+Object.keys(gdPorQuien).length+'</div><div class="lbl">Personas que las aprobaron</div></div>'+
+       '</div>';
+
+    h+='<div class="sec-title">Quién las aprueba</div><div style="overflow-x:auto"><table><thead><tr><th>Aprobado por</th><th class="num">Cantidad</th><th class="num">Monto</th><th class="num">% del monto</th></tr></thead><tbody>'+
+       Object.keys(gdPorQuien).sort(function(a,b){ return gdPorQuien[b].monto-gdPorQuien[a].monto; }).map(function(q){
+         var x=gdPorQuien[q];
+         return '<tr><td>'+esc(q)+'</td><td class="num">'+x.cant+'</td><td class="num">'+money(x.monto)+'</td><td class="num">'+(gdMonto?Math.round(x.monto/gdMonto*100):0)+'%</td></tr>';
+       }).join("")+'</tbody></table></div>';
+
+    var prodTop=Object.keys(gdPorProducto).sort(function(a,b){ return gdPorProducto[b].cant-gdPorProducto[a].cant; }).slice(0,10);
+    h+='<div class="sec-title">Productos que más vuelven por garantía directa</div><div style="overflow-x:auto"><table><thead><tr><th>Código</th><th>Descripción</th><th class="num">Veces</th><th class="num">Monto</th></tr></thead><tbody>'+
+       prodTop.map(function(c){ var x=gdPorProducto[c];
+         return '<tr><td><b>'+esc(c)+'</b></td><td>'+esc(String(x.desc).slice(0,70))+'</td><td class="num">'+x.cant+'</td><td class="num">'+money(x.monto)+'</td></tr>';
+       }).join("")+'</tbody></table></div>';
+
+    h+='<div style="overflow-x:auto;margin-top:10px"><table><thead><tr><th>N° Ticket</th><th>Fecha</th><th>Cliente</th><th>Asesor</th><th>Aprobado por</th><th>Motivo</th><th class="num">Monto</th></tr></thead><tbody>'+
+       gdir.slice().sort(function(a,b){ return String(b.t.garantiaDirecta.f||"").localeCompare(String(a.t.garantiaDirecta.f||"")); }).map(function(d){ var t=d.t, g=t.garantiaDirecta;
+         return '<tr><td><b>'+esc(t.numero)+'</b>'+(t.numeroAnterior?('<div class="muted" style="font-size:11px">antes '+esc(t.numeroAnterior)+'</div>'):'')+'</td>'+
+                '<td>'+esc(String(g.f||"").slice(0,10))+'</td><td>'+esc(t.razonSocial||"")+'</td><td>'+esc(t.vendedor||"")+'</td>'+
+                '<td><b>'+esc(g.por||"")+'</b></td><td>'+esc(g.com||"")+'</td><td class="num">'+money(g.total||0)+'</td></tr>';
+       }).join("")+'</tbody></table></div>';
+
+    h+='<div class="muted" style="margin-top:8px">Estas garantías no pasaron por revisión técnica: se aprueban bajo la autorización permanente acordada entre Revisión de garantía y Mercadería para productos cuyo historial de falla ya se conoce. Cada una queda con el nombre de quien la aprobó.</div></div>';
+  }
+
   /* ===== TICKETS ANULADOS ===== */
   h+='<div class="card" style="border-left:5px solid var(--rojo)"><div class="sec-title" style="margin-top:0">🗑 Tickets anulados</div>'+
      '<div class="grid4" style="margin-bottom:10px">'+
