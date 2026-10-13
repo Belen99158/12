@@ -972,7 +972,7 @@ function abrirNuevo(){
     '<div id="n-refact-wrap" style="display:none"><div class="card" style="background:#E3ECF7;border-color:#B9CBE3"><h3 style="font-size:16px;color:var(--navy);margin-bottom:6px">🔁 Devolución y refacturación</h3><div class="muted" style="margin-bottom:10px">⚠ La <b>guía es OBLIGATORIA también en refacturación</b>: selecciona tu guía arriba igual que en cualquier ticket (sin guía quedará pendiente y NO se enviará a mercadería). Mercadería validará la guía y <b>si ya está refacturado</b>. La NC se hará al cliente de quien se retira la mercadería y se <b>refactura al cliente destino</b>.</div><div class="field ac-wrap" style="margin-bottom:0"><label>⭐ Cliente al que se refactura / envía (elige de la lista o escríbelo) · obligatorio</label><input id="n-refact-cli" placeholder="Escribe mín. 2 letras para buscar, o escribe el nombre completo…" autocomplete="off" oninput="buscarRefactCliente()" onfocus="buscarRefactCliente()"><div class="ac-list" id="n-refact-list"></div></div></div></div>'+
     '<div id="n-aviso-dias"></div><div id="n-items"></div><div id="n-externos-wrap"></div>'+
     '<div class="card" style="background:#F0F3F7;margin-top:14px"><label style="display:flex;align-items:center;gap:8px;text-transform:none;font-size:14px;color:var(--ink);letter-spacing:0;cursor:pointer"><input type="checkbox" id="n-sobre" style="width:auto"> 📨 En esta guía también se envió un <b>sobre</b></label></div>'+
-    '<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px"><button class="btn btn-g" onclick="cerrarModal()">Cancelar</button><button class="btn btn-p" onclick="guardarTicket()">Guardar ticket</button></div></div></div>';
+    '<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px"><button class="btn btn-g" onclick="cerrarModal()">Cancelar</button><button class="btn btn-p" id="btn-guardar-ticket" onclick="guardarTicket()">Guardar ticket</button></div></div></div>';
 }
 function cerrarModal(){
   $("modal-root").innerHTML="";
@@ -1229,8 +1229,93 @@ function extSet(ix,campo,val){
     var td=$("ext-tot-"+ix); if(td) td.textContent=money(tot);
   }
 }
+/* ===== CANDADOS CONTRA TICKETS DUPLICADOS =====
+   Cuando el internet está lento, guardar tarda varios segundos: el formulario sigue
+   abierto, el ticket todavía no aparece en la bandeja y la gente vuelve a pulsar
+   "Guardar". Cada pulsación consumía un número de secuencia y creaba un ticket nuevo.
+   Tres candados, de más temprano a más tarde:
+     1) mientras un guardado está en curso el botón queda bloqueado y una segunda
+        pulsación no inicia nada;
+     2) antes de consumir el número se busca un ticket igual reciente y se avisa con
+        el número que ya existe, dando la opción de no repetirlo;
+     3) al terminar se dice en qué bandeja quedó, para que no haya dudas de si se guardó. */
+var guardadoEnCurso=false;
+var VENTANA_DUPLICADO_MIN=30;
+
+function bloquearGuardado(idBoton,texto){
+  guardadoEnCurso=true;
+  var b=$(idBoton); if(!b) return null;
+  b.setAttribute("data-txt",b.textContent);
+  b.disabled=true; b.style.opacity=".55"; b.style.cursor="progress";
+  b.textContent=texto||"⏳ Guardando…";
+  return b;
+}
+function liberarGuardado(b){
+  guardadoEnCurso=false;
+  if(!b) return;
+  b.disabled=false; b.style.opacity=""; b.style.cursor="";
+  var prev=b.getAttribute("data-txt"); if(prev) b.textContent=prev;
+}
+
+/* Firma de lo que se está registrando: mismo asesor, misma factura y exactamente los
+   mismos códigos con las mismas cantidades. Si eso ya existe, es la misma devolución. */
+function firmaTicket(vendedor,factura,items){
+  var l=(items||[]).map(function(i){ return (i.codigo||"")+"x"+(i.cantidad||0); }).sort().join("|");
+  return normNombre(vendedor||"")+"@"+String(factura||"").trim()+"@"+l;
+}
+function ticketDuplicadoReciente(vendedor,factura,items){
+  var firma=firmaTicket(vendedor,factura,items), limite=Date.now()-VENTANA_DUPLICADO_MIN*60000;
+  var lista=state.tickets||[];
+  for(var i=lista.length-1;i>=0;i--){
+    var t=lista[i];
+    if(!t||t.estado==="ELIMINADO") continue;
+    var ts=Date.parse(t.fechaTicket||"");
+    if(!ts||ts<limite) continue;
+    if(firmaTicket(t.vendedor,t.factura,t.items)===firma) return t;
+  }
+  return null;
+}
+function haceCuanto(iso){
+  var ms=Date.now()-Date.parse(iso||""); if(!(ms>=0)) return "hace un momento";
+  var min=Math.round(ms/60000);
+  if(min<1) return "hace menos de un minuto";
+  return "hace "+min+(min===1?" minuto":" minutos");
+}
+function bandejaDeTicket(t){
+  if(t.estado==="SIN_GUIA") return "\"Mis tickets\", pendiente de que le pongas la guía";
+  if(t.estado==="MERCADERIA") return "Revisión de mercadería";
+  return nombreBandeja(t.estado);
+}
+/* Aviso bloqueante por encima del formulario (el modal usa z-index 100).
+   Devuelve true solo si la persona decide crear otro ticket igual a conciencia. */
+function avisarDuplicado(t){
+  return new Promise(function(resolve){
+    var ov=document.createElement("div");
+    ov.style.cssText="position:fixed;inset:0;background:rgba(14,42,71,.7);z-index:400;display:flex;align-items:center;justify-content:center;padding:20px";
+    ov.innerHTML='<div style="background:#fff;border-radius:12px;max-width:560px;width:100%;padding:24px;box-shadow:0 12px 44px rgba(0,0,0,.35)">'+
+      '<h2 style="font-size:22px;color:var(--navy);margin-bottom:10px">⚠ Este ticket ya se hizo</h2>'+
+      '<div style="background:var(--warn-bg);border:1px solid #E8C766;border-radius:8px;padding:14px;margin-bottom:14px">'+
+        '<div style="font-size:26px;font-weight:700;color:var(--navy)">'+esc(t.numero||"")+'</div>'+
+        '<div class="muted" style="margin-top:2px">Registrado '+esc(haceCuanto(t.fechaTicket))+' por '+esc(t.vendedor||"")+'</div>'+
+        '<div style="margin-top:8px"><b>Cliente:</b> '+esc(t.razonSocial||"")+'</div>'+
+        '<div><b>Factura:</b> '+esc(t.factura||"")+'</div>'+
+        '<div><b>Está en:</b> '+esc(bandejaDeTicket(t))+'</div>'+
+      '</div>'+
+      '<div class="muted" style="margin-bottom:18px">Tiene el mismo cliente, la misma factura y los mismos productos con las mismas cantidades. Si guardaste y no lo viste aparecer, fue solo el internet: el ticket sí se guardó. Si creas otro, saldrá la misma mercadería dos veces.</div>'+
+      '<div style="display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">'+
+        '<button class="btn btn-p" data-a="no" style="background:var(--navy)">Ya está hecho, no repetir</button>'+
+        '<button class="btn btn-g" data-a="si">Es otra devolución, crear igual</button>'+
+      '</div></div>';
+    document.body.appendChild(ov);
+    function cerrar(v){ ov.remove(); resolve(v); }
+    ov.querySelector('[data-a="no"]').onclick=function(){ cerrar(false); };
+    ov.querySelector('[data-a="si"]').onclick=function(){ cerrar(true); };
+  });
+}
+
 async function guardarTicket(){
   if(!puedeActuar()){ toast("👁 Modo solo lectura: no puedes crear tickets fuera de tu propia pestaña.",4000); return; }
+  if(guardadoEnCurso){ toast("⏳ Ya se está guardando un ticket. Espera a que termine, no vuelvas a pulsar Guardar.",6000); return; }
   capturarItemsNuevo();
   var pideGuia=requiereGuia(me.name), guia=null;
   if(pideGuia){
@@ -1280,6 +1365,15 @@ async function guardarTicket(){
     });
   }
   if(items.length===0){ toast(dacion?"Ingresa cantidad en al menos un producto o agrega mercadería externa.":"Ingresa cantidad en al menos un producto."); return; }
+  /* Candado 2: ¿ya existe este mismo ticket? Se pregunta ANTES de consumir el número. */
+  var yaExiste=ticketDuplicadoReciente(me.name,dacion?nuevo.facturas.join(", "):nuevo.factura,items);
+  if(yaExiste){
+    var seguir=await avisarDuplicado(yaExiste);
+    if(!seguir){ cerrarModal(); render(); toast("El ticket "+yaExiste.numero+" ya estaba guardado. Lo encuentras en "+bandejaDeTicket(yaExiste)+".",8000); return; }
+  }
+  /* Candado 1: desde aquí hay esperas al servidor. Se bloquea el botón hasta terminar. */
+  var btnG=bloquearGuardado("btn-guardar-ticket");
+  try{
   var num=await siguienteNumero(prefijoDeMotivo(nuevo.motivo));
   var sobre=$("n-sobre")?$("n-sobre").checked:false;
   var facturasTicket=dacion?nuevo.facturas.slice():[nuevo.factura];
@@ -1291,11 +1385,14 @@ async function guardarTicket(){
   if(refact&&estadoInicial!=="SIN_GUIA") iniciarFlujoRefact(t,ahoraT,me.name);
   state.tickets.push(t); await saveState();
   cerrarModal();
-  if(estadoInicial==="SIN_GUIA") toast("✓ Ticket "+num+" guardado. ⏳ Pendiente: selecciona la guía en \"Mis tickets\" para enviarlo"+(refact?".":" a mercadería.")+" Sin guía no se puede imprimir.",6000);
-  else if(refact) toast("✓ Ticket "+num+" creado"+(guia?" con guía "+guia.numero:"")+" · Devolución y refacturación a "+t.refactCliente+". Enviado a la vez a Notas de crédito y a Revisión de mercadería.",6000);
-  else toast("✓ Ticket "+num+" creado"+(guia?" con guía "+guia.numero:"")+".");
-  if(!faltaGuiaParaImprimir(t)) setTimeout(function(){ imprimirTicket(t.id); },400);
+  /* Candado 3: se redibuja antes de avisar, para que el ticket ya esté visible en la
+     bandeja cuando la persona lea el mensaje, y el mensaje dice dónde quedó. */
   render();
+  if(estadoInicial==="SIN_GUIA") toast("✓ Ticket "+num+" guardado. ⏳ Pendiente: selecciona la guía en \"Mis tickets\" para enviarlo"+(refact?".":" a mercadería.")+" Sin guía no se puede imprimir.",8000);
+  else if(refact) toast("✓ Ticket "+num+" creado"+(guia?" con guía "+guia.numero:"")+" · Devolución y refacturación a "+t.refactCliente+". Enviado a la vez a Notas de crédito y a Revisión de mercadería.",8000);
+  else toast("✓ Ticket "+num+" creado"+(guia?" con guía "+guia.numero:"")+" y enviado a "+bandejaDeTicket(t)+". No vuelvas a guardarlo.",8000);
+  if(!faltaGuiaParaImprimir(t)) setTimeout(function(){ imprimirTicket(t.id); },400);
+  }finally{ liberarGuardado(btnG); }
 }
 /* ===== SOLO ENVIAR SOBRE (sin productos) ===== */
 function findSobre(id){ var s=state.sobres||[]; for(var i=0;i<s.length;i++){ if(s[i].id===id) return s[i]; } return null; }
@@ -1360,7 +1457,7 @@ function abrirAnioAnterior(){
     '<div class="grid2"><div class="field ac-wrap"><label>Cliente (razón social)</label><input id="na-cliente" placeholder="Escribe el nombre; si está en la base aparece como opción…" autocomplete="off" oninput="buscarClienteAnio()" onfocus="buscarClienteAnio()"><div class="ac-list" id="na-cliente-list"></div></div><div class="field"><label>RUC / CI</label><input id="na-ruc" placeholder="Se llena solo al elegir un cliente de la base" autocomplete="off"></div></div>'+
     '<div class="muted" style="margin:-4px 0 10px">💡 El <b>total</b> que escribas (con IVA incluido) será <b>validado por Devoluciones</b> y luego pasa al revisor de <b>Garantías</b>.</div>'+
     '<div id="na-items"></div>'+
-    '<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px"><button class="btn btn-g" onclick="cerrarModal()">Cancelar</button><button class="btn btn-p" onclick="guardarAnioAnterior()">Guardar ticket 2200</button></div></div></div>';
+    '<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px"><button class="btn btn-g" onclick="cerrarModal()">Cancelar</button><button class="btn btn-p" id="btn-guardar-2200" onclick="guardarAnioAnterior()">Guardar ticket 2200</button></div></div></div>';
   renderItemsAnio();
 }
 function renderItemsAnio(){
@@ -1403,6 +1500,7 @@ function anioQuitar(ix){ nuevoAnio.lineas.splice(ix,1); renderItemsAnio(); }
 async function guardarAnioAnterior(){
   if(!ANIO_ANTERIOR_HABILITADO){ toast("La creación de tickets de año anterior está deshabilitada.",4000); return; }
   if(!puedeActuar()){ toast("👁 Modo solo lectura.",4000); return; }
+  if(guardadoEnCurso){ toast("⏳ Ya se está guardando un ticket. Espera a que termine, no vuelvas a pulsar Guardar.",6000); return; }
   var pideGuia=requiereGuia(me.name), guia=null;
   if(pideGuia){
     var guiaId=$("na-guia")?$("na-guia").value:"";
@@ -1425,16 +1523,24 @@ async function guardarAnioAnterior(){
     items.push({codigo:cod,desc:(r.desc||"").trim()||"(sin descripción)",sub:"AÑO ANTERIOR "+anio,cantidad:cant,comVendedor:(r.com||"").trim(),neto:+tot.toFixed(2),iva:0,total:+tot.toFixed(2),factura:factura,anioAnterior:true});
   });
   if(items.length===0){ toast("Ingresa al menos una línea con código, cantidad y total."); return; }
+  var yaExisteA=ticketDuplicadoReciente(me.name,factura,items);
+  if(yaExisteA){
+    var seguirA=await avisarDuplicado(yaExisteA);
+    if(!seguirA){ cerrarModal(); render(); toast("El ticket "+yaExisteA.numero+" ya estaba guardado. Lo encuentras en "+bandejaDeTicket(yaExisteA)+".",8000); return; }
+  }
+  var btnA=bloquearGuardado("btn-guardar-2200");
+  try{
   var num=await siguienteNumero("2200");
   var estadoInicial=(pideGuia&&!guia)?"SIN_GUIA":"MERCADERIA";
   var ahora=new Date().toISOString();
   var t={id:"T"+Date.now(),numero:num,anioAnterior:true,anioFactura:anio,motivo:motivo,razonSocial:cliente,ruc:ruc,factura:factura,facturas:[factura],emision:anio+"-01-01",facturador:"",fechaTicket:ahora,vendedor:me.name,estado:estadoInicial,items:items,fechas:{},guiaId:guia?guia.id:null,guiaNumero:guia?guia.numero:"",sobre:false,historial:[{f:ahora,e:"Creado (año anterior "+anio+", "+(motivo==="GARANTIAS"?"garantía":"devolución")+") por "+me.name+(guia?" · Guía "+guia.numero:(pideGuia?" · guardado SIN guía (pendiente de envío)":""))}]};
   state.tickets.push(t); await saveState();
   cerrarModal();
-  if(estadoInicial==="SIN_GUIA") toast("✓ Ticket "+num+" guardado. ⏳ Selecciona la guía en \"Mis tickets\" para enviarlo a mercadería.",6000);
-  else toast("✓ Ticket "+num+" creado"+(guia?" con guía "+guia.numero:"")+".");
-  setTimeout(function(){ imprimirTicket(t.id); },400);
   render();
+  if(estadoInicial==="SIN_GUIA") toast("✓ Ticket "+num+" guardado. ⏳ Selecciona la guía en \"Mis tickets\" para enviarlo a mercadería.",8000);
+  else toast("✓ Ticket "+num+" creado"+(guia?" con guía "+guia.numero:"")+" y enviado a "+bandejaDeTicket(t)+". No vuelvas a guardarlo.",8000);
+  setTimeout(function(){ imprimirTicket(t.id); },400);
+  }finally{ liberarGuardado(btnA); }
 }
 
 /* ===== ASIGNAR GUÍA A TICKET PENDIENTE (SIN_GUIA) Y ENVIAR ===== */
