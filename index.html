@@ -164,7 +164,18 @@ var VISTAS=[{role:"ASESOR",label:"Asesor"},{role:"MERCADERIA",label:"Rev. Mercad
    Los tickets antiguos que ya tienen ese motivo se siguen mostrando y procesando igual. */
 var MOTIVOS=["DACION EN PAGOS","GESTION COMERCIAL CLIENTE VENDEDOR","LOGISTICA BODEGA","LOGISTICA TRANSPORTE","DEVOLUCION Y REFACTURACION","GARANTIAS","INCIDENCIA GESTIONES ERRONEAS IMPORTACIONES"];
 /* Descripción que se muestra junto a cada motivo (solo texto de ayuda; el valor guardado no cambia) */
-var MOTIVO_DESC={"LOGISTICA BODEGA":"excedente o faltante de productos","LOGISTICA TRANSPORTE":"maltrato de mercadería","GESTION COMERCIAL CLIENTE VENDEDOR":"mal pedido cliente/vendedor","INCIDENCIA GESTIONES ERRONEAS IMPORTACIONES":"no aplica"};
+/* Garantia directa: productos que ya se sabe que vuelven por su historial. NO esta en
+   MOTIVOS a proposito, para que el asesor no lo vea al crear el ticket; solo aparece en
+   la pantalla de corregir el motivo, y solo para Mercaderia y Administrativo. Al
+   aplicarlo el ticket salta la revision tecnica y pasa a Notas de credito ya aprobado,
+   con el nombre de quien lo aprobo. */
+var MOTIVO_GARANTIA_DIRECTA="GARANTIA DIRECTA";
+function motivosParaCorregir(){
+  var r=rolActivo();
+  var puedeDirecta=esSuperAdmin()||r==="MERCADERIA"||r==="ADMIN";
+  return puedeDirecta?MOTIVOS.concat([MOTIVO_GARANTIA_DIRECTA]):MOTIVOS.slice();
+}
+var MOTIVO_DESC={"GARANTIA DIRECTA":"sin revisión técnica, va directo a nota de crédito","LOGISTICA BODEGA":"excedente o faltante de productos","LOGISTICA TRANSPORTE":"maltrato de mercadería","GESTION COMERCIAL CLIENTE VENDEDOR":"mal pedido cliente/vendedor","INCIDENCIA GESTIONES ERRONEAS IMPORTACIONES":"no aplica"};
 var MARCAS=["PERMATEX","ORIGINAL","VALEO","MAHLE","ABRO","LUBA AUTOPARTS","SEIWA","NPR","SABO","APLIC","JCC","MAGNETI MARELLI","AUTOTOP","GMP","AISIN","AMC","FTE","YSK","GEN","SCHADEK","OTRO"];
 var ESTADO_LABEL={SIN_GUIA:"Guardado · pendiente de guía",MERCADERIA:"En revisión mercadería",DEVOLUCION:"En revisión devolución",GARANTIA:"En revisión garantía",MIXTO:"Mixto: devolución + garantía",NC:"En notas de crédito",NO_LLEGO:"No llegó",DEV_RECHAZADA:"Devolución no aceptada",GAR_RECHAZADA:"Garantía no aceptada",RECHAZADA:"Devolución y garantía no aceptadas",GUIA_INCORRECTA:"Devuelto por guía incorrecta",ELIMINADO:"Eliminado",DACION_ADMIN:"En autorización administrativa (dación en pagos)",DACION_RECHAZADA:"Dación en pagos no aceptada"};
 var MESES=["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
@@ -729,7 +740,7 @@ function findT(id){ for(var i=0;i<state.tickets.length;i++){ if(state.tickets[i]
 function findGuia(id){ var g=state.guias||[]; for(var i=0;i<g.length;i++){ if(g[i].id===id) return g[i]; } return null; }
 function sucursalDe(factura){ var m=String(factura||"").match(/(\d{3})/); var cod=m?m[1]:""; return {codigo:cod,nombre:SUCURSALES[cod]||(cod?"Sucursal "+cod:"Sin sucursal")}; }
 function codigosUsados(factura){ var s={}; state.tickets.forEach(function(t){ if(t.factura===factura&&t.estado!=="ELIMINADO") t.items.forEach(function(i){ s[i.codigo]=t.numero; }); }); return s; }
-function tipoDeItem(t,i){ return i.tipo||(t.motivo==="GARANTIAS"?"GARANTIA":"DEVOLUCION"); }
+function tipoDeItem(t,i){ return i.tipo||((t.motivo==="GARANTIAS"||t.motivo===MOTIVO_GARANTIA_DIRECTA)?"GARANTIA":"DEVOLUCION"); }
 /* Suma, por código, la cantidad YA devuelta en tickets activos (no ELIMINADO) de esa factura, y guarda en qué tickets se devolvió. Permite reutilizar el mismo código en varios tickets controlando el saldo.
    Soporta tickets de Dación en pagos que cubren VARIAS facturas (t.facturas / i.factura); para tickets antiguos de una sola factura, cae de vuelta a t.factura tal como siempre. */
 function devolucionesPorCodigo(factura){
@@ -1120,7 +1131,7 @@ function renderItemsBody(){
 function nCalc(i){ var r=nuevo.lineas[i]; if(!r) return; var max=(nuevo.restante&&nuevo.restante[i]!==undefined)?nuevo.restante[i]:r.cant; var el=$("q-"+i); var q=Math.max(0,Math.min(max,+(el?el.value:0))); if(el) el.value=q; nuevo.cant=nuevo.cant||{}; nuevo.cant[i]=q; if($("tt-"+i)) $("tt-"+i).textContent=money(totalLinea(r,q)); }
 function nCom(i){ var el=$("c-"+i); if(!el) return; nuevo.com=nuevo.com||{}; nuevo.com[i]=el.value; }
 /* Serie según el motivo: 5200 garantías · 8800 devolución y refacturación · 3200 el resto */
-function prefijoDeMotivo(m){ return m==="GARANTIAS"?"5200":(m==="DEVOLUCION Y REFACTURACION"?"8800":"3200"); }
+function prefijoDeMotivo(m){ return (m==="GARANTIAS"||m===MOTIVO_GARANTIA_DIRECTA)?"5200":(m==="DEVOLUCION Y REFACTURACION"?"8800":"3200"); }
 function nNum(){ var m=$("n-motivo").value; nuevo.motivo=m; if(!m){ $("n-num").value=""; return; } var pref=prefijoDeMotivo(m); var nx=Math.max(state["seq"+pref]||0,maxNumeroSerie(pref))+1; $("n-num").value=pref+"-"+String(nx).padStart(4,"0"); }
 /* ===== DACIÓN EN PAGOS: facturas múltiples + mercadería externa ===== */
 function esDacion(){ return !!(nuevo&&nuevo.motivo==="DACION EN PAGOS"); }
@@ -1808,6 +1819,17 @@ function verTicket(id){
   if(t.motivoRevision){ var mr=t.motivoRevision; h+='<div class="card" style="margin-top:12px;background:'+(mr.correcto?"var(--ok-bg)":"var(--bad-bg)")+';border-color:'+(mr.correcto?"#A9D9BF":"#E8B0AB")+'"><h3 style="color:var(--navy)">🔎 Comprobación del motivo</h3><div class="kv" style="margin-top:6px"><b>Motivo del asesor</b><span>'+esc(mr.motivoAsesor||t.motivo)+'</span><b>Según el revisor</b><span>'+(mr.correcto?'<span class="tag tag-nc">Coincide</span>':'<span class="tag tag-bad">No coincide</span> → <b>'+esc(mr.motivoCorregido||"")+'</b>')+'</span>'+(mr.com?'<b>Observación</b><span>'+esc(mr.com)+'</span>':'')+'<b>Revisado por</b><span>'+esc(mr.por||"")+' · '+fdate(mr.f)+'</span></div></div>'; }
   if(t.items.some(function(i){return i.merc;})) h+='<div class="card" style="margin-top:12px"><h3 style="color:var(--navy)">Revisión de mercadería</h3>'+t.items.map(function(i){ return i.merc?'<div style="margin:6px 0">• <b>'+esc(i.codigo)+'</b>: llegaron <b>'+llegoQ(i)+'</b> de '+i.cantidad+' — '+esc(i.merc.com||"sin comentario")+'</div>':''; }).join("")+'</div>';
   if(t.gar){ var rechV=garItemsRechazados(t), hayR=rechV.length>0, totAcepV=totalAceptado(t); h+='<div class="card"><h3 style="color:var(--navy)">Revisión de garantía</h3>'; h+=t.items.map(function(i,x){ if(llegoQ(i)>0&&tipoDeItem(t,i)==="GARANTIA"){ var ca=garCantAcep(t,i,x), cr=garCantRech(t,i,x); return '<div style="margin:6px 0">• <b>'+esc(i.codigo)+'</b>: '+(ca>0?'<span style="color:var(--ok)">'+ca+' aceptada(s) → NC</span>':'')+(ca>0&&cr>0?' · ':'')+(cr>0?'<span style="color:var(--bad)">'+cr+' rechazada(s) → informe</span>':'')+' <span class="muted">(de '+llegoQ(i)+' que llegaron)</span></div>'; } return ""; }).join(""); if(totAcepV>0) h+='<div style="margin-top:6px;font-weight:600">Total aceptado (NC): '+money(totAcepV)+'</div>'; h+='<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">'; if(hayR) h+='<button class="btn btn-g btn-sm" onclick="pdfCartaGar(\''+t.id+'\')">Ver carta + informe</button>'; if(me&&puedeActuar()&&(rolActivo()==="GARANTIA"||rolActivo()==="ADMIN")) h+='<button class="btn btn-a btn-sm" onclick="editarGar(\''+t.id+'\')">✎ Editar</button>'; h+='</div></div>'; }
+  /* Sello visible: una garantia directa no paso por el tecnico, y eso debe verse en el
+     ticket, no solo en el historial. */
+  if(t.garantiaDirecta){
+    h+='<div class="card" style="background:#FFF4D6;border-color:#E8C766">'+
+       '<h3 style="color:var(--navy);font-size:16px;margin-bottom:6px">⚡ Garantía directa</h3>'+
+       '<div class="kv"><b>Aprobado por</b><span><b>'+esc(t.garantiaDirecta.por)+'</b></span>'+
+       '<b>Fecha</b><span>'+fdate(t.garantiaDirecta.f)+'</span>'+
+       '<b>Monto aprobado</b><span>'+money(t.garantiaDirecta.total||0)+'</span>'+
+       '<b>Motivo</b><span>'+esc(t.garantiaDirecta.com||"")+'</span></div>'+
+       '<div class="muted" style="margin-top:6px">Producto de historial conocido: no pasó por revisión técnica.</div></div>';
+  }
   if(t.nc){ h+='<div class="card"><h3 style="color:var(--navy)">Nota de crédito</h3><div>'+(t.nc.hecha?"NC HECHA":"PENDIENTE")+(t.nc.numero?" · N° <b>"+esc(t.nc.numero)+"</b>":"")+'</div>'+(t.nc.pdfKey?'<button class="btn btn-g btn-sm" style="margin-top:8px" onclick="verPdfNC(\''+t.id+'\')">Ver PDF</button>':'')+'</div>'; }
   if(t.estado==="DACION_ADMIN"||t.estado==="DACION_RECHAZADA"){
     h+='<div class="card"><h3 style="color:var(--navy)">Dación en pagos</h3>';
@@ -2241,6 +2263,14 @@ function puedeReclasificar(){
 function yaEncaminado(t){
   return ["DEVOLUCION","GARANTIA","MIXTO","DACION_ADMIN","NO_LLEGO"].indexOf(t.estado)>=0;
 }
+/* Suma de lo que efectivamente llego, que es lo que se aprueba en una garantia directa. */
+function totalLlegado(t){
+  return (t.items||[]).reduce(function(s,i){
+    var q=llegoQ(i); if(q<=0) return s;
+    var f=i.cantidad?q/i.cantidad:0;
+    return s+(i.total||0)*f;
+  },0);
+}
 function nombreBandeja(e){
   return {DEVOLUCION:"Revisión de devolución",GARANTIA:"Revisión de garantía",MIXTO:"Devolución y garantía (mixto)",
           DACION_ADMIN:"Autorización administrativa",NO_LLEGO:"No llegó mercadería",NC:"Notas de crédito"}[e]||e;
@@ -2249,7 +2279,7 @@ function abrirReclasificar(id){
   var t=findT(id); if(!t) return;
   if(!puedeReclasificar()){ toast("👁 Solo Mercadería, los revisores de devolución y garantía, o Administrativo pueden corregir el motivo.",4000); return; }
   rcTicketId=id;
-  var opciones=MOTIVOS.map(function(m){
+  var opciones=motivosParaCorregir().map(function(m){
     return '<option value="'+esc(m)+'"'+(m===t.motivo?" selected":"")+">"+esc(m)+" · serie "+prefijoDeMotivo(m)+"</option>";
   }).join("");
   $("modal-root").innerHTML=
@@ -2278,6 +2308,14 @@ function rcAviso(){
     ? '<div class="muted">El número <b>'+esc(t.numero)+'</b> se mantiene: sigue en la serie '+ahora+'.</div>'
     : '<div style="background:#FFF4D6;border:1px solid #E8C766;border-radius:8px;padding:10px 12px">⚠ Cambia de serie <b>'+antes+'</b> a <b>'+ahora+'</b>: el ticket recibirá un <b>número nuevo</b> de la serie '+ahora+', y quedará constancia de que antes era '+esc(t.numero)+'.</div>';
   /* Si ya esta en una bandeja, se calcula a cual se movera con el motivo nuevo. */
+  if(sel.value===MOTIVO_GARANTIA_DIRECTA){
+    caja.innerHTML = txt +
+      '<div style="background:#FFF4D6;border:1px solid #E8C766;border-radius:8px;padding:10px 12px;margin-top:8px">'+
+      '<b>⚠ Garantía directa: salta la revisión técnica.</b><br>'+
+      'El ticket pasa de una vez a <b>Notas de crédito</b>, con los productos ya aceptados por un total de <b>'+
+      money(totalLlegado(t))+'</b>.<br>Quedará registrado como <b>aprobado por '+esc(me?me.name:"")+'</b>.</div>';
+    return;
+  }
   if(yaEncaminado(t)){
     var prueba=JSON.parse(JSON.stringify(t)); prueba.motivo=sel.value; prueba.historial=[];
     var guardaMe=me; try{ routeTrasMerc(prueba,new Date().toISOString(),""); }catch(e){} me=guardaMe;
@@ -2305,10 +2343,30 @@ async function guardarReclasificar(){
   }
   t.reclasificacion={de:antesMotivo,a:nuevoMotivo,numeroAnterior:antesNumero,numeroNuevo:t.numero,com:com,por:me.name,f:ahora};
   t.historial.push({f:ahora,e:"Motivo corregido: de «"+antesMotivo+"» a «"+nuevoMotivo+"»"+(prefA!==prefB?(" · número "+antesNumero+" → "+t.numero):"")+" ("+me.name+"). Motivo: "+com});
+  var bandejaAntes=t.estado;
+  /* GARANTIA DIRECTA: no pasa por el tecnico. Se aceptan los productos que llegaron y el
+     ticket va a Notas de credito, dejando constancia de quien lo aprobo. Se usa la misma
+     marca "auto" del flujo 8800, para que la nota de credito calcule el monto sola y para
+     que al vendedor no se le avise de ningun rechazo (no se rechaza nada). */
+  if(nuevoMotivo===MOTIVO_GARANTIA_DIRECTA){
+    var aprobados=0;
+    (t.items||[]).forEach(function(i){
+      var q=llegoQ(i); if(q<=0) return;
+      i.dev={acepta:true,cantAcep:q,com:"Garantía directa",por:me.name,f:ahora,auto:true};
+      aprobados++;
+    });
+    if(!aprobados){ toast("⚠ Este ticket no tiene productos recibidos; no se puede aprobar como garantía directa."); return; }
+    t.garantiaDirecta={por:me.name,f:ahora,com:com,total:totalLlegado(t)};
+    t.devPendiente=false; t.garPendiente=false; t.devSolicitado=false; t.garSolicitado=true;
+    t.estado="NC"; t.nc=t.nc||{hecha:false};
+    t.fechas=t.fechas||{}; t.fechas.garantia=ahora;
+    t.historial.push({f:ahora,e:"GARANTÍA DIRECTA · aprobada sin revisión técnica por "+me.name+" · "+aprobados+" producto(s) por "+money(t.garantiaDirecta.total)+" → Notas de crédito. Motivo: "+com});
+    t.reclasificacion.bandejaAnterior=bandejaAntes;
+    t.reclasificacion.bandejaNueva="NC";
+  }
   /* Si el ticket ya estaba en una bandeja, se vuelve a encaminar con el motivo nuevo,
      para que le llegue a quien corresponde en vez de quedarse donde estaba. */
-  var bandejaAntes=t.estado;
-  if(yaEncaminado(t)){
+  else if(yaEncaminado(t)){
     t.devPendiente=false; t.garPendiente=false; t.devSolicitado=false; t.garSolicitado=false;
     routeTrasMerc(t,ahora,"Reencaminado tras corregir el motivo → ");
     t.reclasificacion.bandejaAnterior=bandejaAntes;
