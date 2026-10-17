@@ -68,7 +68,24 @@ Es un bloque nuevo: **no cambia ninguna de las reglas que ya funcionan**.
 ## Cómo se usa
 
 Copiar `config.ejemplo.json` como `config.json` y llenar los datos. Después,
-desde esta carpeta, **tres pasos, de menos a más compromiso**:
+desde esta carpeta, **de menos a más compromiso**:
+
+### Paso 0 — Si no sabes la dirección de Perseo
+
+```bash
+node conector.js direccion 192.168.1.50
+```
+
+(con la IP de la máquina donde está instalado Perseo)
+
+Prueba los puertos más habituales y dice en cuál hay algo escuchando. La buena
+señal es un **`CONTESTA` con un número**: ahí hay un servidor que entendió el
+pedido y lo rechazó por la clave, que es justo lo que se espera.
+
+Usa una clave falsa a propósito: solo necesita saber si alguien responde, así
+que **tu API Key real no sale a ningún lado mientras busca**.
+
+Si ya te dieron la dirección, te saltas este paso.
 
 ### Paso 1 — Solo saludar a Perseo
 
@@ -112,7 +129,34 @@ sistema de verdad no lee.** La base real no se toca.
 
 ---
 
-## El candado
+## Los dos candados
+
+### 1. En Perseo: solo puede leer
+
+La API Key de Perseo es **la misma para el ambiente de pruebas y el real**, así
+que la clave no separa un servidor del otro: lo único que los separa es la URL.
+Como eso no alcanza, el programa lleva una lista blanca de los únicos cinco
+endpoints que puede llamar, **todos de consulta**:
+
+`facturas_consulta` · `consultar_clientes` · `consulta_producto` ·
+`facturadores_consulta` · `almacenes_consulta`
+
+Cualquier otro lo rechaza **antes de salir a la red**, y además rechaza por
+nombre todo lo que diga *crear, editar, actualizar, eliminar, autorizar,
+aprobar o borrar*:
+
+```
+BLOQUEADO: "facturas_crear" es un endpoint que ESCRIBE en Perseo.
+  Este conector es de solo lectura y no puede llamarlo.
+```
+
+Queda fuera, en particular, `facturas_crear` — el que con el código `"04"`
+emitiría una nota de crédito **real ante el SRI**.
+
+**Aunque este programa apunte al Perseo de verdad, ahí solo puede leer.** Para
+que pudiera escribir habría que venir al código y cambiar esa lista a propósito.
+
+### 2. En Firebase: no toca la base real
 
 El programa **se niega** a escribir sobre la base real (`baseFacturas`) a menos
 que se lo pida a propósito con `--si-es-la-real`. Y la revisión se hace antes de
@@ -129,15 +173,21 @@ que esto toque lo que está usando la gente.**
 node prueba.js
 ```
 
-Corre 22 comprobaciones sin necesidad de Perseo ni de internet: el armado del
-número de factura, los tres formatos de fecha, el cálculo de neto/IVA/total, que
-las notas de crédito se descuenten de su factura y no se cuenten como venta, y
-los distintos formatos en que Perseo podría envolver la respuesta.
+Corre **29 comprobaciones** sin necesidad de Perseo ni de internet: el armado
+del número de factura, los tres formatos de fecha, el cálculo de neto/IVA/total,
+que las notas de crédito se descuenten de su factura y no se cuenten como venta,
+los distintos formatos en que Perseo podría envolver la respuesta, y que el
+candado de solo lectura bloquee de verdad `facturas_crear`, `facturas_autorizar`,
+`clientes_eliminar`, `crear_salidas`, `productos_editar` y cualquier endpoint
+fuera de la lista.
 
-La más importante es la última: toma el `descomprimirBase()` **real** de
+La más importante es la de la base: toma el `descomprimirBase()` **real** de
 `index.html` y comprueba que puede leer lo que genera el conector, campo por
 campo. Si algún día cambia el formato de la base en la página, esta prueba
 falla y avisa.
+
+Si al correrlo el número no da 29, es que este archivo quedó desactualizado
+frente al código: **manda el número que diga `prueba.js`, no el que diga aquí.**
 
 ---
 
