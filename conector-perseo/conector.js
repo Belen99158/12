@@ -453,7 +453,7 @@ async function buscarDireccion(ip){
         else estado = "";
       }
       if(estado){
-        console.log("   " + estado.padEnd(34) + url);
+        console.log("   " + estado.padEnd(36) + " " + url);
         encontrados.push({ url, estado });
       }
     }
