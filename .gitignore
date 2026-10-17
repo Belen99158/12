@@ -1,1 +1,5 @@
 .claude/
+
+# Claves y datos de la conexion con Perseo: NUNCA deben subirse a GitHub.
+conector-perseo/config.json
+conector-perseo/muestra-perseo.json

@@ -1,0 +1,20 @@
+{
+  "_comentario": "Copia este archivo como config.json y llena los datos. config.json NO se sube a GitHub.",
+
+  "perseo": {
+    "url": "https://192.168.1.XXX:PUERTO",
+    "api_key": "PEGA_AQUI_LA_API_KEY_DE_PERSEO",
+    "aceptarCertificadoLocal": true,
+    "dias": 400,
+    "diasPrueba": 7,
+    "timeoutSegundos": 180
+  },
+
+  "firebase": {
+    "databaseURL": "https://devoluciones-y-garantias-default-rtdb.firebaseio.com",
+    "apiKey": "AIzaSyDI_Xszfjw9f_O1CsL0VC8F_dNtWGEvmo8",
+    "usuario": "conector@lubamaqui-devoluciones.local",
+    "password": "PEGA_AQUI_LA_CLAVE_DEL_USUARIO_CONECTOR",
+    "ruta": "baseFacturasPruebas"
+  }
+}
