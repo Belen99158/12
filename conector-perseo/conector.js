@@ -116,7 +116,44 @@ function postJSON(url, cuerpo, opciones){
 }
 
 /* ---------------------------------------------------------------- Perseo -- */
+
+/* LO UNICO QUE ESTE PROGRAMA TIENE PERMITIDO PEDIRLE A PERSEO.
+   Los cinco son de SOLO LECTURA: consultan y devuelven datos. Ninguno crea,
+   modifica ni borra nada en Perseo.
+
+   Esto importa porque la api_key de Perseo es la misma para el servidor de
+   pruebas y para el real, asi que la clave sola no protege nada. Este candado
+   si: aunque alguien apunte este programa al Perseo de verdad, lo unico que
+   puede hacer ahi es LEER. Para que pudiera escribir algo habria que venir a
+   esta lista y cambiarla a proposito.
+
+   Lo que queda fuera, y seguira quedando fuera: facturas_crear (que con el
+   codigo "04" genera una nota de credito REAL ante el SRI), y todo lo que
+   termine o empiece en crear / editar / actualizar / eliminar / autorizar. */
+const ENDPOINTS_PERMITIDOS = [
+  "facturas_consulta",        /* facturas y notas de credito */
+  "consultar_clientes",       /* razon social y RUC */
+  "consulta_producto",        /* codigos y descripciones */
+  "facturadores_consulta",    /* vendedores y asesores */
+  "almacenes_consulta"        /* bodegas */
+];
+
+const PALABRAS_QUE_ESCRIBEN = /(^|_)(crear|editar|actualizar|eliminar|autorizar|aprobar|borrar)(_|$)/i;
+
+function revisarEndpoint(endpoint){
+  const e = String(endpoint || "").toLowerCase();
+  if(PALABRAS_QUE_ESCRIBEN.test(e)){
+    throw new Error("BLOQUEADO: \"" + endpoint + "\" es un endpoint que ESCRIBE en Perseo.\n" +
+                    "  Este conector es de solo lectura y no puede llamarlo.");
+  }
+  if(ENDPOINTS_PERMITIDOS.indexOf(e) < 0){
+    throw new Error("BLOQUEADO: \"" + endpoint + "\" no esta en la lista de endpoints permitidos.\n" +
+                    "  Permitidos (todos de solo lectura): " + ENDPOINTS_PERMITIDOS.join(", "));
+  }
+}
+
 function pedirAPerseo(cfg, endpoint, cuerpo){
+  revisarEndpoint(endpoint);
   const base = String(cfg.perseo.url).replace(/\/+$/, "");
   const url  = base + "/api/" + endpoint;
   const body = Object.assign({ api_key: cfg.perseo.api_key }, cuerpo || {});
@@ -400,6 +437,8 @@ async function main(){
   try{
     r = await pedirAPerseo(cfg, "facturas_consulta", { dias: dias, generarpdf: false, control: false });
   }catch(e){
+    /* Un bloqueo del candado no es un problema de red: se muestra tal cual. */
+    if(/^BLOQUEADO/.test(e.message)) salir(e.message);
     salir("No se pudo hablar con Perseo:\n  " + e.message + "\n\n" +
           "  Revisa que:\n" +
           "   - esta maquina este en la red de la oficina\n" +
@@ -447,4 +486,4 @@ if(require.main === module){
   main().catch(function(e){ salir("Fallo inesperado: " + (e && e.message ? e.message : e)); });
 }
 
-module.exports = { traducir, comprimirBase, armarNumeroFactura, soloFecha, mesDe, sacarListaDeFacturas };
+module.exports = { revisarEndpoint, ENDPOINTS_PERMITIDOS, traducir, comprimirBase, armarNumeroFactura, soloFecha, mesDe, sacarListaDeFacturas };

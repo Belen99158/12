@@ -92,5 +92,22 @@ ok("acepta respuesta como arreglo suelto", traducir(respuesta.facturas).filas.le
 ok("acepta envoltorio 'data'", traducir({ data: respuesta.facturas }).filas.length === 2);
 ok("respuesta vacia no revienta", traducir({}).filas.length === 0);
 
+/* --- el candado de solo lectura ------------------------------------------- */
+/* Lo que de verdad protege a Perseo: aunque este programa apunte al servidor
+   real, solo puede LEER. Se comprueba que deje pasar las consultas y que
+   bloquee todo lo que escribe. */
+const { revisarEndpoint } = require("./conector.js");
+function bloquea(ep){
+  try{ revisarEndpoint(ep); return false; }
+  catch(e){ return /BLOQUEADO/.test(e.message); }
+}
+console.log("");
+ok("deja pasar facturas_consulta",   !bloquea("facturas_consulta"));
+ok("BLOQUEA facturas_crear",          bloquea("facturas_crear"));
+ok("BLOQUEA facturas_autorizar",      bloquea("facturas_autorizar"));
+ok("BLOQUEA clientes_eliminar",       bloquea("clientes_eliminar"));
+ok("BLOQUEA crear_salidas",           bloquea("crear_salidas"));
+ok("BLOQUEA productos_editar",        bloquea("productos_editar"));
+ok("BLOQUEA cualquier otro endpoint", bloquea("cobros_consulta"));
 console.log("\n" + (fallos ? fallos + " FALLOS" : "Todo pasa."));
 process.exit(fallos ? 1 : 0);
