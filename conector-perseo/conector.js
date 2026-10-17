@@ -414,15 +414,80 @@ function resumen(res){
   console.log("");
 }
 
+/* --------------------------------------------------- encontrar el servidor -- */
+/* Ayuda a dar con la direccion de Perseo cuando no se sabe el puerto.
+   Prueba los puertos mas habituales en la IP que se le indique y dice en cual
+   hay algo escuchando. NO manda la api_key de verdad: usa una falsa, porque
+   solo necesita saber si alguien contesta, no entrar. */
+const PUERTOS_HABITUALES = [443, 8443, 8080, 8081, 9000, 9443, 3000, 5000, 80];
+
+async function buscarDireccion(ip){
+  ip = String(ip || "").trim().replace(/^https?:\/\//, "").replace(/[/:].*$/, "");
+  if(!ip){
+    console.log("\n  Uso:  node conector.js direccion 192.168.1.50\n" +
+                "  (la IP de la maquina donde esta instalado Perseo)\n");
+    process.exit(1);
+  }
+
+  console.log("\n  Buscando Perseo en " + ip + " ...");
+  console.log("  (se prueba con una clave falsa: lo unico que interesa es si alguien contesta)\n");
+
+  const encontrados = [];
+  for(const puerto of PUERTOS_HABITUALES){
+    for(const esquema of ["https", "http"]){
+      /* el puerto por defecto no se escribe, como dice la documentacion para el caso local */
+      const omitir = (esquema === "https" && puerto === 443) || (esquema === "http" && puerto === 80);
+      const url = esquema + "://" + ip + (omitir ? "" : ":" + puerto);
+      let estado = "";
+      try{
+        await postJSON(url + "/api/facturas_consulta", { api_key: "PRUEBA-DE-CONEXION", dias: 1 },
+                       { permitirCertificadoPropio: true, timeout: 4000 });
+        estado = "contesta y acepta"; /* raro, pero es una respuesta */
+      }catch(e){
+        const m = e.message || "";
+        if(/respondio (\d+)/.test(m))            estado = "CONTESTA (" + m.match(/respondio (\d+)/)[1] + ")";
+        else if(/no es JSON valido/.test(m))     estado = "CONTESTA (pero no es la API)";
+        else if(/ECONNREFUSED/.test(m))          estado = "";   /* nada escuchando */
+        else if(/tiempo|ETIMEDOUT|EHOSTUNREACH/.test(m)) estado = "";
+        else if(/certificate|SSL|EPROTO/i.test(m)) estado = "CONTESTA (problema de certificado)";
+        else estado = "";
+      }
+      if(estado){
+        console.log("   " + estado.padEnd(34) + url);
+        encontrados.push({ url, estado });
+      }
+    }
+  }
+
+  console.log("");
+  if(!encontrados.length){
+    console.log("  No contesto nada en esa IP.\n\n" +
+                "  Puede ser que:\n" +
+                "   - esta maquina no este en la misma red que el servidor\n" +
+                "   - la IP no sea esa (revisa el paso 1 y 2 del LEEME)\n" +
+                "   - Perseo use un puerto fuera de los habituales: preguntaselo al proveedor\n");
+  }else{
+    const api = encontrados.filter(e => /^CONTESTA \(\d/.test(e.estado));
+    console.log("  La buena senal es un CONTESTA con numero: ahi hay un servidor que");
+    console.log("  entiende el pedido y lo rechazo por la clave falsa, que es lo esperado.\n");
+    if(api.length) console.log("  Lo mas probable es:  " + api[0].url + "\n");
+    console.log("  Pon esa direccion en config.json y corre:  node conector.js probar\n");
+  }
+}
+
 /* ------------------------------------------------------------------ main -- */
 async function main(){
   const orden = (process.argv[2] || "").toLowerCase();
+
+  if(orden === "direccion"){ await buscarDireccion(process.argv[3]); return; }
+
   if(["probar", "ver", "subir"].indexOf(orden) < 0){
     console.log("\n  CONECTOR PERSEO -> BASE DE FACTURAS\n" +
                 "  ----------------------------------------------------\n" +
-                "    node conector.js probar   solo mira que responde Perseo (no escribe nada)\n" +
-                "    node conector.js ver      trae y traduce, muestra resumen (no escribe nada)\n" +
-                "    node conector.js subir    ademas sube la base a Firebase\n");
+                "    node conector.js direccion <IP>   busca en que puerto responde Perseo\n" +
+                "    node conector.js probar           solo mira que responde Perseo (no escribe nada)\n" +
+                "    node conector.js ver              trae y traduce, muestra resumen (no escribe nada)\n" +
+                "    node conector.js subir            ademas sube la base a Firebase\n");
     process.exit(1);
   }
 
