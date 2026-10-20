@@ -1056,7 +1056,7 @@ function nRazon(){
 function nFact(){
   var f=$("n-fact").value; nuevo.factura=f;
   var rows=base.filter(function(x){ return x.razon.trim()===nuevo.razon&&x.factura===f; });
-  nuevo.lineas=rows; nuevo.cant={}; nuevo.com={}; nuevo.emision=rows[0]?rows[0].emision:""; nuevo.ruc=rows[0]?rows[0].ruc:""; nuevo.facturador=rows[0]?rows[0].facturador:"";
+  nuevo.lineas=rows; nuevo.cant={}; nuevo.com={}; nuevo.const={}; nuevo.emision=rows[0]?rows[0].emision:""; nuevo.ruc=rows[0]?rows[0].ruc:""; nuevo.facturador=rows[0]?rows[0].facturador:"";
   $("n-emi").value=fdate(nuevo.emision); filtroItems="";
   avisoDias30(nuevo.emision); renderItemsNuevo();
 }
@@ -1105,6 +1105,12 @@ function renderItemsBody(){
     var yaDev=dev.cant[r.codigo]||0;
     var creditoExt=r.creditoAplicado||0;
     var restante=Math.max(0,r.cant-yaDev);
+    /* CONSTANCIA (solo ADMIN): línea que contabilidad ya acreditó por completo con una NC. Se puede registrar igual,
+       solo para dejar constancia. Máximo = lo vendido (saldo + lo acreditado) menos lo ya registrado en tickets activos. */
+    nuevo.const=nuevo.const||{};
+    var agotadoNC=restante<=0&&creditoExt>0&&puedeConstancia();
+    var restanteConst=Math.max(0,r.cant+creditoExt-yaDev);
+    if(agotadoNC&&nuevo.const[i]&&restanteConst>0) restante=restanteConst;
     nuevo.restante[i]=restante;
     var agotado=restante<=0;
     var txt=(r.codigo+" "+r.desc+" "+r.sub+" "+r.factura).toUpperCase();
@@ -1120,6 +1126,9 @@ function renderItemsBody(){
     if(creditoExt>0){
       info+='<br><span class="tag tag-bad">Ya con NC en contabilidad: '+creditoExt.toFixed(2)+'</span>';
     }
+    if(agotadoNC&&restanteConst>0){
+      info+='<br><label style="font-size:12px;cursor:pointer"><input type="checkbox" '+(nuevo.const[i]?"checked":"")+' onchange="nConst('+i+',this.checked)"> Registrar solo como constancia (la NC ya existe en contabilidad)</label>';
+    }
     var cantCol=r.cant+((yaDev>0||creditoExt>0)?'<div class="muted" style="font-size:11px">disp. '+restante+'</div>':'');
     var tr=document.createElement("tr");
     tr.innerHTML=(factCol?'<td style="font-size:12px">'+esc(r.factura)+'</td>':'')+'<td><b>'+esc(r.codigo)+'</b>'+info+'</td><td style="max-width:280px;font-size:12px">'+esc(r.desc)+'<div class="muted">'+esc(r.sub)+'</div></td><td class="num">'+cantCol+'</td><td><input type="number" min="0" max="'+restante+'" value="'+esc(qv)+'" id="q-'+i+'" oninput="nCalc('+i+')" style="text-align:right" '+(agotado?"disabled":"")+'></td><td><input id="c-'+i+'" value="'+esc(cv)+'" placeholder="Explica el motivo · obligatorio" oninput="nCom('+i+')" '+(agotado?"disabled":"")+'></td><td class="num" id="tt-'+i+'">'+money(totalLinea(r,qv))+'</td>';
@@ -1128,6 +1137,9 @@ function renderItemsBody(){
   if($("n-count")) $("n-count").textContent=q?("Mostrando "+shown+" de "+lineas.length+" productos"):(lineas.length+" productos en esta factura");
   if(shown===0&&q) tbody.innerHTML='<tr><td colspan="'+(factCol?7:6)+'" class="muted" style="text-align:center;padding:20px">Sin resultados</td></tr>';
 }
+/* Constancia: solo un ADMIN puede registrar una línea que contabilidad ya acreditó con NC */
+function puedeConstancia(){ return !!me&&(esSuperAdmin()||me.role==="ADMIN"); }
+function nConst(i,on){ capturarItemsNuevo(); nuevo.const=nuevo.const||{}; nuevo.const[i]=!!on; if(!on&&nuevo.cant) nuevo.cant[i]=0; renderItemsNuevo(); }
 function nCalc(i){ var r=nuevo.lineas[i]; if(!r) return; var max=(nuevo.restante&&nuevo.restante[i]!==undefined)?nuevo.restante[i]:r.cant; var el=$("q-"+i); var q=Math.max(0,Math.min(max,+(el?el.value:0))); if(el) el.value=q; nuevo.cant=nuevo.cant||{}; nuevo.cant[i]=q; if($("tt-"+i)) $("tt-"+i).textContent=money(totalLinea(r,q)); }
 function nCom(i){ var el=$("c-"+i); if(!el) return; nuevo.com=nuevo.com||{}; nuevo.com[i]=el.value; }
 /* Serie según el motivo: 5200 garantías · 8800 devolución y refacturación · 3200 el resto */
@@ -1342,16 +1354,20 @@ async function guardarTicket(){
   var items=[], excedido=null, entradoPorCod={}, sinComentario=[];
   nuevo.cant=nuevo.cant||{}; nuevo.com=nuevo.com||{};
   (nuevo.lineas||[]).forEach(function(r,i){
-    var q=Math.max(0,Math.min(r.cant,+(nuevo.cant[i]||0))); if(q<=0) return;
+    /* Constancia: línea ya acreditada por completo en contabilidad, solo la puede registrar un ADMIN */
+    var esConst=!!(nuevo.const&&nuevo.const[i])&&puedeConstancia()&&(r.creditoAplicado||0)>0&&r.cant<=0.0001;
+    var tope=esConst?(r.cant+(r.creditoAplicado||0)):r.cant;
+    var q=Math.max(0,Math.min(tope,+(nuevo.cant[i]||0))); if(q<=0) return;
     var dv=devFor(r.factura), key=r.codigo+"|"+r.factura;
-    var restante=r.cant-(dv.cant[r.codigo]||0)-(entradoPorCod[key]||0);
-    if(q>restante){ excedido=r.codigo+" de la factura "+r.factura+" (disponible "+Math.max(0,restante)+" de "+r.cant+")"; return; }
+    var restante=tope-(dv.cant[r.codigo]||0)-(entradoPorCod[key]||0);
+    if(q>restante){ excedido=r.codigo+" de la factura "+r.factura+" (disponible "+Math.max(0,restante)+" de "+tope+")"; return; }
     entradoPorCod[key]=(entradoPorCod[key]||0)+q;
-    var f=q/r.cant, com=(nuevo.com[i]||"").trim();
+    var f=r.cant>0?q/r.cant:0, com=(nuevo.com[i]||"").trim();
     /* El comentario del asesor es obligatorio: sustituye al motivo genérico "DEVOLUCION" que se retiró */
     if(!com) sinComentario.push(r.codigo);
     var it={codigo:r.codigo,desc:r.desc,sub:r.sub,cantidad:q,comVendedor:com,neto:+(r.neto*f).toFixed(4),iva:+(r.iva*f).toFixed(4),total:+(r.total*f).toFixed(4),factura:r.factura};
     if(dacion) it.tipo="DACION";
+    if(esConst){ it.constanciaNC=true; it.comVendedor="[CONSTANCIA · NC ya en contabilidad] "+com; }
     items.push(it);
   });
   if(excedido){ toast("El código "+excedido+" supera la cantidad disponible para devolver."); return; }
@@ -1381,6 +1397,7 @@ async function guardarTicket(){
   var ahoraT=new Date().toISOString();
   var estadoInicial=(pideGuia&&!guia)?"SIN_GUIA":"MERCADERIA"; /* también aplica a refacturación: sin guía NO se envía */
   var t={id:"T"+Date.now(),numero:num,motivo:nuevo.motivo,razonSocial:nuevo.razon,ruc:nuevo.ruc,factura:facturaTxt,facturas:facturasTicket,emision:nuevo.emision,facturador:nuevo.facturador||"",fechaTicket:ahoraT,vendedor:me.name,estado:estadoInicial,items:items,fechas:{},guiaId:guia?guia.id:null,guiaNumero:guia?guia.numero:"",sobre:sobre,refactCliente:refact?nuevo.refactCliente:"",historial:[{f:ahoraT,e:"Creado por "+me.name+(refact?" · Devolución y refacturación (serie 8800) · refacturar a: "+nuevo.refactCliente:"")+(guia?" · Guía "+guia.numero:(pideGuia?" · guardado SIN guía (pendiente de envío)":" · sin guía"))+(sobre?" · con sobre":"")}]};
+  if(items.some(function(x){ return x.constanciaNC; })) t.constanciaNC=true;   /* registrado solo como constancia */
   /* Serie 8800: en cuanto tiene guía entra en paralelo a Notas de crédito y a Revisión de mercadería */
   if(refact&&estadoInicial!=="SIN_GUIA") iniciarFlujoRefact(t,ahoraT,me.name);
   state.tickets.push(t); await saveState();
@@ -1909,7 +1926,7 @@ function verTicket(id){
   var h='<div class="modal-bg" onclick="if(event.target===this)this.remove()"><div class="modal"><h2 style="font-size:24px;color:var(--navy);margin-bottom:8px">Ticket '+esc(t.numero)+' '+tagFor(t)+'</h2>';
   if(t.estado==="GUIA_INCORRECTA") h+='<div class="alert-del">⚠ Devuelto por guía incorrecta. Motivo: <b>'+esc(t.guiaIncorrecta&&t.guiaIncorrecta.motivo||"")+'</b></div>';
   if(t.estado==="SIN_GUIA"&&t.devueltoSinGuia) h+='<div class="alert-del">↩ Devuelto por mercadería ('+esc(t.devueltoSinGuia.por||"")+', '+fdate(t.devueltoSinGuia.f)+'): llegó sin guía. Motivo: <b>'+esc(t.devueltoSinGuia.motivo||"")+'</b></div>';
-  h+='<div class="kv" style="margin-bottom:12px"><b>Guía</b><span>'+esc(t.guiaNumero||"—")+sobreTag+'</span><b>Cliente</b><span>'+esc(t.razonSocial)+'</span><b>RUC</b><span>'+esc(t.ruc||"")+'</span><b>Factura(s)</b><span>'+esc(t.factura)+'</span><b>Sucursal</b><span>'+esc(sucursalDe(t.factura).nombre)+'</span><b>Emisión</b><span>'+fdate(t.emision)+'</span><b>Fecha ticket</b><span>'+fdate(t.fechaTicket)+'</span><b>Vendedor</b><span>'+esc(t.vendedor)+'</span><b>Motivo</b><span>'+esc(t.motivo)+'</span>'+(t.anioAnterior?'<b>Año factura</b><span><span class="tag tag-gar">📅 Año anterior '+esc(t.anioFactura)+'</span>'+(t.valorValidado?' <span class="tag tag-nc">total validado</span>':' <span class="tag tag-merc">total por validar</span>')+'</span>':'')+(t.refactCliente?'<b>Refacturar a</b><span><b>'+esc(t.refactCliente)+'</b>'+(t.refactValidado?' <span class="tag tag-nc">✅ refacturado'+(t.refactValidado.facturaNueva?(' · '+esc(t.refactValidado.facturaNueva)):'')+'</span>':' <span class="tag tag-merc">pendiente de validar</span>')+'</span>':'')+'</div>';
+  h+='<div class="kv" style="margin-bottom:12px"><b>Guía</b><span>'+esc(t.guiaNumero||"—")+sobreTag+'</span><b>Cliente</b><span>'+esc(t.razonSocial)+'</span><b>RUC</b><span>'+esc(t.ruc||"")+'</span><b>Factura(s)</b><span>'+esc(t.factura)+'</span><b>Sucursal</b><span>'+esc(sucursalDe(t.factura).nombre)+'</span><b>Emisión</b><span>'+fdate(t.emision)+'</span><b>Fecha ticket</b><span>'+fdate(t.fechaTicket)+'</span><b>Vendedor</b><span>'+esc(t.vendedor)+'</span><b>Motivo</b><span>'+esc(t.motivo)+'</span>'+(t.constanciaNC?'<b>Constancia</b><span><span class="tag tag-merc">Registrado solo como constancia · la NC ya existe en contabilidad</span></span>':'')+(t.anioAnterior?'<b>Año factura</b><span><span class="tag tag-gar">📅 Año anterior '+esc(t.anioFactura)+'</span>'+(t.valorValidado?' <span class="tag tag-nc">total validado</span>':' <span class="tag tag-merc">total por validar</span>')+'</span>':'')+(t.refactCliente?'<b>Refacturar a</b><span><b>'+esc(t.refactCliente)+'</b>'+(t.refactValidado?' <span class="tag tag-nc">✅ refacturado'+(t.refactValidado.facturaNueva?(' · '+esc(t.refactValidado.facturaNueva)):'')+'</span>':' <span class="tag tag-merc">pendiente de validar</span>')+'</span>':'')+'</div>';
   h+='<div style="overflow-x:auto"><table><thead><tr><th>Código</th><th>Cant.</th><th>Tipo</th><th>Descripción</th><th>Comentario</th><th class="num">Total</th></tr></thead><tbody>'+t.items.map(function(i){ var tp=tipoDeItem(t,i); var tagTipo=tp==="GARANTIA"?'<span class="tag tag-gar">Garantía</span>':(tp==="DACION"?'<span class="tag tag-merc">Dación'+(i.esExterna?" externa":"")+'</span>':'<span class="tag tag-dev">Devolución</span>'); var origen=i.esExterna?('<div class="muted">Mercadería externa'+(i.facturaCliente?(' · Fact. cliente: '+esc(i.facturaCliente)):'')+(i.fechaCliente?(' · '+fdate(i.fechaCliente)):'')+'</div>'):''; return '<tr><td>'+esc(i.codigo)+'</td><td>'+i.cantidad+'</td><td>'+tagTipo+'</td><td style="max-width:260px">'+esc(i.desc)+'<div class="muted">'+esc(i.sub)+'</div>'+origen+'</td><td style="max-width:170px">'+esc(i.comVendedor||"")+'</td><td class="num">'+money(i.total)+'</td></tr>'; }).join("")+'</tbody></table></div>';
   var pqV=paqueteDeGuia(t);
   if(pqV) h+='<div class="card" style="margin-top:12px;background:var(--ok-bg);border-color:#A9D9BF"><h3 style="color:var(--navy)">📦 Llegada del paquete</h3><div class="kv" style="margin-top:6px"><b>Llegó el</b><span>'+fdatetime(pqV.f)+'</span><b>Recibido por</b><span>'+esc(pqV.por||"")+'</span>'+(pqV.cartones!=null?'<b>Bultos</b><span>'+pqV.cartones+'</span>':'')+(pqV.transportadora?'<b>Transportadora</b><span>'+esc(pqV.transportadora)+'</span>':'')+(pqV.com?'<b>Observación</b><span>'+esc(pqV.com)+'</span>':'')+(ticketsDeGuia(t)>1?'<b>Guía compartida</b><span>'+ticketsDeGuia(t)+' tickets viajaron en la guía '+esc(t.guiaNumero||"")+'</span>':'')+'</div></div>';
