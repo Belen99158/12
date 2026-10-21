@@ -2387,9 +2387,28 @@ function yaEncaminado(t){
   return ["DEVOLUCION","GARANTIA","MIXTO","DACION_ADMIN","NO_LLEGO"].indexOf(t.estado)>=0;
 }
 /* Suma de lo que efectivamente llego, que es lo que se aprueba en una garantia directa. */
+/* Lo que el revisor de mercadería ya escribió como llegado en la pantalla Revisar y todavía no guardó.
+   Solo vive en memoria; sirve para que pasar a GARANTIA DIRECTA desde esa pantalla no pierda lo escrito. */
+var mercBorrador=null;
+function guardarBorradorMerc(id){
+  mercBorrador=null;
+  var t=findT(id); if(!t) return;
+  var q={}, hay=false;
+  (t.items||[]).forEach(function(i,x){
+    var el=$("m-q-"+x); if(!el||el.value==="") return;
+    var n=Math.max(0,Math.min(i.cantidad,+el.value||0));
+    q[x]={q:n,com:($("m-co-"+x)?$("m-co-"+x).value:"")}; hay=true;
+  });
+  if(hay) mercBorrador={id:t.id,q:q};
+}
+function llegoQBorrador(t,i,x){
+  var q=llegoQ(i); if(q>0) return q;
+  var b=mercBorrador&&mercBorrador.id===t.id&&mercBorrador.q[x];
+  return b?b.q:0;
+}
 function totalLlegado(t){
-  return (t.items||[]).reduce(function(s,i){
-    var q=llegoQ(i); if(q<=0) return s;
+  return (t.items||[]).reduce(function(s,i,x){
+    var q=llegoQBorrador(t,i,x); if(q<=0) return s;
     var f=i.cantidad?q/i.cantidad:0;
     return s+(i.total||0)*f;
   },0);
@@ -2458,7 +2477,7 @@ async function guardarReclasificar(){
   /* Garantía directa: se comprueba ANTES de tocar el ticket. Antes se cambiaba el motivo en memoria y recién después se
      descubría que no había productos recibidos: salía el aviso, pero el ticket quedaba con el motivo ya cambiado y el
      siguiente intento decía "el motivo es el mismo". */
-  if(nuevoMotivo===MOTIVO_GARANTIA_DIRECTA&&!(t.items||[]).some(function(i){ return llegoQ(i)>0; })){ toast("⚠ Este ticket no tiene productos recibidos: primero Mercadería debe marcar lo que llegó. No se cambió nada.",8000); return; }
+  if(nuevoMotivo===MOTIVO_GARANTIA_DIRECTA&&!(t.items||[]).some(function(i,x){ return llegoQBorrador(t,i,x)>0; })){ toast("⚠ Este ticket no tiene productos recibidos: primero Mercadería debe marcar lo que llegó. No se cambió nada.",8000); return; }
   var ahora=new Date().toISOString(), antesMotivo=t.motivo, antesNumero=t.numero;
   var prefA=prefijoDeMotivo(antesMotivo), prefB=prefijoDeMotivo(nuevoMotivo);
   t.motivo=nuevoMotivo;
@@ -2477,6 +2496,15 @@ async function guardarReclasificar(){
      que al vendedor no se le avise de ningun rechazo (no se rechaza nada). */
   if(nuevoMotivo===MOTIVO_GARANTIA_DIRECTA){
     var aprobados=0;
+    /* Lo escrito como llegado en Revisar (sin guardar) se registra aqui, igual que lo habria hecho esa pantalla */
+    var usoBorrador=false;
+    (t.items||[]).forEach(function(i,x){
+      if(llegoQ(i)>0) return;
+      var b=mercBorrador&&mercBorrador.id===t.id&&mercBorrador.q[x];
+      if(b&&b.q>0){ i.merc={cantLlegada:b.q,com:b.com||"",por:me.name,f:ahora}; usoBorrador=true; }
+    });
+    if(usoBorrador){ t.mercRevisada=true; t.fechas=t.fechas||{}; t.fechas.mercaderia=ahora; }
+    mercBorrador=null;
     (t.items||[]).forEach(function(i){
       var q=llegoQ(i); if(q<=0) return;
       i.dev={acepta:true,cantAcep:q,com:"Garantía directa",por:me.name,f:ahora,auto:true};
@@ -2515,7 +2543,7 @@ function revisarMerc(t){
   var avisoMotivo='<div class="card" style="background:#EEF4FB;border-color:#BFD4EA;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+
     '<div style="flex:1 1 260px">Motivo declarado: <b>'+esc(t.motivo)+'</b> · serie '+prefijoDeMotivo(t.motivo)+
     (t.numeroAnterior?('<div class="muted" style="margin-top:4px">Antes era '+esc(t.numeroAnterior)+', se corrigió el motivo.</div>'):'')+'</div>'+
-    (puedeReclasificar()?('<button class="btn btn-g btn-sm" data-id="'+esc(t.id)+'" onclick="abrirReclasificar(this.dataset.id)">⇄ No es este motivo</button>'):'')+
+    (puedeReclasificar()?('<button class="btn btn-g btn-sm" data-id="'+esc(t.id)+'" onclick="guardarBorradorMerc(this.dataset.id);abrirReclasificar(this.dataset.id)">⇄ No es este motivo</button>'):'')+
     '</div>';
   var h='<div class="modal-bg"><div class="modal"><h2 style="font-size:24px;color:var(--navy)">'+(soloGuia?"Validar guía corregida · ":"Revisión de mercadería · ")+esc(t.numero)+'</h2><div class="muted" style="margin-bottom:10px">'+esc(t.razonSocial)+' · Factura '+esc(t.factura)+'</div>';
   h+='<div class="card" style="background:#FFF1F1;border-color:#E8B0AB">'+(t.guiaModificada?'<div style="background:var(--amber);color:#fff;padding:6px 10px;border-radius:6px;font-weight:700;margin-bottom:10px;font-size:13px">✎ GUÍA MODIFICADA — el vendedor corrigió la guía.'+(soloGuia?' La mercadería ya fue revisada: solo valida la guía.':' Verifica de nuevo.')+'</div>':'')+'<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><div><span class="muted">Guía:</span> <b style="font-size:16px">'+esc(t.guiaNumero||"(sin guía)")+'</b></div>'+(t.sobre?'<span class="tag tag-dev">📨 Incluye sobre</span>':'<span class="muted">Sin sobre</span>')+'</div>';
@@ -2650,7 +2678,7 @@ function revisarDev(t){
     ? ('<div class="card" style="background:#EEF4FB;border-color:#BFD4EA;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+
        '<div style="flex:1 1 250px">Motivo declarado: <b>'+esc(t.motivo)+'</b>'+
        (t.numeroAnterior?('<div class="muted" style="margin-top:4px">Antes era '+esc(t.numeroAnterior)+'.</div>'):'')+'</div>'+
-       '<button class="btn btn-g btn-sm" data-id="'+esc(t.id)+'" onclick="abrirReclasificar(this.dataset.id)">⇄ No es este motivo</button></div>')
+       '<button class="btn btn-g btn-sm" data-id="'+esc(t.id)+'" onclick="mercBorrador=null;abrirReclasificar(this.dataset.id)">⇄ No es este motivo</button></div>')
     : '';
 
   var h='<div class="modal-bg"><div class="modal"><h2 style="font-size:24px;color:var(--navy)">Revisión de devolución · '+esc(t.numero)+'</h2><div class="muted" style="margin-bottom:14px">'+esc(t.razonSocial)+' · Factura '+esc(t.factura)+'</div>';
@@ -2789,7 +2817,7 @@ function formGar(t,g){
     ? ('<div class="card" style="background:#EEF4FB;border-color:#BFD4EA;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+
        '<div style="flex:1 1 250px">Motivo declarado: <b>'+esc(t.motivo)+'</b>'+
        (t.numeroAnterior?('<div class="muted" style="margin-top:4px">Antes era '+esc(t.numeroAnterior)+'.</div>'):'')+'</div>'+
-       '<button class="btn btn-g btn-sm" data-id="'+esc(t.id)+'" onclick="abrirReclasificar(this.dataset.id)">⇄ No es este motivo</button></div>')
+       '<button class="btn btn-g btn-sm" data-id="'+esc(t.id)+'" onclick="mercBorrador=null;abrirReclasificar(this.dataset.id)">⇄ No es este motivo</button></div>')
     : '';
   g=g||{}; var it=g.informe||{};
   garTicketId=t.id;
