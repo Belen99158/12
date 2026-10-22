@@ -743,6 +743,32 @@ function codigosUsados(factura){ var s={}; state.tickets.forEach(function(t){ if
 function tipoDeItem(t,i){ return i.tipo||((t.motivo==="GARANTIAS"||t.motivo===MOTIVO_GARANTIA_DIRECTA)?"GARANTIA":"DEVOLUCION"); }
 /* Suma, por código, la cantidad YA devuelta en tickets activos (no ELIMINADO) de esa factura, y guarda en qué tickets se devolvió. Permite reutilizar el mismo código en varios tickets controlando el saldo.
    Soporta tickets de Dación en pagos que cubren VARIAS facturas (t.facturas / i.factura); para tickets antiguos de una sola factura, cae de vuelta a t.factura tal como siempre. */
+/* Cuánto saldo de la factura 'gasta' realmente un producto de un ticket. Si el ticket ya fue revisado y el producto
+   no llegó (o llegó menos), o fue rechazado en la revisión, esa parte queda LIBRE para un ticket nuevo.
+   Mientras no haya revisión, se cuenta todo lo pedido (no cambia nada). */
+function cantConsumida(t,i){
+  var q=+i.cantidad||0;
+  if(t.mercRevisada) q=Math.min(q,llegoQ(i));
+  if(i.dev){
+    if(i.dev.acepta===false) return 0;
+    if(i.dev.acepta&&i.dev.cantAcep!==undefined) q=Math.min(q,+i.dev.cantAcep||0);
+  }
+  return Math.max(0,q);
+}
+/* Tickets anteriores donde este producto de esta factura quedó libre (no llegó o no fue aceptado) */
+function reingresosDe(factura,codigo){
+  var nums=[];
+  state.tickets.forEach(function(t){
+    if(t.estado==="ELIMINADO") return;
+    var fs=(t.facturas&&t.facturas.length)?t.facturas:[t.factura];
+    if(fs.indexOf(factura)<0) return;
+    (t.items||[]).forEach(function(i){
+      if((i.factura||t.factura)!==factura||i.codigo!==codigo) return;
+      if(cantConsumida(t,i)<(+i.cantidad||0)&&nums.indexOf(t.numero)<0) nums.push(t.numero);
+    });
+  });
+  return nums;
+}
 function devolucionesPorCodigo(factura){
   var cant={}, nums={};
   state.tickets.forEach(function(t){
@@ -752,8 +778,9 @@ function devolucionesPorCodigo(factura){
     t.items.forEach(function(i){
       var itFact=i.factura||t.factura;
       if(itFact!==factura) return;
-      cant[i.codigo]=(cant[i.codigo]||0)+(+i.cantidad||0);
-      (nums[i.codigo]=nums[i.codigo]||[]).push(t.numero);
+      var gasta=cantConsumida(t,i);
+      cant[i.codigo]=(cant[i.codigo]||0)+gasta;
+      if(gasta>0) (nums[i.codigo]=nums[i.codigo]||[]).push(t.numero);
     });
   });
   return {cant:cant,nums:nums};
@@ -1367,6 +1394,7 @@ async function guardarTicket(){
     if(!com) sinComentario.push(r.codigo);
     var it={codigo:r.codigo,desc:r.desc,sub:r.sub,cantidad:q,comVendedor:com,neto:+(r.neto*f).toFixed(4),iva:+(r.iva*f).toFixed(4),total:+(r.total*f).toFixed(4),factura:r.factura};
     if(dacion) it.tipo="DACION";
+    var prevLibre=reingresosDe(r.factura,r.codigo); if(prevLibre.length) it.reingresoDe=prevLibre;
     if(esConst){ it.constanciaNC=true; it.comVendedor="[CONSTANCIA · NC ya en contabilidad] "+com; }
     items.push(it);
   });
@@ -1397,6 +1425,8 @@ async function guardarTicket(){
   var ahoraT=new Date().toISOString();
   var estadoInicial=(pideGuia&&!guia)?"SIN_GUIA":"MERCADERIA"; /* también aplica a refacturación: sin guía NO se envía */
   var t={id:"T"+Date.now(),numero:num,motivo:nuevo.motivo,razonSocial:nuevo.razon,ruc:nuevo.ruc,factura:facturaTxt,facturas:facturasTicket,emision:nuevo.emision,facturador:nuevo.facturador||"",fechaTicket:ahoraT,vendedor:me.name,estado:estadoInicial,items:items,fechas:{},guiaId:guia?guia.id:null,guiaNumero:guia?guia.numero:"",sobre:sobre,refactCliente:refact?nuevo.refactCliente:"",historial:[{f:ahoraT,e:"Creado por "+me.name+(refact?" · Devolución y refacturación (serie 8800) · refacturar a: "+nuevo.refactCliente:"")+(guia?" · Guía "+guia.numero:(pideGuia?" · guardado SIN guía (pendiente de envío)":" · sin guía"))+(sobre?" · con sobre":"")}]};
+  var reing=[]; items.forEach(function(x){ (x.reingresoDe||[]).forEach(function(n){ if(reing.indexOf(n)<0) reing.push(n); }); });
+  if(reing.length){ t.reingresoDe=reing; t.historial.push({f:ahoraT,e:"Reingreso: producto(s) que antes estuvieron en "+reing.join(", ")+" y no llegaron o no fueron aceptados ("+me.name+")"}); }
   if(items.some(function(x){ return x.constanciaNC; })) t.constanciaNC=true;   /* registrado solo como constancia */
   /* Serie 8800: en cuanto tiene guía entra en paralelo a Notas de crédito y a Revisión de mercadería */
   if(refact&&estadoInicial!=="SIN_GUIA") iniciarFlujoRefact(t,ahoraT,me.name);
@@ -1926,7 +1956,7 @@ function verTicket(id){
   var h='<div class="modal-bg" onclick="if(event.target===this)this.remove()"><div class="modal"><h2 style="font-size:24px;color:var(--navy);margin-bottom:8px">Ticket '+esc(t.numero)+' '+tagFor(t)+'</h2>';
   if(t.estado==="GUIA_INCORRECTA") h+='<div class="alert-del">⚠ Devuelto por guía incorrecta. Motivo: <b>'+esc(t.guiaIncorrecta&&t.guiaIncorrecta.motivo||"")+'</b></div>';
   if(t.estado==="SIN_GUIA"&&t.devueltoSinGuia) h+='<div class="alert-del">↩ Devuelto por mercadería ('+esc(t.devueltoSinGuia.por||"")+', '+fdate(t.devueltoSinGuia.f)+'): llegó sin guía. Motivo: <b>'+esc(t.devueltoSinGuia.motivo||"")+'</b></div>';
-  h+='<div class="kv" style="margin-bottom:12px"><b>Guía</b><span>'+esc(t.guiaNumero||"—")+sobreTag+'</span><b>Cliente</b><span>'+esc(t.razonSocial)+'</span><b>RUC</b><span>'+esc(t.ruc||"")+'</span><b>Factura(s)</b><span>'+esc(t.factura)+'</span><b>Sucursal</b><span>'+esc(sucursalDe(t.factura).nombre)+'</span><b>Emisión</b><span>'+fdate(t.emision)+'</span><b>Fecha ticket</b><span>'+fdate(t.fechaTicket)+'</span><b>Vendedor</b><span>'+esc(t.vendedor)+'</span><b>Motivo</b><span>'+esc(t.motivo)+'</span>'+(t.constanciaNC?'<b>Constancia</b><span><span class="tag tag-merc">Registrado solo como constancia · la NC ya existe en contabilidad</span></span>':'')+(t.anioAnterior?'<b>Año factura</b><span><span class="tag tag-gar">📅 Año anterior '+esc(t.anioFactura)+'</span>'+(t.valorValidado?' <span class="tag tag-nc">total validado</span>':' <span class="tag tag-merc">total por validar</span>')+'</span>':'')+(t.refactCliente?'<b>Refacturar a</b><span><b>'+esc(t.refactCliente)+'</b>'+(t.refactValidado?' <span class="tag tag-nc">✅ refacturado'+(t.refactValidado.facturaNueva?(' · '+esc(t.refactValidado.facturaNueva)):'')+'</span>':' <span class="tag tag-merc">pendiente de validar</span>')+'</span>':'')+'</div>';
+  h+='<div class="kv" style="margin-bottom:12px"><b>Guía</b><span>'+esc(t.guiaNumero||"—")+sobreTag+'</span><b>Cliente</b><span>'+esc(t.razonSocial)+'</span><b>RUC</b><span>'+esc(t.ruc||"")+'</span><b>Factura(s)</b><span>'+esc(t.factura)+'</span><b>Sucursal</b><span>'+esc(sucursalDe(t.factura).nombre)+'</span><b>Emisión</b><span>'+fdate(t.emision)+'</span><b>Fecha ticket</b><span>'+fdate(t.fechaTicket)+'</span><b>Vendedor</b><span>'+esc(t.vendedor)+'</span><b>Motivo</b><span>'+esc(t.motivo)+'</span>'+(t.reingresoDe?'<b>Reingreso</b><span><span class="tag tag-merc">Antes en '+esc(t.reingresoDe.join(', '))+' · no llegó o no fue aceptado</span></span>':'')+(t.constanciaNC?'<b>Constancia</b><span><span class="tag tag-merc">Registrado solo como constancia · la NC ya existe en contabilidad</span></span>':'')+(t.anioAnterior?'<b>Año factura</b><span><span class="tag tag-gar">📅 Año anterior '+esc(t.anioFactura)+'</span>'+(t.valorValidado?' <span class="tag tag-nc">total validado</span>':' <span class="tag tag-merc">total por validar</span>')+'</span>':'')+(t.refactCliente?'<b>Refacturar a</b><span><b>'+esc(t.refactCliente)+'</b>'+(t.refactValidado?' <span class="tag tag-nc">✅ refacturado'+(t.refactValidado.facturaNueva?(' · '+esc(t.refactValidado.facturaNueva)):'')+'</span>':' <span class="tag tag-merc">pendiente de validar</span>')+'</span>':'')+'</div>';
   h+='<div style="overflow-x:auto"><table><thead><tr><th>Código</th><th>Cant.</th><th>Tipo</th><th>Descripción</th><th>Comentario</th><th class="num">Total</th></tr></thead><tbody>'+t.items.map(function(i){ var tp=tipoDeItem(t,i); var tagTipo=tp==="GARANTIA"?'<span class="tag tag-gar">Garantía</span>':(tp==="DACION"?'<span class="tag tag-merc">Dación'+(i.esExterna?" externa":"")+'</span>':'<span class="tag tag-dev">Devolución</span>'); var origen=i.esExterna?('<div class="muted">Mercadería externa'+(i.facturaCliente?(' · Fact. cliente: '+esc(i.facturaCliente)):'')+(i.fechaCliente?(' · '+fdate(i.fechaCliente)):'')+'</div>'):''; return '<tr><td>'+esc(i.codigo)+'</td><td>'+i.cantidad+'</td><td>'+tagTipo+'</td><td style="max-width:260px">'+esc(i.desc)+'<div class="muted">'+esc(i.sub)+'</div>'+origen+'</td><td style="max-width:170px">'+esc(i.comVendedor||"")+'</td><td class="num">'+money(i.total)+'</td></tr>'; }).join("")+'</tbody></table></div>';
   var pqV=paqueteDeGuia(t);
   if(pqV) h+='<div class="card" style="margin-top:12px;background:var(--ok-bg);border-color:#A9D9BF"><h3 style="color:var(--navy)">📦 Llegada del paquete</h3><div class="kv" style="margin-top:6px"><b>Llegó el</b><span>'+fdatetime(pqV.f)+'</span><b>Recibido por</b><span>'+esc(pqV.por||"")+'</span>'+(pqV.cartones!=null?'<b>Bultos</b><span>'+pqV.cartones+'</span>':'')+(pqV.transportadora?'<b>Transportadora</b><span>'+esc(pqV.transportadora)+'</span>':'')+(pqV.com?'<b>Observación</b><span>'+esc(pqV.com)+'</span>':'')+(ticketsDeGuia(t)>1?'<b>Guía compartida</b><span>'+ticketsDeGuia(t)+' tickets viajaron en la guía '+esc(t.guiaNumero||"")+'</span>':'')+'</div></div>';
