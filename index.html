@@ -769,6 +769,20 @@ function reingresosDe(factura,codigo){
   });
   return nums;
 }
+/* Una factura puede traer el MISMO código en dos o más líneas (se facturó dos veces). Lo ya devuelto de ese código se
+   reparte entre sus líneas EN ORDEN (la primera se llena primero), en vez de restárselo entero a cada una. Antes, con dos
+   líneas de 1 unidad y 1 devuelta, las dos quedaban en 0 aunque aún quedaba 1 por devolver.
+   Capacidad de cada línea = lo que aún figura + lo que contabilidad ya acreditó (igual que la constancia). */
+function yaDevPorLinea(lineas,devFor){
+  var resto={}, out=[];
+  (lineas||[]).forEach(function(r,i){
+    var k=r.factura+"|"+r.codigo;
+    if(resto[k]===undefined) resto[k]=devFor(r.factura).cant[r.codigo]||0;
+    var cap=Math.max(0,r.cant)+(r.creditoAplicado||0);
+    var a=Math.min(cap,resto[k]); resto[k]-=a; out[i]=a;
+  });
+  return out;
+}
 function devolucionesPorCodigo(factura){
   var cant={}, nums={};
   state.tickets.forEach(function(t){
@@ -1049,7 +1063,8 @@ function facturaTieneSaldo(factura){
     var lineas=base.filter(function(x){ return x.factura===factura; });
     if(lineas.length===0) return false;
     var dev=devolucionesPorCodigo(factura);
-    return lineas.some(function(r){ return (r.cant-(dev.cant[r.codigo]||0))>0; });
+    var asig=yaDevPorLinea(lineas,function(){ return dev; });
+    return lineas.some(function(r,i){ return (r.cant-asig[i])>0; });
   }catch(e){ console.error("facturaTieneSaldo:",e); return true; /* si algo falla, NO ocultar la factura */ }
 }
 function nRazon(){
@@ -1125,11 +1140,12 @@ function renderItemsBody(){
   var factCol=esDacion();
   var devCache={}; function devFor(f){ if(!devCache[f]) devCache[f]=devolucionesPorCodigo(f); return devCache[f]; }
   var q=filtroItems.trim().toUpperCase(), lineas=nuevo.lineas;
+  var asigDev=yaDevPorLinea(lineas,devFor);
   nuevo.restante=nuevo.restante||{};
   tbody.innerHTML=""; var shown=0;
   lineas.forEach(function(r,i){
     var dev=devFor(r.factura);
-    var yaDev=dev.cant[r.codigo]||0;
+    var yaDev=asigDev[i]||0;
     var creditoExt=r.creditoAplicado||0;
     var restante=Math.max(0,r.cant-yaDev);
     /* CONSTANCIA (solo ADMIN): línea que contabilidad ya acreditó por completo con una NC. Se puede registrar igual,
@@ -1380,13 +1396,14 @@ async function guardarTicket(){
   var devCache={}; function devFor(f){ if(!devCache[f]) devCache[f]=devolucionesPorCodigo(f); return devCache[f]; }
   var items=[], excedido=null, entradoPorCod={}, sinComentario=[];
   nuevo.cant=nuevo.cant||{}; nuevo.com=nuevo.com||{};
+  var asigDev=yaDevPorLinea(nuevo.lineas||[],devFor);
   (nuevo.lineas||[]).forEach(function(r,i){
     /* Constancia: línea ya acreditada por completo en contabilidad, solo la puede registrar un ADMIN */
     var esConst=!!(nuevo.const&&nuevo.const[i])&&puedeConstancia()&&(r.creditoAplicado||0)>0&&r.cant<=0.0001;
     var tope=esConst?(r.cant+(r.creditoAplicado||0)):r.cant;
     var q=Math.max(0,Math.min(tope,+(nuevo.cant[i]||0))); if(q<=0) return;
     var dv=devFor(r.factura), key=r.codigo+"|"+r.factura;
-    var restante=tope-(dv.cant[r.codigo]||0)-(entradoPorCod[key]||0);
+    var restante=tope-(asigDev[i]||0);
     if(q>restante){ excedido=r.codigo+" de la factura "+r.factura+" (disponible "+Math.max(0,restante)+" de "+tope+")"; return; }
     entradoPorCod[key]=(entradoPorCod[key]||0)+q;
     var f=r.cant>0?q/r.cant:0, com=(nuevo.com[i]||"").trim();
